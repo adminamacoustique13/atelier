@@ -34,9 +34,9 @@ def point_d_etape(chantier: Chantier, en_marche: bool) -> str:
         pluriel = "décisions" if attente > 1 else "décision"
         return f"{bilan}. J'ai besoin de toi pour {attente} {pluriel}."
     if chantier.termine:
-        return f"Chantier terminé : {bilan}. Tout est enregistré"
+        return f"Chantier terminé : {bilan}. Tout est enregistré."
     if en_marche:
-        return f"{bilan}, {en_cours} en cours. Je n'ai pas besoin de toi pour l'instant"
+        return f"{bilan}, {en_cours} en cours. Je n'ai pas besoin de toi pour l'instant."
     return f"{bilan}. Le chantier est à l'arrêt."
 
 
@@ -59,6 +59,8 @@ def vue(chantier: Chantier, en_marche: bool, mode: str, occupe=False, brouillon=
     for tache in donnees["taches"]:
         tache["etat_fr"] = ETATS_FR.get(tache["etat"], tache["etat"])
         tache["dosage_fr"] = dosage.libelle(tache["modele"], tache["effort"])
+        verificateur = dosage.verificateur(tache["modele"], tache["effort"])
+        tache["verificateur_fr"] = dosage.libelle(*verificateur)
     contrat = donnees["contrat"]
     contrat["plafond_fr"] = dosage.libelle(contrat["plafond_modele"], contrat["plafond_effort"])
     donnees["point_d_etape"] = point_d_etape(chantier, en_marche)
