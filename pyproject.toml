@@ -1,0 +1,18 @@
+[project]
+name = "atelier"
+version = "0.1.0"
+description = "Atelier : un chef de chantier en code pour des agents Claude Code dosés et vérifiés"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "C90"]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10

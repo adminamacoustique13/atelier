@@ -1,0 +1,624 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Atelier — tableau de bord</title>
+<style>
+:root {
+  --fond: #06090b; --barre: #0a0f12; --carte: #0d1417; --creux: #080c0e;
+  --trait: rgba(255, 255, 255, 0.07); --texte: #dfe9ec; --discret: #8a9da4; --faible: #5d6f76;
+  --reussite: #4fe3d6; --refus: #ff8a4c; --rayon: 10px;
+  --mono: ui-monospace, "SF Mono", Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; }
+body {
+  margin: 0; color: var(--texte); font-size: 13px; line-height: 1.45; font-weight: 400;
+  font-family: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+  background: radial-gradient(1100px 520px at 88% -18%, rgba(79, 227, 214, 0.05), transparent 62%), var(--fond);
+}
+h1, h2, h3, p, ol, ul { margin: 0; }
+.app { height: 100vh; height: 100dvh; display: flex; flex-direction: column; min-width: 0; }
+
+/* Barre du haut : projet, onglets, compteurs */
+.tete {
+  flex: none; display: flex; align-items: stretch; gap: 14px; height: 44px; padding: 0 16px;
+  background: var(--barre); border-bottom: 1px solid var(--trait); overflow-x: auto; white-space: nowrap;
+}
+.tete > * { display: flex; align-items: center; }
+.marque { font-size: 13.5px; font-weight: 600; letter-spacing: 0.01em; }
+.sep { color: var(--faible); margin: 0 -6px; }
+.nom-projet { color: var(--discret); }
+.onglets { gap: 2px; margin-left: 10px; align-items: stretch; }
+.onglets a {
+  display: flex; align-items: center; gap: 7px; padding: 0 11px; color: var(--discret); text-decoration: none;
+  border-bottom: 2px solid transparent; margin-bottom: -1px; font-size: 12.5px; font-weight: 500;
+}
+.onglets a:hover { color: var(--texte); }
+.onglets a[aria-current="page"] { color: var(--texte); border-bottom-color: var(--reussite); }
+.cpt { font-family: var(--mono); font-size: 10.5px; color: var(--faible); }
+.pt { width: 6px; height: 6px; border-radius: 50%; background: var(--refus); display: none; }
+.pt.allume { display: block; }
+.pousse { flex-grow: 1; }
+.pastille { font-size: 11.5px; color: var(--discret); }
+.pastille.mode { color: var(--faible); }
+
+.vue { flex: 1 1 0; min-height: 0; display: none; }
+.vue.active { display: flex; }
+
+.etiquette, .carte h2, th, .contrat span, .chiffres span, .rail h2, .fiche h3 {
+  font-size: 10.5px; font-weight: 500; color: var(--faible); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.calme { color: var(--discret); }
+.petit { color: var(--faible); font-size: 11.5px; }
+button {
+  height: 28px; padding: 0 12px; border-radius: 6px; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
+  background: transparent; color: var(--texte); border: 1px solid rgba(255, 255, 255, 0.16); white-space: nowrap;
+}
+button.principal { background: var(--reussite); color: #041c1a; border-color: var(--reussite); font-weight: 600; }
+button:hover:not(:disabled) { filter: brightness(1.12); }
+button:disabled { opacity: 0.4; cursor: default; }
+button:focus-visible, a:focus-visible, .noeud:focus-visible { outline: 2px solid #ffffff; outline-offset: 2px; }
+.boutons { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (pointer: coarse) { button { height: 44px; padding: 0 16px; } }
+
+/* Conversation */
+.discussion { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
+.fil { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 22px 20px 8px; }
+.colonne { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.msg { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.msg.toi {
+  align-self: flex-end; max-width: 80%; padding: 8px 12px; background: rgba(255, 255, 255, 0.055);
+  border: 1px solid var(--trait); border-radius: 10px 10px 3px 10px; white-space: pre-wrap; overflow-wrap: anywhere;
+}
+.qui { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--faible); }
+.qui::before { content: ""; width: 7px; height: 7px; border-radius: 2px; border: 1px solid var(--reussite); }
+.qui b { font-weight: 500; color: var(--discret); }
+.qui time { font-family: var(--mono); font-size: 10.5px; }
+.prose { font-size: 13.5px; line-height: 1.58; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 8px; }
+.prose code { font-family: var(--mono); font-size: 12px; padding: 1px 4px; border-radius: 4px; background: rgba(255, 255, 255, 0.06); }
+.prose b { font-weight: 600; }
+.gestes { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 11.5px; color: var(--faible); }
+.points { display: inline-flex; gap: 4px; padding: 6px 0; }
+.points i { width: 4px; height: 4px; border-radius: 50%; background: var(--discret); animation: battre 1.2s ease-in-out infinite; }
+.points i:nth-child(2) { animation-delay: 0.2s; } .points i:nth-child(3) { animation-delay: 0.4s; }
+.activite { margin-left: 3px; padding-left: 14px; border-left: 1px solid var(--trait); display: flex; flex-direction: column; gap: 2px; }
+.activite p { color: var(--faible); font-size: 11.5px; padding-bottom: 2px; }
+.ligne-moteur { display: grid; grid-template-columns: 58px 30px minmax(0, 1fr); gap: 8px; font-size: 12px; color: var(--discret); }
+.ligne-moteur time, .ligne-moteur .id { font-family: var(--mono); font-size: 11px; color: var(--faible); }
+.ligne-moteur .id { color: var(--reussite); }
+.carte-fil { background: var(--carte); border: 1px solid var(--trait); border-radius: var(--rayon); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+.carte-fil.decision { border-left: 2px solid var(--refus); }
+.carte-fil h3 { font-size: 12.5px; font-weight: 600; }
+.saisie { flex: none; padding: 8px 20px 14px; }
+.boite {
+  max-width: 720px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 12px;
+  background: var(--carte); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: var(--rayon);
+}
+.boite:focus-within { border-color: rgba(255, 255, 255, 0.28); }
+textarea {
+  flex: 1 1 0; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--texte);
+  font: inherit; font-size: 13.5px; line-height: 1.5; max-height: 160px; padding: 4px 0;
+}
+textarea::placeholder { color: var(--faible); }
+.sous-saisie { max-width: 720px; margin: 6px auto 0; color: var(--faible); font-size: 11px; }
+.rail { flex: 0 0 288px; border-left: 1px solid var(--trait); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+.rail section { display: flex; flex-direction: column; gap: 9px; }
+.mini { list-style: none; padding: 0; display: flex; flex-direction: column; }
+.mini li { display: grid; grid-template-columns: 28px minmax(0, 1fr) 8px; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--trait); font-size: 12px; }
+.mini li:first-child { border-top: 0; }
+.mini .titre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--discret); }
+
+/* États */
+.puce { font-family: var(--mono); font-size: 12px; color: var(--reussite); }
+.rond { width: 6px; height: 6px; border-radius: 50%; background: var(--faible); display: block; }
+.rond.verifie { background: var(--reussite); } .rond.revenu { background: var(--refus); }
+.rond.en_cours, .rond.en_verification { background: #ffffff; animation: battre 1.2s ease-in-out infinite; }
+.etat { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
+.etat.verifie { color: var(--reussite); } .etat.revenu { color: var(--refus); }
+.etat.a_lancer, .etat.abandonnee { color: var(--faible); }
+@keyframes battre { 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .rond, .points i { animation: none !important; } .rail-jauge i { transition: none; } }
+
+/* Chantier */
+.defilante { overflow-y: auto; }
+.pages { width: 100%; max-width: 1280px; margin: 0 auto; padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 12px; height: max-content; }
+.grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.carte { background: var(--carte); border: 1px solid var(--trait); border-radius: var(--rayon); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.point { font-size: 15px; line-height: 1.4; font-weight: 500; }
+.contrat { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
+.contrat div { padding: 7px 0; border-top: 1px solid var(--trait); min-width: 0; }
+.contrat div:first-child, .contrat .large:first-child { border-top: 0; padding-top: 0; }
+.contrat .large { grid-column: 1 / -1; }
+.contrat span { display: block; margin-bottom: 1px; }
+.demande { border-left: 2px solid var(--refus); padding: 2px 0 2px 12px; display: flex; flex-direction: column; gap: 8px; }
+.tuiles { display: flex; flex-direction: column; gap: 9px; }
+.rang { display: grid; grid-template-columns: 82px minmax(0, 1fr) 150px; align-items: center; gap: 12px; }
+.rang .nom { color: var(--discret); }
+.duo { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: rgba(255, 255, 255, 0.05); }
+.duo i { display: block; height: 100%; }
+.duo .r { background: var(--reussite); } .duo .f { background: var(--refus); }
+.rang .compte { text-align: right; color: var(--discret); font-size: 12px; white-space: nowrap; }
+.rang .compte b { font-weight: 500; }
+.rang .compte .r { color: var(--reussite); } .rang .compte .f { color: var(--refus); }
+.jauge { display: flex; flex-direction: column; gap: 5px; }
+.jauge .ligne { display: flex; justify-content: space-between; gap: 12px; color: var(--discret); }
+.jauge .ligne b { font-weight: 500; color: var(--texte); }
+.rail-jauge { height: 3px; border-radius: 2px; background: rgba(255, 255, 255, 0.07); overflow: hidden; }
+.rail-jauge i { display: block; height: 100%; background: var(--reussite); transition: width 0.5s ease; }
+.rail-jauge i.haut-niveau { background: var(--refus); }
+.chiffres { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; border-top: 1px solid var(--trait); padding-top: 10px; }
+.chiffres span { display: block; }
+.chiffres b { font-size: 18px; font-weight: 400; letter-spacing: -0.01em; }
+.defile { overflow-x: auto; margin: 0 -6px; }
+table { width: 100%; border-collapse: collapse; min-width: 640px; }
+th { text-align: left; padding: 0 6px 7px; }
+td { padding: 7px 6px; border-top: 1px solid var(--trait); vertical-align: baseline; }
+td.droite, th.droite { text-align: right; }
+.badge { margin-left: 8px; padding: 0 6px; border-radius: 4px; border: 1px solid rgba(255, 138, 76, 0.5); color: var(--refus); font-size: 10.5px; font-weight: 500; white-space: nowrap; }
+.evenements { list-style: none; padding: 0; display: flex; flex-direction: column; font-size: 12px; }
+.evenements li { display: grid; grid-template-columns: 62px 34px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-top: 1px solid var(--trait); }
+.evenements li:first-child { border-top: 0; }
+.evenements time, .evenements .id { font-family: var(--mono); font-size: 11.5px; color: var(--faible); }
+.evenements .id { color: var(--reussite); }
+.evenements span:last-child { color: var(--discret); }
+
+/* Plan */
+.toile { flex: 1 1 0; min-width: 0; overflow: auto; padding: 20px; display: flex; flex-direction: column; gap: 16px; }
+.toile svg { display: block; margin: 0 auto; flex: none; }
+.bandeau { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; max-width: 900px; width: 100%; margin: 0 auto; }
+.bandeau p { flex: 1 1 320px; color: var(--discret); }
+.legende { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; color: var(--faible); font-size: 11.5px; }
+.legende span { display: inline-flex; align-items: center; gap: 6px; }
+.lien { fill: none; stroke: rgba(255, 255, 255, 0.15); stroke-width: 1; }
+.lien.fait { stroke: rgba(79, 227, 214, 0.55); }
+.noeud { cursor: pointer; outline-offset: 3px; }
+.noeud rect { fill: var(--carte); stroke: rgba(255, 255, 255, 0.13); stroke-width: 1; }
+.noeud:hover rect { fill: #111a1e; }
+.noeud.verifie rect { stroke: rgba(79, 227, 214, 0.45); }
+.noeud.revenu rect { stroke: var(--refus); }
+.noeud.ajoutee rect { stroke-dasharray: 4 3; }
+.noeud.choisie rect { stroke: var(--texte); stroke-width: 1.25; }
+.noeud text { font-family: inherit; }
+.n-id { font-family: var(--mono) !important; font-size: 11.5px; fill: var(--reussite); }
+.n-etat { font-size: 10.5px; fill: var(--faible); text-anchor: end; }
+.n-titre { font-size: 12.5px; fill: var(--texte); font-weight: 500; }
+.n-dose { font-size: 11px; fill: var(--discret); }
+.racine rect { fill: var(--creux); stroke: rgba(255, 255, 255, 0.13); }
+.racine text { font-size: 11.5px; fill: var(--discret); text-anchor: middle; }
+.racine.fait rect { stroke: rgba(79, 227, 214, 0.45); } .racine.fait text { fill: var(--reussite); }
+.c-verifie { fill: var(--reussite); } .c-revenu { fill: var(--refus); } .c-a_lancer, .c-abandonnee { fill: var(--faible); }
+.c-en_cours, .c-en_verification { fill: #ffffff; animation: battre 1.2s ease-in-out infinite; }
+.fiche { flex: 0 0 328px; border-left: 1px solid var(--trait); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.fiche header { display: flex; flex-direction: column; gap: 4px; }
+.fiche h2 { font-size: 14px; font-weight: 600; }
+.fiche section { display: flex; flex-direction: column; gap: 5px; }
+.fiche ol, .fiche ul { padding-left: 18px; display: flex; flex-direction: column; gap: 3px; color: var(--discret); }
+.fiche ul.fichiers { list-style: none; padding: 0; font-family: var(--mono); font-size: 11.5px; }
+.fiche .essais { list-style: none; padding: 0; }
+.fiche .essais li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; padding: 4px 0; border-top: 1px solid var(--trait); font-size: 12px; }
+.fiche .essais li:first-child { border-top: 0; }
+.fiche .essais .ok { color: var(--reussite); } .fiche .essais .non { color: var(--refus); }
+
+@media (max-width: 900px) {
+  .rail { display: none; }
+  .grille { grid-template-columns: minmax(0, 1fr); }
+  #vue-plan.active { flex-direction: column; overflow-y: auto; }
+  .toile { flex: none; overflow-x: auto; }
+  .fiche { flex: none; border-left: 0; border-top: 1px solid var(--trait); }
+  .pastille { display: none !important; }
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="tete">
+    <div class="marque">Atelier</div>
+    <span class="sep" aria-hidden="true">/</span>
+    <span class="nom-projet" id="projet">Chargement</span>
+    <nav class="onglets" aria-label="Onglets">
+      <a href="#conversation" data-onglet="conversation">Conversation<i class="pt" id="pt-conversation" title="Quelque chose t'attend"></i></a>
+      <a href="#chantier" data-onglet="chantier">Chantier<span class="cpt" id="cpt-chantier"></span></a>
+      <a href="#plan" data-onglet="plan">Plan<span class="cpt" id="cpt-plan"></span></a>
+    </nav>
+    <div class="pousse"></div>
+    <span class="pastille" id="pastille-agents"></span>
+    <span class="pastille" id="pastille-cout"></span>
+    <span class="pastille mode" id="mode"></span>
+  </header>
+
+  <section class="vue" id="vue-conversation" aria-label="Conversation">
+    <div class="discussion">
+      <div class="fil" id="fil" aria-live="polite"><div class="colonne" id="colonne"></div></div>
+      <form class="saisie" id="saisie">
+        <div class="boite">
+          <textarea id="message" rows="1" aria-label="Message à l'orchestrateur" placeholder="Écris à l'orchestrateur"></textarea>
+          <button class="principal" type="submit" id="envoi">Envoyer</button>
+        </div>
+        <p class="sous-saisie" id="sous-saisie"></p>
+      </form>
+    </div>
+    <aside class="rail" aria-label="Résumé du chantier">
+      <section><h2>Point d'étape</h2><p id="rail-point"></p></section>
+      <section><h2>Enveloppe</h2><div id="rail-jauges" style="display: flex; flex-direction: column; gap: 10px"></div></section>
+      <section><h2>Tâches</h2><ul class="mini" id="rail-taches"></ul></section>
+    </aside>
+  </section>
+
+  <section class="vue defilante" id="vue-chantier" aria-label="Chantier">
+    <div class="pages">
+      <div class="grille">
+        <article class="carte"><h2>Orchestrateur</h2><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></article>
+        <article class="carte"><h2>Ce qui t'attend</h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
+      </div>
+      <div class="grille">
+        <article class="carte"><h2>Dosage par type de tâche</h2><div class="tuiles" id="tuiles"></div>
+          <p class="petit">Turquoise : vérifiées du premier coup. Orange : livrables refusés.</p></article>
+        <article class="carte"><h2>Enveloppe du contrat</h2><div id="jauges" style="display: flex; flex-direction: column; gap: 12px"></div></article>
+      </div>
+      <article class="carte"><h2>Tâches et agents</h2>
+        <div class="defile"><table>
+          <thead><tr><th>Tâche</th><th>Intitulé</th><th>Agent</th><th class="droite">Tentatives</th><th>État</th><th class="droite">Coût</th><th class="droite">Tokens</th></tr></thead>
+          <tbody id="lignes"></tbody>
+        </table></div>
+      </article>
+      <article class="carte"><h2>Fil du chantier</h2><ol class="evenements" id="evenements"></ol></article>
+    </div>
+  </section>
+
+  <section class="vue" id="vue-plan" aria-label="Plan">
+    <div class="toile" id="toile"></div>
+    <aside class="fiche" id="fiche" aria-label="Détail de la tâche"></aside>
+  </section>
+</div>
+
+<script>
+const INSTANTANES = /*INSTANTANES*/[];
+const EFFORTS = { low: "faible", medium: "moyen", high: "élevé", xhigh: "très élevé", max: "max" };
+const TYPES = { mecanique: "mécanique", courante: "courante", delicate: "délicate", physique: "physique", conception: "conception" };
+let derniere = null, rejoue = false, pas = 0, minuterie = null, choisie = null, signatureFil = "";
+const franchies = new Set();
+
+const propre = (texte) => String(texte ?? "").replace(/[&<>"']/g,
+  (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+const nombre = (n) => Number(n || 0).toLocaleString("fr-FR");
+const euros = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " $";
+const poser = (id, html) => { document.getElementById(id).innerHTML = html; };
+const couper = (texte, n) => (texte.length > n ? texte.slice(0, n - 1).trimEnd() + "…" : texte);
+const ouvertes = (vue) => vue.demandes.filter((d) => d.reponse === null && !franchies.has(`decision:${d.id}`));
+const contratEnAttente = (vue) => vue.taches.length > 0 && !vue.contrat.valide;
+
+function riche(texte) {
+  return propre(texte).split(/\n{2,}/).filter(Boolean).map((p) => `<p>${p
+    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>")}</p>`).join("");
+}
+
+/* ---------- Morceaux communs ---------- */
+function resumeTaches(vue) {
+  const comptes = {};
+  vue.taches.forEach((t) => { comptes[t.type] = (comptes[t.type] || 0) + 1; });
+  const detail = Object.entries(comptes).map(([type, n]) => `${n} ${TYPES[type] || type}${n > 1 ? "s" : ""}`).join(", ");
+  return `${vue.taches.length} tâches : ${detail}`;
+}
+
+function contratHtml(vue) {
+  const c = vue.contrat;
+  return `<div class="contrat">
+    <div class="large"><span>Objectif</span>${propre(c.objectif)}</div>
+    <div class="large"><span>Hors périmètre</span>${propre(c.hors_perimetre || "Non précisé")}</div>
+    <div class="large"><span>Découpage</span>${propre(resumeTaches(vue))}</div>
+    <div><span>Enveloppe</span>${c.max_agents} agents, ${c.max_tentatives} tentatives par tâche</div>
+    <div><span>Plafond d'escalade</span>${propre(c.plafond_fr)}</div>
+    <div class="large"><span>Zones rouges</span>${c.zones_rouges.length} actions interdites sans toi</div>
+  </div>`;
+}
+
+const boutonValider = `<button class="principal" data-action="valider">Valider le contrat et lancer</button>`;
+
+function demandeHtml(d) {
+  return `<p>${propre(d.question)}</p><div class="boutons">${d.options.map((o, i) =>
+    `<button class="${i ? "" : "principal"}" data-action="decider" data-id="${propre(d.id)}" data-choix="${propre(o)}">${propre(o)}</button>`).join("")}</div>`;
+}
+
+function jauge(titre, valeur, maximum) {
+  const part = maximum ? Math.min(100, Math.round((valeur / maximum) * 100)) : 0;
+  return `<div class="jauge"><div class="ligne"><span>${titre}</span><b>${valeur} sur ${maximum}</b></div>
+    <div class="rail-jauge" role="img" aria-label="${titre} : ${valeur} sur ${maximum}">
+    <i class="${part >= 80 ? "haut-niveau" : ""}" style="width: ${part}%"></i></div></div>`;
+}
+
+/* ---------- Conversation ---------- */
+function activite(lignes) {
+  const visibles = lignes.slice(-3), cachees = lignes.length - visibles.length;
+  return `<div class="activite">${cachees ? `<p>${cachees} ligne${cachees > 1 ? "s" : ""} plus haut, dans l'onglet Chantier</p>` : ""}${
+    visibles.map((e) => `<div class="ligne-moteur"><time>${propre(e.heure)}</time><span class="id">${propre(e.tache)}</span><span>${propre(e.texte)}</span></div>`).join("")}</div>`;
+}
+
+function reponse(heure, corps) {
+  return `<div class="msg orch"><div class="qui"><b>Orchestrateur</b>${heure ? `<time>${propre(heure)}</time>` : ""}</div>${corps}</div>`;
+}
+
+function brouillon(vue) {
+  const b = vue.brouillon || { texte: "", outils: [] };
+  const gestes = b.outils.length ? `<ul class="gestes">${b.outils.slice(-4).map((o) => `<li>${propre(o)}</li>`).join("")}</ul>` : "";
+  const texte = b.texte.trim() ? `<div class="prose">${riche(b.texte)}</div>` : `<span class="points" aria-label="L'orchestrateur écrit"><i></i><i></i><i></i></span>`;
+  return reponse("", gestes + texte);
+}
+
+function fil(vue) {
+  const blocs = [];
+  let groupe = [];
+  const vider = () => { if (groupe.length) { blocs.push(activite(groupe)); groupe = []; } };
+  for (const e of vue.evenements) {
+    const auteur = e.auteur || "moteur";
+    if (auteur === "moteur") { groupe.push(e); continue; }
+    vider();
+    blocs.push(auteur === "toi" ? `<div class="msg toi">${propre(e.texte)}</div>` : reponse(e.heure, `<div class="prose">${riche(e.texte)}</div>`));
+  }
+  vider();
+  if (vue.occupe) blocs.push(brouillon(vue));
+  if (contratEnAttente(vue) && !vue.occupe) {
+    blocs.push(`<div class="carte-fil"><h3>Contrat de chantier à valider</h3>${contratHtml(vue)}
+      <div class="boutons">${boutonValider}<button data-action="voir-plan">Voir le plan</button></div></div>`);
+  }
+  ouvertes(vue).forEach((d) => blocs.push(`<div class="carte-fil decision"><h3>J'ai besoin de ta décision</h3>${demandeHtml(d)}</div>`));
+  return blocs.join("");
+}
+
+function afficherConversation(vue) {
+  const b = vue.brouillon || { texte: "", outils: [] };
+  const signature = [vue.evenements.length, vue.occupe, b.texte.length, b.outils.length, vue.contrat.valide, vue.taches.length, ouvertes(vue).map((d) => d.id).join()].join("|");
+  if (signature !== signatureFil) {
+    const cadre = document.getElementById("fil");
+    const enBas = cadre.scrollHeight - cadre.scrollTop - cadre.clientHeight < 120;
+    poser("colonne", fil(vue));
+    if (enBas || !signatureFil) cadre.scrollTop = cadre.scrollHeight;
+    signatureFil = signature;
+  }
+  const c = vue.contrat;
+  document.getElementById("rail-point").textContent = vue.point_d_etape;
+  poser("rail-jauges", vue.taches.length
+    ? jauge("Agents lancés", vue.agents_lances, c.max_agents) + jauge("Montées en gamme", vue.montees, c.max_montees)
+    : `<p class="calme">Pas encore de contrat.</p>`);
+  poser("rail-taches", vue.taches.map((t) => `<li><span class="puce">${propre(t.id)}</span>
+    <span class="titre" title="${propre(t.titre)} · ${propre(t.etat_fr)}">${propre(t.titre)}</span>
+    <i class="rond ${propre(t.etat)}" aria-label="${propre(t.etat_fr)}"></i></li>`).join("") || `<li style="display:block" class="calme">Aucune tâche.</li>`);
+
+  const saisie = document.getElementById("message"), envoi = document.getElementById("envoi");
+  const fige = rejoue && attente_de(vue) !== "objectif";
+  saisie.disabled = fige;
+  envoi.disabled = fige || vue.occupe;
+  saisie.placeholder = fige ? "Démonstration rejouée : seule la première demande est enregistrée" : "Écris à l'orchestrateur";
+  document.getElementById("sous-saisie").textContent = vue.mode === "réel" && !rejoue
+    ? "Session Claude Code de l'orchestrateur, gardée d'un message à l'autre. Elle lit le dépôt, elle n'écrit rien."
+    : "Démonstration : réponses et agents simulés, aucun appel à Claude Code.";
+}
+
+/* ---------- Chantier ---------- */
+function attenteHtml(vue) {
+  if (contratEnAttente(vue)) return `${contratHtml(vue)}<div class="boutons">${boutonValider}</div>`;
+  const liste = ouvertes(vue);
+  if (!liste.length) return `<p class="calme">Rien pour l'instant. Je te préviens si je sors du contrat.</p>`;
+  return liste.map((d) => `<div class="demande">${demandeHtml(d)}</div>`).join("");
+}
+
+function afficherChantier(vue) {
+  const c = vue.contrat;
+  document.getElementById("point").textContent = vue.point_d_etape;
+  document.getElementById("objectif").textContent = c.objectif;
+  poser("attente", attenteHtml(vue));
+  poser("tuiles", vue.statistiques.map((s) => {
+    const total = Math.max(1, s.premier_coup + s.refus);
+    return `<div class="rang"><span class="nom">${propre(s.type)}</span>
+      <div class="duo" role="img" aria-label="${s.premier_coup} du premier coup, ${s.refus} refus">
+        <i class="r" style="width: ${(s.premier_coup / total) * 100}%"></i>
+        <i class="f" style="width: ${(s.refus / total) * 100}%"></i></div>
+      <span class="compte"><b class="r">${s.premier_coup}</b> du 1er coup · <b class="f">${s.refus}</b> refus</span></div>`;
+  }).join("") || `<p class="calme">Aucune tâche.</p>`);
+  poser("jauges", jauge("Agents lancés", vue.agents_lances, c.max_agents)
+    + jauge("Montées en gamme", vue.montees, c.max_montees)
+    + `<div class="chiffres"><div><span>Coût équivalent</span><b>${euros(vue.cout_usd)}</b></div>
+       <div><span>Tokens</span><b>${nombre(vue.tokens)}</b></div></div>`);
+  poser("lignes", vue.taches.map((t) => `<tr>
+    <td><span class="puce">${propre(t.id)}</span></td>
+    <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}</td>
+    <td>${propre(t.dosage_fr)}</td>
+    <td class="droite">${t.tentatives}</td>
+    <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(t.etat_fr)}</span></td>
+    <td class="droite">${euros(t.cout_usd)}</td><td class="droite petit">${nombre(t.tokens)}</td></tr>`).join("")
+    || `<tr><td colspan="7" class="calme">Aucune tâche.</td></tr>`);
+  const moteur = vue.evenements.filter((e) => (e.auteur || "moteur") === "moteur");
+  poser("evenements", moteur.slice(-18).reverse().map((e) =>
+    `<li><time>${propre(e.heure)}</time><span class="id">${propre(e.tache)}</span><span>${propre(e.texte)}</span></li>`).join("")
+    || `<li style="display:block" class="calme">Rien encore.</li>`);
+}
+
+/* ---------- Plan : le graphe des tâches ---------- */
+function disposer(taches) {
+  const parId = Object.fromEntries(taches.map((t) => [t.id, t]));
+  const parents = (t) => (t.depend_de || []).filter((id) => parId[id]);
+  const rang = {};
+  const profondeur = (t, vus) => {
+    if (rang[t.id]) return rang[t.id];
+    if (vus.has(t.id)) return 1;
+    vus.add(t.id);
+    rang[t.id] = 1 + Math.max(0, ...parents(t).map((id) => profondeur(parId[id], vus)));
+    return rang[t.id];
+  };
+  taches.forEach((t) => profondeur(t, new Set()));
+  const couches = [];
+  taches.forEach((t) => { (couches[rang[t.id] - 1] = couches[rang[t.id] - 1] || []).push(t); });
+  return { couches: couches.filter(Boolean), parents };
+}
+
+function graphe(vue) {
+  const L = 204, H = 60, ecartX = 18, ecartY = 46, marge = 12, racine = { l: 150, h: 28 };
+  const { couches, parents } = disposer(vue.taches);
+  const large = Math.max(...couches.map((c) => c.length)) * (L + ecartX) - ecartX;
+  const lieu = {};
+  couches.forEach((couche, n) => {
+    const centre = (t) => { const p = parents(t).map((id) => lieu[id]?.x ?? 0); return p.length ? p.reduce((a, b) => a + b, 0) / p.length : 0; };
+    if (n) couche.sort((a, b) => centre(a) - centre(b));
+    const debut = marge + (large - (couche.length * (L + ecartX) - ecartX)) / 2;
+    couche.forEach((t, i) => { lieu[t.id] = { x: debut + i * (L + ecartX), y: marge + racine.h + ecartY + n * (H + ecartY) }; });
+  });
+  const largeur = large + 2 * marge, hauteur = marge * 2 + racine.h + couches.length * (H + ecartY);
+  const courbe = (x1, y1, x2, y2, fait) => { const m = (y1 + y2) / 2; return `<path class="lien ${fait ? "fait" : ""}" d="M${x1} ${y1} C${x1} ${m} ${x2} ${m} ${x2} ${y2}"/>`; };
+  const etatDe = Object.fromEntries(vue.taches.map((t) => [t.id, t.etat]));
+  let liens = "", noeuds = "";
+  for (const t of vue.taches) {
+    const { x, y } = lieu[t.id], amont = parents(t);
+    if (!amont.length) liens += courbe(largeur / 2, marge + racine.h, x + L / 2, y, vue.contrat.valide);
+    amont.forEach((id) => { liens += courbe(lieu[id].x + L / 2, lieu[id].y + H, x + L / 2, y, etatDe[id] === "verifie"); });
+    const classes = ["noeud", t.etat, t.ajoutee ? "ajoutee" : "", t.id === choisie ? "choisie" : ""].join(" ");
+    noeuds += `<g class="${classes}" transform="translate(${x} ${y})" data-action="choisir" data-id="${propre(t.id)}" tabindex="0" role="button"
+      aria-label="Tâche ${propre(t.id)}, ${propre(t.titre)}, ${propre(t.etat_fr)}">
+      <rect width="${L}" height="${H}" rx="8"/>
+      <text class="n-id" x="12" y="19">${propre(t.id)}</text>
+      <text class="n-etat" x="${L - 24}" y="19">${propre(t.etat_fr)}</text>
+      <circle class="c-${propre(t.etat)}" cx="${L - 14}" cy="15.5" r="3"/>
+      <text class="n-titre" x="12" y="37">${propre(couper(t.titre, 29))}</text>
+      <text class="n-dose" x="12" y="51">${propre(t.dosage_fr)}${t.ajoutee ? " · ajoutée" : ""}</text></g>`;
+  }
+  const tete = `<g class="racine ${vue.contrat.valide ? "fait" : ""}" transform="translate(${(largeur - racine.l) / 2} ${marge})">
+    <rect width="${racine.l}" height="${racine.h}" rx="14"/><text x="${racine.l / 2}" y="18">${vue.contrat.valide ? "Contrat validé" : "Contrat à valider"}</text></g>`;
+  return `<svg width="${largeur}" height="${hauteur}" viewBox="0 0 ${largeur} ${hauteur}" role="group" aria-label="Graphe des tâches">${liens}${tete}${noeuds}</svg>`;
+}
+
+function fiche(vue) {
+  const t = vue.taches.find((x) => x.id === choisie);
+  if (!t) return `<p class="calme">Choisis une tâche dans le graphe pour lire ses critères et son périmètre.</p>`;
+  const liste = (elements, classe) => `<ul class="${classe || ""}">${elements.map((e) => `<li>${propre(e)}</li>`).join("")}</ul>`;
+  const essais = (t.historique || []).map((h) => {
+    const ok = h.issue === "valide";
+    return `<li><span class="${ok ? "ok" : "non"}">${ok ? "✓" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(h.modele.charAt(0).toUpperCase() + h.modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
+      h.detail ? `<br><span class="petit">${propre(h.detail)}</span>` : ""}</span></li>`;
+  }).join("");
+  return `<header><span class="puce">${propre(t.id)}</span><h2>${propre(t.titre)}</h2>
+      <span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(t.etat_fr)}</span></header>
+    <section><h3>Agent</h3><p>${propre(t.dosage_fr)} · tâche ${propre(TYPES[t.type] || t.type)}${t.ajoutee ? " · ajoutée en route" : ""}</p></section>
+    ${t.pourquoi ? `<section><h3>Pourquoi</h3><p class="calme">${propre(t.pourquoi)}</p></section>` : ""}
+    <section><h3>Critères de vérification</h3>${t.criteres.length ? `<ol>${t.criteres.map((c) => `<li>${propre(c)}</li>`).join("")}</ol>` : `<p class="calme">Aucun critère.</p>`}</section>
+    <section><h3>Périmètre</h3>${t.perimetre.length ? liste(t.perimetre, "fichiers") : `<p class="calme">Non précisé.</p>`}</section>
+    <section><h3>Attend</h3><p class="calme">${t.depend_de.length ? propre(t.depend_de.join(", ")) : "Rien : peut partir dès le contrat validé."}</p></section>
+    ${essais ? `<section><h3>Tentatives</h3><ul class="essais">${essais}</ul></section>` : ""}`;
+}
+
+function afficherPlan(vue) {
+  if (!vue.taches.length) {
+    poser("toile", `<p class="calme" style="margin: auto; max-width: 380px; text-align: center">Pas encore de plan. Décris ton objectif dans la conversation : le découpage s'affichera ici, avec ce qui attend quoi.</p>`);
+    return poser("fiche", "");
+  }
+  if (!vue.taches.some((t) => t.id === choisie)) choisie = (vue.taches.find((t) => t.etat === "revenu") || vue.taches[0]).id;
+  const bandeau = contratEnAttente(vue)
+    ? `<div class="bandeau"><p>Relis le découpage : clique une tâche pour voir ses critères et les fichiers qu'elle a le droit de toucher. Rien ne démarre avant ta validation.</p>${boutonValider}</div>` : "";
+  const legende = `<div class="legende"><span><i class="rond"></i>À lancer</span><span><i class="rond en_cours"></i>En cours</span>
+    <span><i class="rond verifie"></i>Vérifiée</span><span><i class="rond revenu"></i>Revenue vers toi</span><span>Contour pointillé : ajoutée en route</span></div>`;
+  poser("toile", bandeau + graphe(vue) + legende);
+  poser("fiche", fiche(vue));
+}
+
+/* ---------- Ensemble ---------- */
+function afficher(vue) {
+  derniere = vue;
+  const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  document.getElementById("projet").textContent = vue.projet;
+  document.getElementById("mode").textContent = rejoue ? "Démonstration rejouée" : vue.mode === "réel" ? "" : "Démonstration";
+  document.getElementById("pastille-agents").textContent = vue.taches.length ? `Agents ${vue.agents_lances} / ${c.max_agents}` : "";
+  document.getElementById("pastille-cout").textContent = vue.cout_usd ? `Coût équivalent ${euros(vue.cout_usd)}` : "";
+  document.getElementById("cpt-chantier").textContent = vue.taches.length ? `${verifiees}/${vue.taches.length}` : "";
+  document.getElementById("cpt-plan").textContent = vue.taches.length || "";
+  document.getElementById("pt-conversation").classList.toggle("allume", contratEnAttente(vue) || ouvertes(vue).length > 0);
+  afficherConversation(vue);
+  afficherChantier(vue);
+  afficherPlan(vue);
+}
+
+function onglet() {
+  const nom = ["conversation", "chantier", "plan"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "conversation";
+  document.querySelectorAll(".vue").forEach((v) => v.classList.toggle("active", v.id === `vue-${nom}`));
+  document.querySelectorAll(".onglets a").forEach((a) => {
+    if (a.dataset.onglet === nom) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
+  });
+  if (nom === "conversation") { const cadre = document.getElementById("fil"); cadre.scrollTop = cadre.scrollHeight; }
+}
+window.addEventListener("hashchange", onglet);
+
+/* Sans serveur (page ouverte seule), on rejoue un chantier enregistré, en s'arrêtant là où tu es attendue. */
+function attente_de(vue) {
+  if (!vue.evenements.some((e) => e.auteur === "toi")) return "objectif";
+  if (contratEnAttente(vue) && !vue.occupe) return "contrat";
+  const demande = ouvertes(vue)[0];
+  return demande && !vue.en_marche ? `decision:${demande.id}` : null;
+}
+
+function avancer() {
+  if (pas >= INSTANTANES.length - 1) { clearInterval(minuterie); minuterie = null; return; }
+  pas += 1;
+  afficher(INSTANTANES[pas]);
+  const attendue = attente_de(INSTANTANES[pas]);
+  if (attendue && !franchies.has(attendue)) { clearInterval(minuterie); minuterie = null; }
+}
+
+async function envoyer(adresse, corps) {
+  if (rejoue) {
+    franchies.add(adresse === "/api/message" ? "objectif" : adresse === "/api/decision" ? `decision:${corps.id}` : "contrat");
+    afficher(derniere);
+    if (!minuterie) minuterie = setInterval(avancer, 900);
+    return;
+  }
+  const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
+  if (retour.ok) afficher(await retour.json());
+}
+
+function agir(cible) {
+  const action = cible.dataset.action;
+  if (action === "valider") envoyer("/api/contrat/valider");
+  if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix });
+  if (action === "voir-plan") location.hash = "#plan";
+  if (action === "choisir") { choisie = cible.dataset.id; afficherPlan(derniere); }
+}
+document.addEventListener("click", (e) => { const cible = e.target.closest("[data-action]"); if (cible) agir(cible); });
+document.addEventListener("keydown", (e) => {
+  const cible = e.target.closest?.(".noeud");
+  if (cible && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); agir(cible); }
+});
+
+const zone = document.getElementById("message");
+function ajuster() { zone.style.height = "auto"; zone.style.height = Math.min(zone.scrollHeight, 160) + "px"; }
+zone.addEventListener("input", ajuster);
+zone.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); document.getElementById("saisie").requestSubmit(); }
+});
+document.getElementById("saisie").addEventListener("submit", (e) => {
+  e.preventDefault();
+  const texte = zone.value.trim();
+  if (!texte || (derniere && derniere.occupe)) return;
+  zone.value = ""; ajuster();
+  signatureFil = "";
+  envoyer("/api/message", { texte });
+});
+
+async function charger() {
+  if (rejoue) return;
+  try {
+    const retour = await fetch("/api/etat", { cache: "no-store" });
+    if (!retour.ok) throw new Error("pas de serveur");
+    afficher(await retour.json());
+  } catch (erreur) {
+    if (INSTANTANES.length) {
+      rejoue = true;
+      afficher(INSTANTANES[0]);
+      const premiere = INSTANTANES.flatMap((v) => v.evenements).find((e) => e.auteur === "toi");
+      if (premiere) { zone.value = premiere.texte; ajuster(); }
+    } else document.getElementById("rail-point").textContent = "Le moteur ne répond pas. Relance l'atelier.";
+  }
+}
+async function boucle() { await charger(); setTimeout(boucle, derniere && derniere.occupe ? 400 : 1500); }
+onglet();
+boucle();
+</script>
+</body>
+</html>

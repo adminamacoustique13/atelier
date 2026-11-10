@@ -1,0 +1,289 @@
+import subprocess
+
+import pytest
+
+from atelier.agents import AgentSimule, lire_sortie_claude
+from atelier.consignes import consigne_ouvrier, lire_verdict
+from atelier.controles import ControlesGit, ControlesSimules, hors_perimetre, se_chevauchent
+from atelier.modele import Chantier, Contrat, Tache
+from atelier.moteur import ABANDONNER, RELANCER, ContratNonValide, Moteur
+
+
+def chantier(taches, **contrat):
+    reglages = {"objectif": "Essai", "valide": True, **contrat}
+    return Chantier(projet="essai", contrat=Contrat(**reglages), taches=taches)
+
+
+def tache(identifiant, **champs):
+    reglages = {"titre": f"Tâche {identifiant}", "type": "mecanique", "criteres": ["Ça marche."]}
+    reglages["perimetre"] = [f"{identifiant.lower()}.py"]
+    return Tache(id=identifiant, **{**reglages, **champs})
+
+
+def moteur(c, scenario=None):
+    agent = AgentSimule(scenario or {}, perimetres={t.id: t.perimetre for t in c.taches})
+    return Moteur(c, agent, ControlesSimules()), agent
+
+
+def test_sans_contrat_valide_rien_ne_demarre():
+    c = chantier([tache("A")], valide=False)
+    with pytest.raises(ContratNonValide):
+        moteur(c)[0].executer()
+
+
+def test_chantier_nominal_tout_est_verifie_dans_l_ordre_des_dependances():
+    c = chantier([tache("A"), tache("B"), tache("C", depend_de=["A", "B"])])
+    m, agent = moteur(c)
+    m.executer()
+    assert [t.etat for t in c.taches] == ["verifie"] * 3
+    assert c.termine
+    assert c.agents_lances == 6
+    ouvriers = [a["tache"] for a in agent.appels if a["role"] == "ouvrier"]
+    assert ouvriers.index("C") == 2
+
+
+def test_chaque_agent_recoit_son_dosage_et_le_verificateur_est_au_dessus():
+    c = chantier([tache("A"), tache("P", type="physique")])
+    m, agent = moteur(c)
+    m.executer()
+    dosages = {(a["tache"], a["role"]): (a["modele"], a["effort"]) for a in agent.appels}
+    assert dosages[("A", "ouvrier")] == ("haiku", "low")
+    assert dosages[("A", "verificateur")] == ("sonnet", "medium")
+    assert dosages[("P", "ouvrier")] == ("fable", "max")
+    assert dosages[("P", "verificateur")] == ("fable", "max")
+
+
+def test_seconde_chance_puis_montee_d_un_cran():
+    c = chantier([tache("A")])
+    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie"
+    assert a.tentatives == 3
+    assert (a.modele, a.effort) == ("sonnet", "low")
+    assert c.montees == 1
+    ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
+    assert ouvriers == [("haiku", "low"), ("haiku", "low"), ("sonnet", "low")]
+
+
+def test_un_travail_bacle_monte_l_effort_pas_le_modele():
+    c = chantier([tache("A")])
+    m, _ = moteur(c, {"A": ["bacle", "bacle", "ok"]})
+    m.executer()
+    assert (c.tache("A").modele, c.tache("A").effort) == ("haiku", "medium")
+
+
+def test_au_plafond_la_tache_revient_avec_une_seule_decision():
+    c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
+    m, _ = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    assert c.tache("A").etat == "revenu"
+    assert not c.termine
+    assert len(c.demandes) == 1
+    assert c.demandes[0]["options"] == [RELANCER, ABANDONNER]
+
+
+def test_relancer_apres_decision_monte_d_un_cran_et_termine():
+    c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
+    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m.executer()
+    m.repondre(c.demandes[0]["id"], RELANCER)
+    m.executer()
+    assert c.tache("A").etat == "verifie"
+    assert agent.appels[-1]["role"] == "verificateur"
+
+
+def test_abandonner_ferme_la_tache():
+    c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
+    m, _ = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    m.repondre(c.demandes[0]["id"], ABANDONNER)
+    m.executer()
+    assert c.tache("A").etat == "abandonnee"
+    assert c.termine
+
+
+def test_une_sortie_de_perimetre_est_refusee_sans_passer_par_le_verificateur():
+    c = chantier([tache("A")])
+    m, agent = moteur(c, {"A": ["deborde", "ok"]})
+    m.executer()
+    assert c.tache("A").historique[0]["issue"] == "deborde"
+    assert "hors_perimetre.txt" in c.tache("A").historique[0]["detail"]
+    assert [a["role"] for a in agent.appels] == ["ouvrier", "ouvrier", "verificateur"]
+
+
+def test_une_consigne_mal_posee_revient_tout_de_suite():
+    c = chantier([tache("A")])
+    m, _ = moteur(c, {"A": ["consigne"]})
+    m.executer()
+    assert c.tache("A").etat == "revenu"
+    assert c.tache("A").tentatives == 1
+
+
+def test_l_enveloppe_d_agents_arrete_le_chantier():
+    c = chantier([tache("A"), tache("B", depend_de=["A"])], max_agents=3)
+    m, _ = moteur(c)
+    m.executer()
+    assert c.tache("A").etat == "verifie"
+    assert c.tache("B").etat == "revenu"
+    assert c.agents_lances == 3
+
+
+def test_deux_taches_au_meme_perimetre_ne_tournent_jamais_ensemble():
+    c = chantier([tache("A", perimetre=["commun.py"]), tache("B", perimetre=["commun.py"])])
+    agent = AgentSimule(delai_s=0.05, perimetres={"A": ["commun.py"], "B": ["commun.py"]})
+    actives_max = []
+
+    def observer():
+        actives_max.append(sum(t.etat in ("en_cours", "en_verification") for t in c.taches))
+
+    Moteur(c, agent, ControlesSimules(), sur_changement=observer).executer()
+    assert max(actives_max) == 1
+    assert c.termine
+
+
+def test_perimetres():
+    assert hors_perimetre(["a.py", "b.py", "chantier/relais/A.md"], ["a.py"]) == ["b.py"]
+    assert hors_perimetre(["src/x/y.py"], ["src/*"]) == []
+    assert se_chevauchent(["src/*.py"], ["src/a.py"])
+    assert not se_chevauchent(["a.py"], ["b.py"])
+
+
+def test_un_verdict_illisible_vaut_refus():
+    assert lire_verdict("Tout va bien, je crois.")["valide"] is False
+    verdict = lire_verdict('Analyse faite.\n{"valide": true, "motif": "bacle", "resume": "OK"}')
+    assert verdict == {"valide": True, "motif": "bacle", "resume": "OK"}
+
+
+def test_la_consigne_porte_les_criteres_le_perimetre_et_les_remarques():
+    t = tache("A", criteres=["Rend 42."], perimetre=["a.py"])
+    texte = consigne_ouvrier(t, Contrat(objectif="But"), {"commandes": ["pytest -q"]}, "Trop lent.")
+    assert "1. Rend 42." in texte and "`a.py`" in texte
+    assert "`pytest -q`" in texte and "Trop lent." in texte
+    assert "Aucun commit" in texte
+
+
+def test_lecture_de_la_sortie_de_claude_code():
+    erreur = lire_sortie_claude('{"is_error": true, "result": "Authentication error"}')
+    assert not erreur.ok and "Authentication" in erreur.erreur
+    succes = lire_sortie_claude(
+        '{"is_error": false, "result": "fait", "total_cost_usd": 0.12,'
+        ' "usage": {"input_tokens": 100, "output_tokens": 50}}'
+    )
+    assert succes.ok and succes.cout_usd == 0.12 and succes.tokens == 150
+    assert not lire_sortie_claude("pas du json").ok
+
+
+def test_avec_un_vrai_depot_git_le_travail_verifie_est_fusionne_et_le_reste_jete(tmp_path):
+    def git(*arguments):
+        subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Essai")
+    git("config", "user.email", "essai@example.invalid")
+    (tmp_path / "LISEZMOI.md").write_text("socle\n", "utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "socle")
+
+    c = chantier([tache("A"), tache("B"), tache("C", depend_de=["A"])])
+    agent = AgentSimule({"B": ["deborde", "ok"]}, perimetres={t.id: t.perimetre for t in c.taches})
+    controles = ControlesGit(tmp_path, commandes=["test -f LISEZMOI.md"])
+    Moteur(c, agent, controles).executer()
+
+    assert c.termine
+    assert sorted(p.name for p in tmp_path.glob("*.py")) == ["a.py", "b.py", "c.py"]
+    assert not (tmp_path / "hors_perimetre.txt").exists()
+    historique = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    for identifiant in "ABC":
+        assert f"{identifiant} : Tâche {identifiant}" in historique
+    etat = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=tmp_path, capture_output=True, text=True
+    ).stdout
+    assert etat.strip() == ""
+
+
+def test_la_conversation_propose_un_plan_puis_le_chantier_se_deroule(tmp_path):
+    from atelier.serveur import Atelier
+
+    plan = {"taches": [{"id": "A", "titre": "Un", "type": "mecanique", "perimetre": ["a.py"]}]}
+    vide = Chantier(projet="essai", contrat=Contrat(objectif=""))
+    atelier = Atelier(tmp_path, vide, AgentSimule(plan=plan), ControlesSimules(), {})
+    assert atelier.vue()["point_d_etape"].startswith("Aucun chantier")
+
+    atelier.message("Construis un.")
+    atelier.fil_message.join()
+    vue = atelier.vue()
+    assert [t["id"] for t in vue["taches"]] == ["A"]
+    assert vue["contrat"]["objectif"] == "Construis un." and not vue["contrat"]["valide"]
+    assert [e["auteur"] for e in vue["evenements"]] == [
+        "orchestrateur",
+        "toi",
+        "orchestrateur",
+        "moteur",
+    ]
+    assert "atelier-plan" not in vue["evenements"][2]["texte"]
+    assert not vue["occupe"] and vue["brouillon"]["texte"] == ""
+
+    atelier.valider_contrat()
+    atelier.fil.join()
+    assert atelier.vue()["taches"][0]["etat"] == "verifie"
+
+    atelier.message("Merci.")
+    atelier.fil_message.join()
+    dernier = atelier.vue()["evenements"][-1]
+    assert dernier["auteur"] == "orchestrateur" and "noté" in dernier["texte"]
+    assert (tmp_path / "chantier" / "CAHIER.md").exists()
+    appels = [a for a in atelier.moteur.agent.appels if a.get("role") == "conversation"]
+    assert [a["reprise"] for a in appels] == [False, True]
+    assert appels[0]["session"] == appels[1]["session"]
+
+
+def test_le_flux_de_claude_code_est_relaye_au_fil_de_l_eau():
+    import json
+
+    from atelier.agents import lire_flux_claude
+
+    def ligne(**champs):
+        return json.dumps(champs)
+
+    outil = {"type": "tool_use", "name": "Read", "input": {"file_path": "coeur/calcul.py"}}
+    flux = [
+        ligne(type="system", subtype="init"),
+        "ligne illisible",
+        ligne(type="assistant", message={"content": [outil]}),
+        ligne(type="stream_event", event={"delta": {"type": "text_delta", "text": "Bon"}}),
+        ligne(type="stream_event", event={"delta": {"type": "text_delta", "text": "jour"}}),
+        ligne(
+            type="result",
+            is_error=False,
+            result="Bonjour",
+            total_cost_usd=0.5,
+            usage={"input_tokens": 10, "output_tokens": 5},
+        ),
+    ]
+    textes, outils = [], []
+    resultat = lire_flux_claude(flux, textes.append, outils.append)
+    assert resultat.ok and resultat.texte == "Bonjour" and resultat.tokens == 15
+    assert textes == ["Bon", "jour"] and outils == ["Lit coeur/calcul.py"]
+    assert not lire_flux_claude(flux[:-1]).ok
+    erreur = lire_flux_claude([ligne(type="result", is_error=True, result="Non connecté.")])
+    assert not erreur.ok and "Non connecté" in erreur.erreur
+
+
+def test_un_plan_se_lit_meme_avec_des_objets_imbriques_et_des_champs_inconnus():
+    from atelier.consignes import extraire_plan
+    from atelier.moteur import taches_du_plan
+
+    reponse = (
+        'Voici {le plan}.\n```atelier-plan\n{"objectif": "But", "taches": ['
+        '{"id": "A", "titre": "Un", "type": "physique", "inconnu": 1}, {"titre": "sans id"},'
+        ' {"id": "B", "titre": "Deux", "type": "bizarre", "depend_de": ["A"]}]}\n```'
+    )
+    texte, plan = extraire_plan(reponse)
+    assert texte == "Voici {le plan}." and plan["objectif"] == "But"
+    taches = taches_du_plan(plan, {})
+    assert [(t.id, t.type) for t in taches] == [("A", "physique"), ("B", "courante")]
+    assert (taches[0].modele, taches[0].effort) == ("fable", "max")
+    assert extraire_plan("Juste une réponse.") == ("Juste une réponse.", None)
