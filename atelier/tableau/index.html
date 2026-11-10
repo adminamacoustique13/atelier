@@ -9,17 +9,23 @@
    Turquoise = réussite, orange = tu es attendue. Boutons principaux en neutre plein. */
 :root {
   color-scheme: dark;
-  --fond: #2b2c2f;
-  --scene: radial-gradient(1000px 680px at 88% -12%, rgba(255, 255, 255, 0.17), transparent 60%),
-    radial-gradient(900px 640px at 2% 112%, rgba(255, 255, 255, 0.1), transparent 60%),
-    radial-gradient(640px 440px at 46% 52%, rgba(0, 0, 0, 0.28), transparent 70%),
-    linear-gradient(160deg, #4b4c4f, #222325);
-  --verre: rgba(255, 255, 255, 0.085); --verre-fort: rgba(255, 255, 255, 0.16); --creux: rgba(0, 0, 0, 0.2);
-  --bord: rgba(255, 255, 255, 0.14); --reflet: rgba(255, 255, 255, 0.13); --trait: rgba(255, 255, 255, 0.1);
-  --texte: #f3f4f5; --discret: #bcc0c4; --faible: #9aa0a5;
-  --reussite: #62e2d4; --refus: #ff965c; --plein: #f4f5f6; --sur-plein: #1a1b1d;
-  --ombre: 0 18px 44px -26px rgba(0, 0, 0, 0.75);
-  --rayon: 18px; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  /* Une pièce floue derrière (fenêtre, lampe, meubles sombres), une grande plaque de verre fumé
+     par-dessus, et des cartes à peine plus claires posées sur la plaque. */
+  --fond: #5a595e;
+  --scene: radial-gradient(40% 46% at 52% 110%, rgba(255, 220, 182, 0.5), transparent 70%),
+    radial-gradient(32% 42% at 20% -8%, rgba(255, 255, 255, 0.4), transparent 70%),
+    radial-gradient(26% 62% at 104% 42%, rgba(16, 16, 18, 0.85), transparent 72%),
+    radial-gradient(30% 46% at -5% 80%, rgba(14, 14, 16, 0.88), transparent 72%),
+    radial-gradient(22% 30% at 78% 4%, rgba(200, 212, 235, 0.32), transparent 70%),
+    linear-gradient(170deg, #7e7c81, #57565b 55%, #46454a);
+  --plaque: rgba(58, 58, 64, 0.36);
+  --verre: linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.055));
+  --verre-fort: rgba(255, 255, 255, 0.17); --creux: rgba(0, 0, 0, 0.14);
+  --bord: rgba(255, 255, 255, 0.12); --reflet: rgba(255, 255, 255, 0.2); --trait: rgba(255, 255, 255, 0.12);
+  --texte: #ffffff; --discret: rgba(255, 255, 255, 0.8); --faible: rgba(255, 255, 255, 0.66);
+  --reussite: #72ebdc; --refus: #ffa76e; --plein: #ffffff; --sur-plein: #2a2a2e;
+  --ombre: 0 14px 34px -22px rgba(0, 0, 0, 0.5);
+  --rayon: 22px; --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
@@ -30,37 +36,38 @@ body {
   background: var(--scene), var(--fond); background-attachment: fixed;
 }
 h1, h2, h3, p, ol, ul { margin: 0; }
-.app { height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 10px; min-width: 0; }
-
-/* Le verre */
-.pilule, .carte, .rail, .fiche, .toile, .boite, .carte-fil, .msg.toi {
-  background: var(--verre); border: 1px solid var(--bord);
-  box-shadow: inset 0 1px 0 var(--reflet), var(--ombre);
-  -webkit-backdrop-filter: blur(26px) saturate(150%); backdrop-filter: blur(26px) saturate(150%);
-}
-@media (prefers-reduced-transparency: reduce) {
-  .pilule, .carte, .rail, .fiche, .toile, .boite, .carte-fil, .msg.toi { background: var(--fond); -webkit-backdrop-filter: none; backdrop-filter: none; }
+.app {
+  height: calc(100% - 24px); margin: 12px; display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 14px; min-width: 0;
+  border-radius: 30px; background: var(--plaque); border: 1px solid var(--bord);
+  box-shadow: inset 0 1px 0 var(--reflet), 0 30px 80px -40px rgba(0, 0, 0, 0.7);
+  -webkit-backdrop-filter: blur(30px) saturate(125%); backdrop-filter: blur(30px) saturate(125%);
 }
 
-/* Barre du haut : pilules flottantes */
-.tete { flex: none; display: flex; align-items: center; gap: 8px; min-height: 36px; overflow-x: auto; white-space: nowrap; }
-.pilule { flex: none; height: 36px; display: flex; align-items: center; gap: 10px; padding: 0 14px; border-radius: 999px; }
+/* Le verre : les cartes sont translucides, c'est la plaque qui floute la pièce */
+.carte, .rail, .fiche, .toile, .boite, .carte-fil, .msg.toi, .infos {
+  background: var(--verre); border: 1px solid var(--bord); border-top-color: var(--reflet); box-shadow: var(--ombre);
+}
+@media (prefers-reduced-transparency: reduce) { .app { background: var(--fond); -webkit-backdrop-filter: none; backdrop-filter: none; } }
+
+/* Barre du haut : le nom, les onglets en texte souligné, les compteurs */
+.tete { flex: none; display: flex; align-items: center; gap: 18px; min-height: 40px; padding: 0 6px; overflow-x: auto; white-space: nowrap; }
+.pilule { flex: none; display: flex; align-items: center; gap: 10px; }
 .logo { width: 14px; height: 14px; border-radius: 5px; background: var(--plein); position: relative; }
 .logo::after { content: ""; position: absolute; inset: 4px; border-radius: 2px; background: var(--sur-plein); }
-.marque b { font-size: 13.5px; font-weight: 600; letter-spacing: 0.01em; }
-.nom-projet { color: var(--discret); padding-left: 10px; border-left: 1px solid var(--trait); }
-.onglets { padding: 0 3px; gap: 2px; }
+.marque b { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+.nom-projet { color: var(--faible); padding-left: 10px; border-left: 1px solid var(--trait); }
+.onglets { gap: 24px; margin-left: 14px; align-self: stretch; }
 .onglets a {
-  display: flex; align-items: center; gap: 7px; height: 28px; padding: 0 13px; border-radius: 999px;
-  color: var(--discret); text-decoration: none; font-size: 12.5px; font-weight: 500;
+  display: flex; align-items: center; gap: 7px; height: 40px; color: var(--faible); text-decoration: none;
+  font-size: 15px; font-weight: 400; border-bottom: 2px solid transparent;
 }
 .onglets a:hover { color: var(--texte); }
-.onglets a[aria-current="page"] { color: var(--texte); background: var(--verre-fort); box-shadow: inset 0 1px 0 var(--reflet); }
+.onglets a[aria-current="page"] { color: var(--texte); border-bottom-color: var(--texte); }
 .cpt { font-family: var(--mono); font-size: 10.5px; color: var(--faible); }
 .pt { width: 6px; height: 6px; border-radius: 50%; background: var(--refus); display: none; }
 .pt.allume { display: block; }
 .pousse { flex-grow: 1; }
-.infos { font-size: 11.5px; color: var(--discret); gap: 14px; }
+.infos { height: 32px; padding: 0 14px; border-radius: 999px; font-size: 11.5px; color: var(--discret); gap: 14px; }
 .infos span:empty { display: none; }
 .infos[hidden] { display: none; }
 
@@ -76,7 +83,6 @@ button {
   height: 28px; padding: 0 13px; border-radius: 999px; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
   background: var(--verre); color: var(--texte); border: 1px solid var(--bord); white-space: nowrap;
 }
-button.pilule { height: 36px; font-size: 12px; color: var(--discret); }
 button.principal { background: var(--plein); color: var(--sur-plein); border-color: transparent; font-weight: 600; }
 button:hover:not(:disabled) { filter: brightness(1.1); }
 button:disabled { opacity: 0.4; cursor: default; }
@@ -89,7 +95,7 @@ button:focus-visible, a:focus-visible, .noeud:focus-visible { outline: 2px solid
 .fil { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 16px 16px 8px; }
 .colonne { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
 .msg { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.msg.toi { align-self: flex-end; max-width: 80%; padding: 8px 13px; border-radius: 16px 16px 4px 16px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg.toi { align-self: flex-end; max-width: 80%; padding: 8px 14px; border-radius: 18px 18px 5px 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .qui { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--faible); }
 .qui::before { content: ""; width: 7px; height: 7px; border-radius: 2px; border: 1px solid var(--reussite); }
 .qui b { font-weight: 500; color: var(--discret); }
@@ -259,6 +265,8 @@ td.droite, th.droite { text-align: right; }
   .fiche { flex: none; }
   .infos { display: none; }
   .fil, .saisie { padding-left: 4px; padding-right: 4px; }
+  .app { margin: 6px; height: calc(100% - 12px); padding: 8px 10px 10px; border-radius: 22px; }
+  .onglets { gap: 16px; margin-left: 4px; } .nom-projet { display: none; }
 }
 </style>
 </head>
