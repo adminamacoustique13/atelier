@@ -40,6 +40,12 @@ Un fichier `chantier/profil.json` dans chaque dépôt :
 - `commandes_permises` : les seules commandes qu'un agent a le droit de lancer.
 - `dosage` (facultatif) : remplace la table de départ, par exemple `{"mecanique": ["sonnet", "low"]}`.
 
+## Plusieurs projets
+
+Le bouton « Nouveau projet », en haut, crée un projet depuis le tableau de bord : un dossier à son nom, avec son dépôt git et son profil, puis une conversation vide avec l'orchestrateur. La liste à côté du nom permet de passer d'un projet à l'autre ; un chantier lancé continue de tourner quand on regarde un autre projet.
+
+Les nouveaux dossiers sont créés à côté du dépôt servi (dans son dossier parent), ou dans le dossier donné par `--racine`. Au démarrage, l'atelier y retrouve les projets qui ont déjà un chantier.
+
 ## Les trois onglets
 
 - **Conversation** : tu écris à l'orchestrateur. C'est une session Claude Code (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.
@@ -56,7 +62,7 @@ Un fichier `chantier/profil.json` dans chaque dépôt :
 
 ## Ce qui est testé et ce qui ne l'est pas
 
-Testé (28 tests, `python3 -m pytest -q`) : la lecture du flux de Claude Code, la reprise de session, la lecture du plan, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
+Testé (30 tests, `python3 -m pytest -q`) : la lecture du flux de Claude Code, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
 
 Pas encore essayé avec de vrais agents : l'appel à Claude Code (`atelier/agents.py`, classe `AgentClaude`) est écrit d'après ses options réelles, mais n'a jamais tourné connecté. Même chose pour la session de la conversation (`converser`) : Claude Code accepte la ligne de commande, mais aucune vraie réponse n'a encore été reçue. C'est le premier essai à faire sur ta machine, sur un dépôt sans importance.
 

@@ -26,6 +26,10 @@ ZONES_ROUGES = [
 ]
 
 
+class ProjetImpossible(Exception):
+    """Un projet n'a pas pu être créé ou ouvert ; le message dit pourquoi, en clair."""
+
+
 @dataclass
 class Tache:
     """Une tâche du cahier des charges, avec son dosage et son histoire."""

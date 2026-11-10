@@ -287,3 +287,56 @@ def test_un_plan_se_lit_meme_avec_des_objets_imbriques_et_des_champs_inconnus():
     assert [(t.id, t.type) for t in taches] == [("A", "physique"), ("B", "courante")]
     assert (taches[0].modele, taches[0].effort) == ("fable", "max")
     assert extraire_plan("Juste une réponse.") == ("Juste une réponse.", None)
+
+
+def test_on_cree_un_projet_puis_on_revient_au_premier(tmp_path):
+    import pytest
+
+    from atelier.modele import ProjetImpossible
+    from atelier.projets import Projets
+    from atelier.serveur import Atelier
+
+    def simule(dossier, nom):
+        dossier.mkdir(parents=True)
+        vide = Chantier(projet=nom, contrat=Contrat(objectif=""))
+        return Atelier(dossier, vide, AgentSimule(), ControlesSimules(), {})
+
+    projets = Projets(tmp_path, simule)
+    projets.ajouter(simule(tmp_path / "premier", "Premier"))
+    assert projets.creer("  Étude  d'été n°2 ") == "etude-d-ete-n2"
+    vue = projets.vue()
+    assert vue["projet"] == "Étude d'été n°2" and vue["racine"] == str(tmp_path)
+    assert [(p["id"], p["courant"]) for p in vue["projets"]] == [
+        ("premier", False),
+        ("etude-d-ete-n2", True),
+    ]
+    assert (tmp_path / "etude-d-ete-n2" / ".atelier" / "etat.json").exists()
+    for refuse in ("Étude d'été n°2", "premier", "  ", "!!!"):
+        with pytest.raises(ProjetImpossible):
+            projets.creer(refuse)
+    projets.ouvrir("premier")
+    assert projets.vue()["projet"] == "Premier"
+    with pytest.raises(ProjetImpossible):
+        projets.ouvrir("inconnu")
+
+
+def test_un_vrai_projet_nait_avec_son_depot_git_et_son_profil(tmp_path):
+    import subprocess
+
+    from atelier.projets import Projets, creer_depot, ouvrir_depot
+
+    projets = Projets(tmp_path, creer_depot, ouvrir_depot)
+    cle = projets.creer("Mon projet")
+    dossier = tmp_path / cle
+    journal = subprocess.run(
+        ["git", "log", "--oneline"], cwd=dossier, capture_output=True, text=True, check=True
+    )
+    assert "Création du projet" in journal.stdout
+    assert '"nom": "Mon projet"' in (dossier / "chantier" / "profil.json").read_text("utf-8")
+    assert projets.vue()["projet"] == "Mon projet" and projets.vue()["mode"] == "réel"
+
+    autres = Projets(tmp_path, creer_depot, ouvrir_depot)
+    autres.decouvrir()
+    assert [p["id"] for p in autres.liste()] == ["mon-projet"]
+    autres.ouvrir("mon-projet")
+    assert autres.vue()["projet"] == "Mon projet"

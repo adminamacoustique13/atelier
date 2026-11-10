@@ -55,7 +55,31 @@ h1, h2, h3, p, ol, ul { margin: 0; }
 .logo { width: 14px; height: 14px; border-radius: 5px; background: var(--plein); position: relative; }
 .logo::after { content: ""; position: absolute; inset: 4px; border-radius: 2px; background: var(--sur-plein); }
 .marque b { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
-.nom-projet { color: var(--faible); padding-left: 10px; border-left: 1px solid var(--trait); }
+.nom-projet {
+  appearance: none; -webkit-appearance: none; max-width: 240px; padding: 5px 20px 5px 12px; border: 0; border-left: 1px solid var(--trait);
+  border-radius: 0; background-color: transparent; color: var(--discret); font: inherit; cursor: pointer; text-overflow: ellipsis;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: calc(100% - 10px) 55%, calc(100% - 6px) 55%; background-size: 4px 4px; background-repeat: no-repeat;
+}
+.nom-projet:disabled { background-image: none; padding-right: 6px; cursor: default; opacity: 1; }
+.nom-projet option { background: #3b3b40; color: #ffffff; }
+.plus::before { content: "+"; margin-right: 6px; font-weight: 400; }
+dialog {
+  width: min(420px, calc(100vw - 32px)); padding: 20px 22px; color: var(--texte); border: 1px solid var(--bord); border-top-color: var(--reflet);
+  border-radius: 22px; background: rgba(72, 72, 78, 0.74); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.75);
+  -webkit-backdrop-filter: blur(30px); backdrop-filter: blur(30px);
+}
+dialog::backdrop { background: rgba(0, 0, 0, 0.38); }
+dialog form { display: flex; flex-direction: column; gap: 10px; }
+dialog h2 { font-size: 15px; font-weight: 600; }
+dialog .boutons { margin-top: 6px; }
+input[type="text"] {
+  height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--bord); background: var(--creux); color: var(--texte);
+  font: inherit; font-size: 13.5px; outline: 0;
+}
+input[type="text"]:focus-visible { border-color: var(--texte); }
+.alerte { color: var(--refus); }
+.alerte:empty { display: none; }
 .onglets { gap: 24px; margin-left: 14px; align-self: stretch; }
 .onglets a {
   display: flex; align-items: center; gap: 7px; height: 40px; color: var(--faible); text-decoration: none;
@@ -86,7 +110,7 @@ button {
 button.principal { background: var(--plein); color: var(--sur-plein); border-color: transparent; font-weight: 600; }
 button:hover:not(:disabled) { filter: brightness(1.1); }
 button:disabled { opacity: 0.4; cursor: default; }
-button:focus-visible, a:focus-visible, .noeud:focus-visible { outline: 2px solid var(--texte); outline-offset: 2px; }
+button:focus-visible, a:focus-visible, select:focus-visible, .noeud:focus-visible { outline: 2px solid var(--texte); outline-offset: 2px; }
 .boutons { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (pointer: coarse) { button { height: 44px; padding: 0 16px; } }
 
@@ -266,14 +290,14 @@ td.droite, th.droite { text-align: right; }
   .infos { display: none; }
   .fil, .saisie { padding-left: 4px; padding-right: 4px; }
   .app { margin: 6px; height: calc(100% - 12px); padding: 8px 10px 10px; border-radius: 22px; }
-  .onglets { gap: 16px; margin-left: 4px; } .nom-projet { display: none; }
+  .onglets { gap: 16px; margin-left: 4px; }
 }
 </style>
 </head>
 <body>
 <div class="app">
   <header class="tete">
-    <div class="pilule marque"><i class="logo" aria-hidden="true"></i><b>Atelier</b><span class="nom-projet" id="projet">Chargement</span></div>
+    <div class="pilule marque"><i class="logo" aria-hidden="true"></i><b>Atelier</b><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus" id="nouveau">Nouveau projet</button></div>
     <nav class="pilule onglets" aria-label="Onglets">
       <a href="#conversation" data-onglet="conversation">Conversation<i class="pt" id="pt-conversation" title="Quelque chose t'attend"></i></a>
       <a href="#chantier" data-onglet="chantier">Chantier<span class="cpt" id="cpt-chantier"></span></a>
@@ -328,6 +352,20 @@ td.droite, th.droite { text-align: right; }
     <aside class="fiche" id="fiche" aria-label="Détail de la tâche"></aside>
   </section>
 </div>
+
+<dialog id="creation" aria-labelledby="titre-creation">
+  <form id="form-creation" method="dialog">
+    <h2 id="titre-creation">Nouveau projet</h2>
+    <label class="etiquette" for="nom-nouveau">Nom du projet</label>
+    <input id="nom-nouveau" name="nom" type="text" maxlength="60" autocomplete="off" required>
+    <p class="petit" id="lieu-creation"></p>
+    <p class="alerte" id="erreur-creation" role="alert"></p>
+    <div class="boutons">
+      <button class="principal" type="submit" id="creer">Créer le projet</button>
+      <button type="button" id="annuler-creation">Annuler</button>
+    </div>
+  </form>
+</dialog>
 
 <script>
 const INSTANTANES = /*INSTANTANES*/[];
@@ -643,7 +681,13 @@ function afficherPlan(vue) {
 function afficher(vue) {
   derniere = vue;
   const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
-  document.getElementById("projet").textContent = vue.projet;
+  const choix = document.getElementById("projet"), liste = vue.projets || [{ id: "", nom: vue.projet, courant: true }];
+  const empreinte = liste.map((p) => `${p.id}/${p.nom}/${p.courant}`).join("|");
+  if (choix.dataset.empreinte !== empreinte) {
+    choix.innerHTML = liste.map((p) => `<option value="${propre(p.id)}"${p.courant ? " selected" : ""}>${propre(p.nom)}</option>`).join("");
+    choix.dataset.empreinte = empreinte;
+  }
+  choix.disabled = liste.length < 2;
   document.getElementById("mode").textContent = rejoue ? "Démonstration rejouée" : vue.mode === "réel" ? "" : "Démonstration";
   document.getElementById("pastille-agents").textContent = vue.taches.length ? `Agents ${vue.agents_lances} / ${c.max_agents}` : "";
   document.getElementById("pastille-cout").textContent = vue.cout_usd ? `Coût équivalent ${euros(vue.cout_usd)}` : "";
@@ -737,6 +781,37 @@ async function charger() {
     } else document.getElementById("rail-point").textContent = "Le moteur ne répond pas. Relance l'atelier.";
   }
 }
+/* Projets : passer de l'un à l'autre, en créer un nouveau. */
+async function demander(adresse, corps) {
+  const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+  return { ok: retour.ok, donnees: await retour.json() };
+}
+function changerDeProjet(vue) { signatureFil = ""; choisie = null; afficher(vue); }
+document.getElementById("projet").addEventListener("change", async (e) => {
+  const { ok, donnees } = await demander("/api/projets/ouvrir", { id: e.target.value });
+  if (ok) changerDeProjet(donnees);
+});
+const dialogue = document.getElementById("creation"), champNom = document.getElementById("nom-nouveau"), alerte = document.getElementById("erreur-creation");
+document.getElementById("nouveau").addEventListener("click", () => {
+  const reel = derniere && derniere.mode === "réel";
+  alerte.textContent = "";
+  champNom.value = "";
+  document.getElementById("creer").disabled = rejoue;
+  document.getElementById("lieu-creation").textContent = rejoue
+    ? "Démonstration rejouée : pour créer un projet, lance l'Atelier sur ton ordinateur."
+    : `Un dossier à ce nom sera créé dans ${(derniere && derniere.racine) || "le dossier des projets"}${reel ? ", avec son dépôt git" : " (démonstration, agents simulés)"}.`;
+  dialogue.showModal();
+});
+document.getElementById("annuler-creation").addEventListener("click", () => dialogue.close());
+document.getElementById("form-creation").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const { ok, donnees } = await demander("/api/projets/creer", { nom: champNom.value });
+  if (!ok) { alerte.textContent = donnees.erreur || "Le projet n'a pas pu être créé."; return; }
+  dialogue.close();
+  location.hash = "#conversation";
+  changerDeProjet(donnees);
+});
+
 async function boucle() { await charger(); setTimeout(boucle, derniere && derniere.occupe ? 400 : 1500); }
 onglet();
 boucle();

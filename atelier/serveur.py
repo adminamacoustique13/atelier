@@ -13,7 +13,7 @@ from pathlib import Path
 
 from atelier import dosage
 from atelier.consignes import BALISE_PLAN, extraire_plan, message_avec_etat
-from atelier.modele import ETATS_FR, Chantier, Contrat, ecrire_cahier
+from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire_cahier
 from atelier.moteur import Moteur, taches_du_plan
 
 PAGE = Path(__file__).parent / "tableau" / "index.html"
@@ -219,9 +219,13 @@ class Atelier:
 
 
 class Requetes(BaseHTTPRequestHandler):
-    """Répond aux demandes du tableau de bord."""
+    """Répond aux demandes du tableau de bord, pour le projet affiché."""
 
-    atelier: Atelier
+    projets = None  # les projets de l'atelier (atelier.projets.Projets)
+
+    @property
+    def atelier(self) -> Atelier:
+        return self.projets.atelier()
 
     def log_message(self, *arguments) -> None:
         return None
@@ -239,7 +243,7 @@ class Requetes(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/api/etat":
-            return self._json(self.atelier.vue())
+            return self._json(self.projets.vue())
         if self.path in ("/", "/index.html"):
             return self._repondre(200, PAGE.read_bytes(), "text/html")
         return self._json({"erreur": "Adresse inconnue."}, 404)
@@ -254,14 +258,20 @@ class Requetes(BaseHTTPRequestHandler):
                 self.atelier.decider(corps["id"], corps["choix"])
             elif self.path == "/api/message":
                 self.atelier.message(corps["texte"])
+            elif self.path == "/api/projets/creer":
+                self.projets.creer(corps["nom"])
+            elif self.path == "/api/projets/ouvrir":
+                self.projets.ouvrir(corps["id"])
             else:
                 return self._json({"erreur": "Adresse inconnue."}, 404)
+        except ProjetImpossible as erreur:
+            return self._json({"erreur": str(erreur)}, 400)
         except (KeyError, StopIteration, ValueError):
             return self._json({"erreur": "Demande introuvable ou incomplète."}, 400)
-        return self._json(self.atelier.vue())
+        return self._json(self.projets.vue())
 
 
-def creer_serveur(atelier: Atelier, port: int = 8765) -> ThreadingHTTPServer:
+def creer_serveur(projets, port: int = 8765) -> ThreadingHTTPServer:
     """Crée le serveur du tableau de bord, limité à la machine locale."""
-    gestionnaire = type("RequetesLiees", (Requetes,), {"atelier": atelier})
+    gestionnaire = type("RequetesLiees", (Requetes,), {"projets": projets})
     return ThreadingHTTPServer(("127.0.0.1", port), gestionnaire)

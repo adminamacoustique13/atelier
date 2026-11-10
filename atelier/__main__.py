@@ -9,17 +9,11 @@ import tempfile
 from pathlib import Path
 
 from atelier.agents import AgentClaude, AgentSimule
-from atelier.controles import ControlesGit, ControlesSimules
+from atelier.controles import ControlesSimules
 from atelier.modele import Chantier, Contrat
 from atelier.moteur import RELANCER, planifier
+from atelier.projets import Projets, creer_depot, lire_profil, ouvrir_depot
 from atelier.serveur import PAGE, Atelier, creer_serveur
-
-
-def lire_profil(depot: Path) -> dict:
-    """Lit le profil du projet, ou rend un profil vide."""
-    chemin = depot / "chantier" / "profil.json"
-    return json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
-
 
 OBJECTIF_DEMO = "Moteur de calcul : formules de la norme, validées sur les cas de référence."
 
@@ -72,18 +66,26 @@ def plan_de_demonstration() -> tuple[dict, dict]:
     return plan, scenario
 
 
-def atelier_de_demonstration(delai_s: float) -> Atelier:
-    """Monte un atelier complet sur un dossier temporaire, avec des agents simulés."""
-    depot = Path(tempfile.mkdtemp(prefix="atelier-demo-"))
+def projet_simule(dossier: Path, nom: str, delai_s: float) -> Atelier:
+    """Monte un projet de démonstration : un dossier vide et des agents simulés."""
+    dossier.mkdir(parents=True, exist_ok=True)
     plan, scenario = plan_de_demonstration()
-    chantier = Chantier(projet="Projet de démonstration", contrat=Contrat(objectif=""))
+    chantier = Chantier(projet=nom, contrat=Contrat(objectif=""))
     agent = AgentSimule(scenario, delai_s, plan=plan)
-    return Atelier(depot, chantier, agent, ControlesSimules(), {}, mode="démonstration")
+    return Atelier(dossier, chantier, agent, ControlesSimules(), {}, mode="démonstration")
+
+
+def atelier_de_demonstration(delai_s: float) -> Atelier:
+    """Monte le projet de démonstration sur un dossier temporaire."""
+    racine = Path(tempfile.mkdtemp(prefix="atelier-demo-"))
+    return projet_simule(racine / "demonstration", "Projet de démonstration", delai_s)
 
 
 def commande_demo(arguments) -> None:
-    atelier = atelier_de_demonstration(arguments.delai)
-    serveur = creer_serveur(atelier, arguments.port)
+    premier = atelier_de_demonstration(arguments.delai)
+    projets = Projets(premier.depot.parent, lambda d, n: projet_simule(d, n, arguments.delai))
+    projets.ajouter(premier)
+    serveur = creer_serveur(projets, arguments.port)
     print(f"Tableau de bord de démonstration : http://127.0.0.1:{arguments.port}")
     serveur.serve_forever()
 
@@ -105,16 +107,13 @@ def commande_planifier(arguments) -> None:
 
 def commande_servir(arguments) -> None:
     depot = Path(arguments.depot).resolve()
-    profil = lire_profil(depot)
-    etat = depot / ".atelier" / "etat.json"
-    if etat.exists():
-        chantier = Chantier.charger(etat)
-    else:
-        chantier = Chantier(projet=profil.get("nom", depot.name), contrat=Contrat(objectif=""))
-    controles = ControlesGit(depot, profil.get("commandes", []))
-    atelier = Atelier(depot, chantier, AgentClaude(profil), controles, profil)
-    serveur = creer_serveur(atelier, arguments.port)
+    racine = Path(arguments.racine).resolve() if arguments.racine else depot.parent
+    projets = Projets(racine, creer_depot, ouvrir_depot)
+    projets.ajouter(ouvrir_depot(depot))
+    projets.decouvrir()
+    serveur = creer_serveur(projets, arguments.port)
     print(f"Tableau de bord : http://127.0.0.1:{arguments.port}")
+    print(f"Les nouveaux projets seront créés dans : {racine}")
     serveur.serve_forever()
 
 
@@ -156,6 +155,8 @@ def main() -> None:
     servir = commandes.add_parser("servir", help="Tableau de bord et moteur sur un vrai dépôt.")
     servir.add_argument("--depot", default=".")
     servir.add_argument("--port", type=int, default=8765)
+    aide = "Dossier où créer les nouveaux projets (par défaut : le parent du dépôt)."
+    servir.add_argument("--racine", help=aide)
     servir.set_defaults(action=commande_servir)
 
     instantanes = commandes.add_parser("instantanes", help="Page autonome de démonstration.")
