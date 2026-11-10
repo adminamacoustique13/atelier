@@ -83,7 +83,7 @@ class Atelier:
         self.sur_vue = None
         self.moteur = Moteur(chantier, agent, controles, profil, sur_changement=self._sauver)
         if not chantier.taches and not chantier.evenements:
-            accueil = "Bonjour Dis-moi ce que tu veux construire, je te proposerai un découpage."
+            accueil = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
             chantier.noter(accueil, auteur="orchestrateur")
         self._sauver()
 

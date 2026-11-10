@@ -257,12 +257,12 @@ class AgentSimule:
         if self.plan and not contexte.get("chantier"):
             nombre = len(self.plan.get("taches", []))
             texte = (
-                f"Voilà J'ai découpé ton objectif en {nombre} tâches. Relis le contrat et "
+                f"J'ai découpé ton objectif en {nombre} tâches. Relis le contrat et "
                 "l'onglet Plan, puis valide quand ça te convient : rien ne démarre avant.\n\n"
                 f"{BALISE_PLAN}\n{json.dumps(self.plan, ensure_ascii=False)}\n```"
             )
         else:
-            texte = "C'est noté (Réponse simulée : en vrai, Claude Code te répond ici.)"
+            texte = "C'est noté. (Réponse simulée : en vrai, Claude Code te répond ici.)"
         for mot in texte.split(" "):
             time.sleep(min(self.delai_s, 1.0) / 25)
             if sur_texte:
