@@ -178,10 +178,10 @@ launchctl bootstrap "gui/$(id -u)" "${PLIST}"
 dire "Démarrage de l'Atelier…"
 # Le premier démarrage peut prendre un peu de temps : uv prépare Python.
 for _ in $(seq 1 120); do
-  curl -fs "${ADRESSE}/api/etat" >/dev/null 2>&1 && break
+  curl -fs --max-time 2 "${ADRESSE}/api/etat" >/dev/null 2>&1 && break
   sleep 0.5
 done
-if ! curl -fs "${ADRESSE}/api/etat" >/dev/null 2>&1; then
+if ! curl -fs --max-time 2 "${ADRESSE}/api/etat" >/dev/null 2>&1; then
   printf '
 Voici la fin du journal (%s) :
 
