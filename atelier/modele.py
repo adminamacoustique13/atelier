@@ -21,7 +21,8 @@ ZONES_ROUGES = [
     "Supprimer des fichiers ou réécrire l'historique git",
     "Déployer ou pousser en production",
     "Toucher aux secrets",
-    "Installer une dépendance ou un plugin nouveau",
+    "Ajouter au produit une bibliothèque dont la licence n'est pas permissive "
+    "ou qui envoie des données à l'extérieur",
     "Modifier les tests de référence ou les garde-fous eux-mêmes",
 ]
 

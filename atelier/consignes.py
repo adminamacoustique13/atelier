@@ -55,6 +55,12 @@ après vérification.
 - Les zones rouges :
 {zones}
 
+## Outils
+Tu peux installer librement un outil de travail (test, contrôle de forme, lecture de \
+documents), depuis une source officielle (pip, npm, crates.io, le dépôt de l'éditeur). \
+Jamais de script téléchargé depuis un site inconnu exécuté directement. Signale dans ton \
+compte rendu chaque outil installé et chaque bibliothèque ajoutée au produit, avec sa licence.
+
 ## À rendre
 Termine par un compte rendu en cinq rubriques courtes : Fait (critère par critère), \
 Fichiers touchés, Contrats modifiés, Reste à faire, Doutes et demandes.
