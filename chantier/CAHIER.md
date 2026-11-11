@@ -4,7 +4,7 @@
 
 ## Suivi
 
-Enveloppe : 24 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 7 lancements prévus au minimum (les vérifications de D2 et de I, puis D3 et G à deux agents chacune, la vérification de E étant en cours), plus la simplification de clôture.
+Enveloppe : 27 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 7 lancements prévus au minimum (les vérifications de E, de D2 et de I, puis D3 et G à deux agents chacune), plus la simplification de clôture : la marge est à zéro.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
@@ -16,7 +16,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
 | D2 | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
-| E | en vérification | Sonnet, effort moyen | Opus, effort moyen | 1 | 430 tests verts, `bash -n` et `shellcheck` sans avertissement, périmètre respecté |
+| E | en cours (troisième passe) | Sonnet, effort moyen | Opus, effort moyen | 3 | Script, ménage et LISEZMOI validés dès la première vérification |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | I | en cours | Sonnet, effort élevé | Opus, effort élevé | 1 | |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
@@ -52,6 +52,14 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Constat à dire à la personne responsable dans le bilan : chaque « Relancer » ajoute deux agents à l'enveloppe du chantier servi, même après un arrêt avant le départ, où aucun agent n'a été lancé. La règle existait avant ce chantier.
 - Transmis à D2 : la rubrique 3 de la fiche de relais D1.
 - À transmettre à F : la reprise de la conversation après une première réponse arrêtée.
+
+### Historique de la tâche E
+- Première vérification : recalé. Le script d'installation, le ménage de l'ancien câblage et l'essentiel du LISEZMOI sont validés. Quatre défauts, tous sur ce qu'Atelier dit de la facturation : une phrase de départ qui annonçait « abonnement » sans le savoir ; une contradiction non relevée quand le SDK annonçait ensuite une clé ; un conseil (« retire la variable de ton environnement ») qui ne marche pas sous l'agent de lancement de macOS ; le câblage de `servir` non testé. Trou de la consigne : « un test du message avec les deux sources » se satisfaisait au niveau de la fonction.
+- Seconde chance (même ouvrier, même niveau) : les quatre défauts sont levés ; `uv.lock` entre dans le dépôt et fixe `claude-agent-sdk` 0.2.172 ; l'annonce n'est écrite que si elle change.
+- Seconde vérification : recalé pour deux défauts simples. Le dédoublonnage, ajouté à la demande de l'orchestrateur, pouvait écarter une confirmation promise par la phrase de départ ; un test de la démonstration ne cherchait pas la bonne phrase.
+- Troisième passe, courte et bornée, au même niveau : le premier défaut vient d'une demande ajoutée par l'orchestrateur à la seconde passe, pas d'une incapacité de l'ouvrier. Pas de montée en gamme.
+- À transmettre à F : la liste « À essayer en vrai » de la fiche de relais E.
+- Reste mineur, à reprendre à la clôture : `outils/desinstaller-mac.sh` ne retire pas le dossier `.venv` (le LISEZMOI le dit).
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
