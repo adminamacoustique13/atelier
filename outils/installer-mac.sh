@@ -2,7 +2,8 @@
 # Installe l'Atelier sur un Mac : il démarre tout seul à l'ouverture de session, en arrière-plan,
 # et se consulte dans une fenêtre d'appli ajoutée au Dock depuis Safari.
 #
-# À lancer depuis le dossier du dépôt cloné :   ./outils/installer-mac.sh
+# Dans le Terminal :   bash installer-mac.sh   (depuis le dossier où se trouve ce fichier)
+# Lancé seul, il télécharge l'Atelier dans ~/Atelier-appli ; lancé depuis le dépôt, il l'utilise.
 # Pour tout retirer ensuite :                   ./outils/desinstaller-mac.sh
 #
 # Rien n'est installé hors de ton dossier personnel, à part uv si tu ne l'as pas déjà.
@@ -24,6 +25,22 @@ xml() { sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' <<<"$1"; }
 
 if [ -z "$ESSAI" ] && [ "$(uname)" != "Darwin" ]; then
   arreter "ce script est fait pour macOS."
+fi
+
+# 0. Lancé seul (par exemple depuis Téléchargements) : on récupère d'abord l'Atelier, puis on
+#    relance la copie qui se trouve dans le dépôt. Un dépôt déjà présent est simplement mis à jour.
+if [ ! -f "$DEPOT/atelier/__main__.py" ]; then
+  DESTINATION="${ATELIER_DOSSIER:-$HOME/Atelier-appli}"
+  command -v git >/dev/null || arreter "git est introuvable. Installe les outils de développement d'Apple (xcode-select --install)."
+  if [ -d "$DESTINATION/.git" ]; then
+    dire "Mise à jour de l'Atelier dans $DESTINATION…"
+    git -C "$DESTINATION" pull --ff-only --quiet || arreter "la mise à jour de $DESTINATION a échoué."
+  else
+    dire "Téléchargement de l'Atelier dans $DESTINATION…"
+    git clone --quiet https://github.com/adminamacoustique13/atelier.git "$DESTINATION" \
+      || arreter "le téléchargement de l'Atelier a échoué."
+  fi
+  exec bash "$DESTINATION/outils/installer-mac.sh" "$@"
 fi
 
 # 1. Claude Code doit être installé : c'est lui qui fait travailler les agents.
