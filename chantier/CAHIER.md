@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C et H sont vérifiées, D1 est en cours.
+État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C, H et D1 sont vérifiées, D2 et E sont lancées en parallèle.
 
 ## Suivi
 
-Enveloppe : 17 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 9 lancements prévus au minimum (la vérification de D1, puis D2, D3, E et G à deux agents chacune), plus la simplification de clôture.
+Enveloppe : 22 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 6 lancements prévus au minimum (les vérifications de D2 et de E, puis D3 et G à deux agents chacune), plus la simplification de clôture.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
@@ -13,10 +13,10 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | A | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 71 tests du pont verts, dont deux avec le vrai client du SDK sur un faux exécutable ; deux vérifications, 800 courses sans blocage |
 | B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
 | C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
-| D1 | en cours | Sonnet, effort élevé | Opus, effort élevé | 1 | |
-| D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
+| D2 | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
-| E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| E | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
@@ -42,6 +42,15 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Transmis à D1 : la liste « À savoir pour la tâche D1 » de la fiche de relais C.
 - À transmettre à F : la liste « À essayer en vrai » de la fiche de relais C.
 - Limite connue, à dire dans le bilan : « sans outil d'écriture » veut dire sans les outils Edit, Write, MultiEdit et NotebookEdit. Le vérificateur garde, comme avant le chantier, les commandes permises du projet, dont certaines écrivent sur le disque.
+
+### Historique de la tâche D1
+- Première vérification : recalé pour un seul défaut. Les six critères sont remplis, les garde-fous du moteur sont intacts, les routes tiennent face aux requêtes mal formées, la règle d'un « toujours » vient toujours du guichet. Défaut : un arrêt tombant juste avant le départ d'un agent était noté, mais l'agent partait quand même et travaillait jusqu'au bout. Trou de la consigne : « rendue quel que soit le moment » garantissait l'issue, pas l'arrêt effectif de l'agent.
+- Seconde chance (même ouvrier, même niveau) : le drapeau est relu juste avant chaque lancement d'agent ; un arrêt demandé avant la décision d'enregistrer l'emporte toujours, un arrêt demandé après est refusé avec une phrase claire ; chaque « toujours » laisse une phrase au fil.
+- Seconde vérification : validé. Le redécoupage de deux fonctions du moteur est un simple déplacement de code (aucun écart sur 36 parties, plus 20 parties de cinq tâches en parallèle). Le « dernier mot sous verrou » ne peut pas créer d'interblocage.
+- Restes mineurs, à reprendre à la clôture : les notes « Ouvrier lancé » et « Vérificateur lancé » sont écrites même quand l'agent ne part pas ; deux relectures du drapeau sont devenues redondantes.
+- Constat à dire à la personne responsable dans le bilan : chaque « Relancer » ajoute deux agents à l'enveloppe du chantier servi, même après un arrêt avant le départ, où aucun agent n'a été lancé. La règle existait avant ce chantier.
+- Transmis à D2 : la rubrique 3 de la fiche de relais D1.
+- À transmettre à F : la reprise de la conversation après une première réponse arrêtée.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
