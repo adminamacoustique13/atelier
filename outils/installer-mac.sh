@@ -63,14 +63,45 @@ fi
 
 # 3. Le dossier où l'Atelier rangera les projets.
 DEFAUT="${HOME}/Atelier"
-RACINE="${ATELIER_RACINE:-}"
-if [ -z "${RACINE}" ]; then
+
+# Un chemin glissé depuis le Finder arrive avec des « \ » devant les espaces et un espace final.
+nettoyer() {
+  local c
+  c="$(printf '%s' "$1" | sed -e 's/\\\(.\)/\1/g')"
+  c="${c#"${c%%[![:space:]]*}"}"
+  c="${c%"${c##*[![:space:]]}"}"
+  case "${c}" in
+    \"*\" | \'*\') c="${c:1:${#c}-2}" ;;
+  esac
+  c="${c/#\~/${HOME}}"
+  printf '%s' "${c}"
+}
+
+# Les dossiers que macOS protège (un programme lancé en arrière-plan n'a pas le droit d'y lire)
+# et ceux qu'un service de synchronisation surveille ne conviennent pas.
+probleme_de() {
+  case "$1/" in
+    "${HOME}/Documents/"* | "${HOME}/Desktop/"* | "${HOME}/Downloads/"*)
+      echo "macOS interdit à un programme lancé en arrière-plan de lire Documents, Bureau et Téléchargements." ;;
+    "${HOME}/Library/Mobile Documents/"* | "${HOME}/Library/CloudStorage/"* | *Dropbox* | *kDrive*)
+      echo "ce dossier est synchronisé, et la synchronisation abîme les dépôts git." ;;
+  esac
+}
+
+RACINE="$(nettoyer "${ATELIER_RACINE:-}")"
+while [ -z "${ATELIER_RACINE:-}" ]; do
   printf '\nDans quel dossier l'"'"'Atelier doit-il ranger tes projets ?\n'
-  printf 'Évite Dropbox, kDrive ou iCloud : la synchronisation abîme les dépôts git.\n'
-  read -r -p "Dossier [${DEFAUT}] : " RACINE </dev/tty || true
-fi
+  printf 'Tape son chemin, glisse-le ici depuis le Finder, ou appuie sur Entrée pour garder le choix proposé.\n'
+  printf 'À éviter : Documents, Bureau, Téléchargements, iCloud, Dropbox et kDrive.\n'
+  REPONSE=""
+  read -r -p "Dossier [${DEFAUT}] : " REPONSE </dev/tty || true
+  RACINE="$(nettoyer "${REPONSE}")"
+  RACINE="${RACINE:-${DEFAUT}}"
+  PROBLEME="$(probleme_de "${RACINE}")"
+  [ -z "${PROBLEME}" ] && break
+  printf '\nCe dossier ne convient pas : %s\nChoisis-en un autre, par exemple %s.\n' "${PROBLEME}" "${DEFAUT}"
+done
 RACINE="${RACINE:-${DEFAUT}}"
-RACINE="${RACINE/#\~/${HOME}}"
 mkdir -p "${RACINE}"
 RACINE="$(cd "${RACINE}" && pwd)"
 
@@ -145,12 +176,20 @@ launchctl bootstrap "gui/$(id -u)" "${PLIST}"
 
 # 6. Attendre que le tableau de bord réponde, puis l'ouvrir dans Safari.
 dire "Démarrage de l'Atelier…"
-for _ in $(seq 1 60); do
+# Le premier démarrage peut prendre un peu de temps : uv prépare Python.
+for _ in $(seq 1 120); do
   curl -fs "${ADRESSE}/api/etat" >/dev/null 2>&1 && break
   sleep 0.5
 done
-curl -fs "${ADRESSE}/api/etat" >/dev/null 2>&1 \
-  || arreter "l'Atelier ne répond pas. Le journal est ici : ${JOURNAL}"
+if ! curl -fs "${ADRESSE}/api/etat" >/dev/null 2>&1; then
+  printf '
+Voici la fin du journal (%s) :
+
+' "${JOURNAL}"
+  tail -n 25 "${JOURNAL}" 2>/dev/null || printf '(journal vide)
+'
+  arreter "l'Atelier ne répond pas. Envoie ces lignes à Claude."
+fi
 
 open -a Safari "${ADRESSE}"
 
