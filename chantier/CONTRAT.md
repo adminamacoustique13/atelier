@@ -8,6 +8,8 @@ Amendé le 2026-11-11 par la personne responsable : l'enveloppe passe de 18 à 2
 
 Amendé le 2026-11-11 par la personne responsable : une tâche G, hors de l'objectif initial, entre dans le chantier (un bouton « Mettre à jour » dans le tableau de bord, voir le cahier).
 
+Amendé le 2026-11-11 par la personne responsable : une tâche H retire du dépôt tout lien avec l'ancien câblage (`claude -p`). Pour elle seule, la zone rouge « modifier les 35 tests existants » est levée sur deux tests de `tests/test_moteur.py`, qui ne testaient que les anciens lecteurs : `test_lecture_de_la_sortie_de_claude_code` et `test_le_flux_de_claude_code_est_relaye_au_fil_de_l_eau`. Les 33 autres restent intouchables. L'enveloppe passe de 24 à 36 agents lancés.
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 
@@ -28,7 +30,7 @@ Ce qui ne change pas : la connexion par ton abonnement, le modèle et l'effort p
 - La logique de dosage, d'escalade et de vérification (`dosage.py`, `consignes.py`, et l'enchaînement dans `moteur.py`), en dehors de ce que la tâche D1 y ajoute pour l'arrêt.
 
 ## Enveloppe
-- Agents lancés au maximum : 24 (porté de 18 à 24 le 2026-11-11 : 7 tâches automatisées depuis l'ajout de D3, et les passes supplémentaires de A et de B)
+- Agents lancés au maximum : 36 (porté de 18 à 24, puis à 36, le 2026-11-11 : les tâches D3, G et H ont été ajoutées, et chaque tâche a demandé au moins une seconde passe)
 - Tentatives par tâche au maximum : 3 (le premier essai, la seconde chance, puis un cran au-dessus)
 - Montées en gamme au maximum : 3 sur l'ensemble du chantier
 
@@ -41,6 +43,6 @@ Je peux monter seul jusqu'au modèle frontière (Fable) en effort élevé. L'eff
 - Pousser sur la branche principale. Le chantier vit sur la branche `chantier/agent-sdk`, et c'est toi qui décides de la fusion.
 - Toucher aux secrets, aux clés API ou aux identifiants de connexion.
 - Ajouter au produit une bibliothèque autre que `claude-agent-sdk`, si sa licence n'est pas permissive ou si elle envoie des données à l'extérieur.
-- Modifier les 35 tests existants ou les garde-fous (contrôle de périmètre, plafond, enveloppe, vérificateur).
+- Modifier les 35 tests existants ou les garde-fous (contrôle de périmètre, plafond, enveloppe, vérificateur). Exception du 2026-11-11 : les deux tests des anciens lecteurs, que la tâche H retire.
 - Retirer le mode démonstration ou l'agent simulé.
 - Faire écouter le serveur ailleurs que sur 127.0.0.1.

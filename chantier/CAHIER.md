@@ -4,9 +4,9 @@
 
 ## Suivi
 
-Enveloppe : 14 agents lancés sur 24 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24 le 2026-11-11. Il reste 10 lancements prévus au minimum (D1, D2, D3, E et G à deux agents chacune) : la marge est à zéro. À la prochaine seconde chance, la question de l'enveloppe revient à la personne responsable.
+Enveloppe : 14 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 12 lancements prévus au minimum (D1, D2, D3, E, G et H à deux agents chacune), plus la simplification de clôture : la marge est de 8 environ.
 
-Ordre de la suite, revu le 2026-11-11 : C, puis D1, puis D2 et E en parallèle, puis D3, puis G.
+Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
@@ -18,7 +18,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1, puis D2 et E en parallèle, 
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
-| H | en attente d'une décision de la personne responsable | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| H | à lancer (accord donné le 2026-11-11) | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
@@ -251,12 +251,12 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   3. Les deux tests d'origine qui ne testaient que les anciens lecteurs sont retirés ; chaque règle qu'ils vérifiaient reste couverte par un test du pont.
   4. Aucun commentaire, aucune docstring, aucun message et aucune page de documentation ne décrit plus Atelier comme lançant Claude Code en ligne de commande.
   5. `subprocess` ne sert plus qu'à git et aux contrôles du projet.
-- **Périmètre** : tout le dépôt, sauf `chantier/` et `DECISIONS.md`, qui gardent l'histoire. Dans `tests/test_moteur.py`, uniquement le retrait des deux tests nommés ci-dessus.
+- **Périmètre** : `atelier/agents.py`, `atelier/sdk.py` (commentaires seulement), `tests/test_agents.py`, `tests/test_sdk.py`, et `tests/test_moteur.py` pour le seul retrait des deux tests nommés ci-dessus. Le reste du ménage est réparti : `atelier/__main__.py`, `outils/installer-mac.sh` et `LISEZMOI.md` reviennent à la tâche E ; chaque tâche suivante reçoit la consigne de ne rien écrire qui renvoie à l'ancien câblage ; l'orchestrateur lance la recherche finale à la clôture.
 - **Contrats** : ne change aucun comportement.
-- **Dépendances** : G (elle passe en dernier, pour balayer aussi ce que les tâches précédentes auront écrit).
+- **Dépendances** : C. Lancée en parallèle de D1, sans fichier en commun (revu le 2026-11-11, à la demande de la personne responsable de faire ce ménage sans attendre la fin).
 - **Preuve** : une recherche dans le dépôt, hors `chantier/` et `DECISIONS.md`, ne trouve plus `claude -p`, `lire_flux_claude`, `lire_sortie_claude` ni « en ligne de commande » à propos de Claude Code ; la suite de tests et le contrôle de forme restent verts.
 - **Départ** : Sonnet, effort moyen. C'est un retrait bien cadré, mais il touche aux tests.
-- **Ce qui attend la personne responsable** : le critère 3 touche à une zone rouge du contrat (modifier les 35 tests existants), et la tâche fait dépasser l'enveloppe.
+- **Accord de la personne responsable, le 2026-11-11** : le retrait des deux tests d'origine (zone rouge levée pour eux seuls) et l'enveloppe portée à 36.
 
 ### F. Premier essai réel sur ton Mac — revient à la personne responsable
 - **Pourquoi** : aucune machine du chantier n'est connectée à ton compte Claude. La seule preuve qu'Atelier marche vraiment, c'est un essai chez toi.
