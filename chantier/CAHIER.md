@@ -4,12 +4,12 @@
 
 ## Suivi
 
-Enveloppe : 8 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 12 lancements prévus au minimum (vérifications de A et de B, puis C, D1, D2, D3 et E à deux agents chacune), soit 20 : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11 : porter l'enveloppe à 24. En attendant, rien n'est lancé au-delà de 18.
+Enveloppe : 9 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 11 lancements prévus au minimum (vérification de A, puis C, D1, D2, D3 et E à deux agents chacune), soit 20 : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11 : porter l'enveloppe à 24. En attendant, rien n'est lancé au-delà de 18.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
 | A | en cours (seconde chance) | Opus, effort élevé | Fable, effort élevé | 2 | Chemin nominal et fidélité au SDK validés à la première vérification |
-| B | en cours (troisième passe) | Opus, effort élevé | Fable, effort élevé | 3 | Concurrence validée dès la première vérification |
+| B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
 | C | à lancer | Opus, effort élevé | Fable, effort élevé | 0 | |
 | D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
@@ -29,6 +29,8 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
 - Seconde chance (même ouvrier, même niveau) : les trois défauts et quatre compléments sont levés (clé `detail`, retour à la ligne visible, aucune exception, guichet simulé aligné). Seconde vérification : recalé de peu, sur deux contournements nouveaux (interpréteur seul, lanceurs absents de la liste) et un risque sur `localhost`.
 - Troisième passe, courte et bornée, au même niveau : le vérificateur a montré qu'une liste d'exclusions ne sera jamais complète. C'est la consigne qui était en cause, pas l'ouvrier : pas de montée en gamme. On ferme les cas connus et on écrit le risque qui reste.
+- Troisième vérification : code et tests validés (les six points faits et testés, rien de cassé). Seul défaut : deux phrases du paragraphe « Risque qui reste » de la fiche, reprises de la consigne de l'orchestrateur, qui les a corrigées lui-même ; l'affichage de la règle sur la carte devient le critère 7 de D2. Tâche vérifiée.
+- Restes mineurs, à reprendre à la clôture : aucun test ne couvre `eval` dans la liste des lanceurs ; « 1 caractères de plus » au singulier dans la coupe de `detail`.
 - À transmettre à D1 : `repondre` rend `False` aussi bien pour un « toujours » sans règle que pour un identifiant inconnu ; le serveur ne retire donc pas une carte sur `False`, il se fie à `ouvertes()`.
 - À transmettre à D2 : masquer « Toujours pour ce projet » quand `regle` est vide ; afficher la règle exacte sur la carte ; afficher `detail` à la demande.
 - À transmettre à A ou C : après un arrêt, le pont ne doit plus appeler `demander` (une demande arrivée après `annuler` attendrait tout le délai).
@@ -149,6 +151,9 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   4. Chaque agent en marche a un bouton « Arrêter », discret, qui demande une confirmation d'un clic avant d'agir.
   5. L'orchestrateur, pendant qu'il répond, a son bouton « Arrêter » à côté de la zone de saisie.
   6. Le style reste celui du verre fumé déjà en place : mêmes tailles de texte, l'orange pour ce qui attend une décision, rien de surdimensionné.
+  7. Chaque carte affiche la règle exacte que « Toujours pour ce projet » retiendrait (ajouté le 2026-11-11, après la vérification de B : c'est la seule vraie protection contre une règle trop large).
+  8. Le choix « Toujours pour ce projet » n'apparaît pas quand la demande n'a pas de règle.
+  9. Le texte complet de la demande (clé `detail`) s'affiche d'un clic sur la carte.
 - **Périmètre** : `atelier/tableau/index.html`
 - **Contrats** : attend D1.
 - **Dépendances** : D1
