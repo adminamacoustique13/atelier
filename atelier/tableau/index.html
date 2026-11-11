@@ -294,7 +294,42 @@ td.droite, th.droite { text-align: right; }
 .fiche .essais li:first-child { border-top: 0; }
 .fiche .essais .ok { color: var(--reussite); } .fiche .essais .non { color: var(--refus); }
 
+/* Autorisations et agents en marche */
+button.discret { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 400; background: transparent; color: var(--discret); }
+button.discret.confirme { color: var(--refus); border-color: color-mix(in srgb, var(--refus) 60%, transparent); font-weight: 500; }
+.autorisation { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.autor-corps { display: flex; flex-direction: column; gap: 6px; min-width: 0; cursor: pointer; border-radius: 8px; }
+.autor-corps p { overflow-wrap: anywhere; }
+.autor-corps:hover .petit { color: var(--discret); }
+.regle { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--creux); color: var(--texte); overflow-wrap: anywhere; }
+.detail { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--creux); font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+textarea.dis-lui {
+  flex: none; width: 100%; min-height: 56px; max-height: 160px; resize: vertical; padding: 8px 10px; border-radius: 10px;
+  border: 1px solid var(--bord); background: var(--creux); font-size: 13px;
+}
+textarea.dis-lui:focus-visible { border-color: var(--texte); outline: 0; }
+.refus-champ { display: flex; flex-direction: column; gap: 6px; }
+.agents { display: flex; flex-direction: column; margin-top: 4px; }
+.agent { border-top: 1px solid var(--trait); }
+.agent:first-child { border-top: 0; }
+.agent-tete { display: flex; align-items: center; gap: 10px; }
+button.agent-ligne {
+  flex: 1 1 0; min-width: 0; height: auto; padding: 5px 0; border: 0; border-radius: 0; background: none; font-weight: 400; text-align: left;
+  display: grid; grid-template-columns: 52px 78px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 12px; color: var(--discret);
+}
+button.agent-ligne .id { font-family: var(--mono); font-size: 11px; color: var(--reussite); }
+button.agent-ligne .role { color: var(--faible); }
+button.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journal { list-style: none; padding: 2px 0 8px 138px; display: flex; flex-direction: column; gap: 1px; font-family: var(--mono); font-size: 11.5px; color: var(--faible); max-height: 260px; overflow-y: auto; }
+.journal li { overflow-wrap: anywhere; }
+.salle .s-activite { font-family: var(--mono); font-size: 10px; fill: var(--faible); }
+.poste-actif { cursor: pointer; }
+.fiche .essais .neutre { color: var(--faible); }
+
 @media (max-width: 900px) {
+  .journal { padding-left: 0; }
+  button.agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
+  button.agent-ligne .role { display: none; }
   .rail { display: none; }
   .grille { grid-template-columns: minmax(0, 1fr); }
   #vue-plan.active { flex-direction: column; overflow-y: auto; }
@@ -343,6 +378,7 @@ td.droite, th.droite { text-align: right; }
       <form class="saisie" id="saisie">
         <div class="boite">
           <textarea id="message" rows="1" aria-label="Message à l'orchestrateur" placeholder="Écris à l'orchestrateur"></textarea>
+          <button class="discret" type="button" id="arret-orch" data-action="arreter" hidden>Arrêter</button>
           <button class="principal" type="submit" id="envoi">Envoyer</button>
         </div>
         <p class="sous-saisie" id="sous-saisie"></p>
@@ -361,7 +397,7 @@ td.droite, th.droite { text-align: right; }
         <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div></article>
         <article class="carte"><h2>Ce qui t'attend</h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
       </div>
-      <article class="carte"><h2>La salle</h2><div class="defile" id="salle"></div></article>
+      <article class="carte"><h2>La salle</h2><div class="defile" id="salle"></div><div class="agents" id="agents"></div></article>
       <div class="grille">
         <article class="carte"><h2>Dosage par type de tâche</h2><div class="tuiles" id="tuiles"></div>
           <p class="petit">Turquoise : vérifiées du premier coup. Orange : livrables refusés.</p></article>
@@ -428,14 +464,46 @@ const EFFORTS = { low: "faible", medium: "moyen", high: "élevé", xhigh: "très
 const TYPES = { mecanique: "mécanique", courante: "courante", delicate: "délicate", physique: "physique", conception: "conception" };
 let derniere = null, rejoue = false, pas = 0, minuterie = null, choisie = null, signatureFil = "";
 const franchies = new Set();
+/* Ce que la page retient entre deux interrogations du serveur : cartes d'autorisation (champ de refus,
+   envoi en cours, remarque), détails dépliés, journaux dépliés, arrêts armés ou demandés, avis passager. */
+const cartes = new Map(), details = new Set(), deroules = new Set(), arretes = new Set();
+let armee = "", armeeLe = 0, minuteArmee = null, avisTexte = "", minuteAvis = null;
 
 const propre = (texte) => String(texte ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const nombre = (n) => Number(n || 0).toLocaleString("fr-FR");
 const euros = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " $";
-const poser = (id, html) => { document.getElementById(id).innerHTML = html; };
+const DELAI_CONFIRMATION = 400; // ms : un clic de confirmation plus rapproché est pris pour un double-clic
+const dernierHtml = new Map();
+/* Ne touche au DOM que si le contenu change : une saisie en cours, le défilement et le focus restent en place. */
+function poser(id, html) {
+  if (dernierHtml.get(id) === html) return;
+  dernierHtml.set(id, html);
+  const cadre = document.getElementById(id);
+  const actif = document.activeElement;
+  const garde = actif && actif.matches && actif.matches("textarea[data-carte]") && cadre.contains(actif)
+    ? { carte: actif.dataset.carte, debut: actif.selectionStart, fin: actif.selectionEnd } : null;
+  /* Un journal déroulé : en bas il y reste quand une ligne arrive, remonté il garde sa position. */
+  const defilements = new Map();
+  cadre.querySelectorAll("[data-garde]").forEach((j) => defilements.set(j.dataset.garde, { haut: j.scrollTop, bas: j.scrollHeight - j.scrollTop - j.clientHeight < 8 }));
+  cadre.innerHTML = html;
+  cadre.querySelectorAll("[data-garde]").forEach((j) => {
+    const avant = defilements.get(j.dataset.garde);
+    j.scrollTop = !avant || avant.bas ? j.scrollHeight : avant.haut;
+  });
+  cadre.querySelectorAll("textarea[data-carte]").forEach((z) => {
+    z.value = etatCarte(z.dataset.carte).texte;
+    if (garde && garde.carte === z.dataset.carte) { z.focus(); z.setSelectionRange(garde.debut, garde.fin); }
+  });
+}
+const etatCarte = (id) => { if (!cartes.has(id)) cartes.set(id, { refus: false, texte: "", envoi: false, remarque: "" }); return cartes.get(id); };
 const couper = (texte, n) => (texte.length > n ? texte.slice(0, n - 1).trimEnd() + "…" : texte);
 const ouvertes = (vue) => vue.demandes.filter((d) => d.reponse === null && !franchies.has(`decision:${d.id}`));
+const autorisationsDe = (vue) => (vue.autorisations || []).filter((a) => !franchies.has(`autorisation:${a.id}`));
+const agentsDe = (vue) => vue.agents || [];
+const ilFautRepondre = (vue) => contratEnAttente(vue) || ouvertes(vue).length > 0 || autorisationsDe(vue).length > 0;
+const arretee = (t) => t.etat === "revenu" && (t.historique || []).slice(-1)[0]?.issue === "arretee";
+const libelleEtat = (t) => (arretee(t) ? "Arrêtée par toi" : t.etat_fr);
 const contratEnAttente = (vue) => vue.taches.length > 0 && !vue.contrat.valide;
 
 /* Texte de l'orchestrateur : paragraphes, listes à tirets, gras, code en ligne et blocs de code. */
@@ -483,6 +551,51 @@ function contratHtml(vue) {
     <div><span>Plafond d'escalade</span>${propre(c.plafond_fr)}</div>
     <div class="large"><span>Zones rouges</span>${c.zones_rouges.length} actions interdites sans toi</div>
   </div>`;
+}
+
+/* Ce que « Toujours pour ce projet » permettrait, en mots, d'après la forme de la règle (le guichet n'en produit que trois). */
+const OUTILS_ECRITURE = new Set(["Write", "Edit", "MultiEdit", "NotebookEdit"]);
+function porteeRegle(regle) {
+  const forme = regle.match(/^([A-Za-z][A-Za-z0-9_]*)\(([\s\S]*)\)$/);
+  if (forme && forme[1] === "Bash") {
+    const debut = forme[2].match(/^([\s\S]*\S):\*$/);
+    if (debut) return `toute commande qui commence par « ${debut[1]} » sera permise sans redemander.`;
+  }
+  if (forme && forme[1] === "WebFetch") {
+    const site = forme[2].match(/^domain:(\S+)$/);
+    if (site) return `toute page du site ${site[1]} pourra être consultée sans redemander.`;
+  }
+  if (/^[A-Za-z][A-Za-z0-9_]*$/.test(regle)) {
+    return OUTILS_ECRITURE.has(regle)
+      ? `tout usage de l'outil ${regle} sera permis sans redemander : cela veut dire toute modification de fichier.`
+      : `tout usage de l'outil ${regle} sera permis sans redemander.`;
+  }
+  return "cette règle sera retenue telle quelle pour ce projet, sans que je sache dire en mots ce qu'elle permet.";
+}
+
+/* Une demande d'autorisation : qui demande quoi, la règle exacte que « Toujours » retiendrait, trois choix. */
+function autorisationHtml(a) {
+  const e = etatCarte(a.id), regle = String(a.regle || "").trim(), detail = String(a.detail || "");
+  const ouvert = details.has(a.id), bloque = e.envoi ? " disabled" : "";
+  const id = propre(a.id);
+  const lire = detail
+    ? `<div class="autor-corps" data-action="detail" data-id="${id}" role="button" tabindex="0" aria-expanded="${ouvert}">
+        <p>${propre(a.phrase)}</p>${ouvert ? `<pre class="detail">${propre(detail)}</pre>` : ""}
+        <span class="petit">${ouvert ? "Clique pour replier la demande complète." : "Clique pour lire la demande complète."}</span></div>`
+    : `<div class="autor-corps"><p>${propre(a.phrase)}</p></div>`;
+  const portee = regle
+    ? `<p class="petit">« Toujours pour ce projet » retient la règle <code class="regle">${propre(regle)}</code> :
+        ${propre(porteeRegle(regle))}</p>`
+    : `<p class="petit">Aucune règle n'est possible pour cette demande : tu peux l'autoriser cette fois, ou la refuser.</p>`;
+  const choix = e.refus
+    ? `<div class="refus-champ"><span class="etiquette">Dis-lui plutôt quoi faire (facultatif)</span>
+        <textarea class="dis-lui" data-carte="${id}" rows="2" aria-label="Dis-lui plutôt quoi faire" placeholder="Par exemple : utilise plutôt une autre commande."${bloque}></textarea></div>
+      <div class="boutons"><button class="principal" data-action="refus-envoyer" data-id="${id}"${bloque}>Confirmer le refus</button>
+        <button data-action="refus-retour" data-id="${id}"${bloque}>Retour</button></div>`
+    : `<div class="boutons"><button class="principal" data-action="autoriser" data-choix="une_fois" data-id="${id}"${bloque}>Autoriser une fois</button>
+        ${regle ? `<button data-action="autoriser" data-choix="toujours" data-id="${id}"${bloque}>Toujours pour ce projet</button>` : ""}
+        <button data-action="refuser" data-id="${id}"${bloque}>Refuser</button></div>`;
+  return `<div class="autorisation" data-autorisation="${id}">${lire}${portee}${choix}${e.remarque ? `<p class="alerte" role="alert">${propre(e.remarque)}</p>` : ""}</div>`;
 }
 
 const boutonValider = `<button class="principal" data-action="valider">Valider le contrat et lancer</button>`;
@@ -533,13 +646,15 @@ function fil(vue) {
     blocs.push(`<div class="carte-fil"><h3>Contrat de chantier à valider</h3>${contratHtml(vue)}
       <div class="boutons">${boutonValider}<button data-action="voir-plan">Voir le plan</button></div></div>`);
   }
+  autorisationsDe(vue).forEach((a) => blocs.push(`<div class="carte-fil decision"><h3>J'ai besoin de ton autorisation</h3>${autorisationHtml(a)}</div>`));
   ouvertes(vue).forEach((d) => blocs.push(`<div class="carte-fil decision"><h3>J'ai besoin de ta décision</h3>${demandeHtml(d)}</div>`));
   return blocs.join("");
 }
 
 function afficherConversation(vue) {
   const b = vue.brouillon || { texte: "", outils: [] };
-  const signature = [vue.evenements.length, vue.occupe, b.texte.length, b.outils.length, vue.contrat.valide, vue.taches.length, ouvertes(vue).map((d) => d.id).join()].join("|");
+  const signature = [vue.evenements.length, vue.occupe, b.texte.length, b.outils.length, vue.contrat.valide, vue.taches.length, ouvertes(vue).map((d) => d.id).join(),
+    autorisationsDe(vue).map((a) => `${a.id}:${a.phrase}:${a.regle}:${details.has(a.id)}:${JSON.stringify(etatCarte(a.id))}`).join()].join("|");
   if (signature !== signatureFil) {
     const cadre = document.getElementById("fil");
     const enBas = cadre.scrollHeight - cadre.scrollTop - cadre.clientHeight < 120;
@@ -553,25 +668,44 @@ function afficherConversation(vue) {
     ? jauge("Agents lancés", vue.agents_lances, c.max_agents) + jauge("Montées en gamme", vue.montees, c.max_montees)
     : `<p class="calme">Pas encore de contrat.</p>`);
   poser("rail-taches", vue.taches.map((t) => `<li><span class="puce">${propre(t.id)}</span>
-    <span class="titre" title="${propre(t.titre)} · ${propre(t.etat_fr)}">${propre(t.titre)}</span>
-    <i class="rond ${propre(t.etat)}" aria-label="${propre(t.etat_fr)}"></i></li>`).join("") || `<li style="display:block" class="calme">Aucune tâche.</li>`);
+    <span class="titre" title="${propre(t.titre)} · ${propre(libelleEtat(t))}">${propre(t.titre)}</span>
+    <i class="rond ${propre(t.etat)}" aria-label="${propre(libelleEtat(t))}"></i></li>`).join("") || `<li style="display:block" class="calme">Aucune tâche.</li>`);
 
   const saisie = document.getElementById("message"), envoi = document.getElementById("envoi");
   const fige = rejoue && attente_de(vue) !== "objectif";
   saisie.disabled = fige;
   envoi.disabled = fige || vue.occupe;
   saisie.placeholder = fige ? "Démonstration rejouée : seule la première demande est enregistrée" : "Écris à l'orchestrateur";
-  document.getElementById("sous-saisie").textContent = vue.mode === "réel" && !rejoue
+  document.getElementById("sous-saisie").textContent = avisTexte || (vue.mode === "réel" && !rejoue
     ? "Session Claude Code de l'orchestrateur, gardée d'un message à l'autre. Elle lit le dépôt, elle n'écrit rien."
-    : "Démonstration : réponses et agents simulés, aucun appel à Claude Code.";
+    : "Démonstration : réponses et agents simulés, aucun appel à Claude Code.");
+  const arret = document.getElementById("arret-orch");
+  arret.hidden = !vue.occupe || rejoue;
+  habillerArret(arret, "orchestrateur");
+}
+
+/* Le bouton « Arrêter » : un premier clic l'arme quelques secondes (« Confirmer l'arrêt »), le second agit. */
+function habillerArret(bouton, cle) {
+  const demande = arretes.has(cle), arme = armee === cle;
+  bouton.textContent = demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter";
+  bouton.disabled = demande;
+  bouton.classList.toggle("confirme", arme && !demande);
+  bouton.title = arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.";
+}
+function boutonArret(cle, tache) {
+  const demande = arretes.has(cle), arme = armee === cle;
+  return `<button class="discret${arme && !demande ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${demande ? " disabled" : ""}
+    title="${arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu."}">${demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter"}</button>`;
 }
 
 /* ---------- Chantier ---------- */
 function attenteHtml(vue) {
   if (contratEnAttente(vue)) return `${contratHtml(vue)}<div class="boutons">${boutonValider}</div>`;
-  const liste = ouvertes(vue);
-  if (!liste.length) return `<p class="calme">Rien pour l'instant. Je te préviens si je sors du contrat.</p>`;
-  return liste.map((d) => `<div class="demande">${demandeHtml(d)}</div>`).join("");
+  const liste = ouvertes(vue), autos = autorisationsDe(vue);
+  const avis = avisTexte ? `<p class="petit" role="status">${propre(avisTexte)}</p>` : "";
+  if (!liste.length && !autos.length) return `${avis}<p class="calme">Rien pour l'instant. Je te préviens si je sors du contrat.</p>`;
+  return avis + autos.map((a) => `<div class="demande">${autorisationHtml(a)}</div>`).join("")
+    + liste.map((d) => `<div class="demande">${demandeHtml(d)}</div>`).join("");
 }
 
 function anneau(faites, total) {
@@ -586,7 +720,7 @@ function anneau(faites, total) {
 const buste = (x, y) => `<circle class="buste" cx="${x}" cy="${y}" r="6"/><path class="buste" d="M${x - 12} ${y + 22} a12 12 0 0 1 24 0"/>`;
 const pense = (x, y) => `<g class="pense"><circle cx="${x - 5}" cy="${y}" r="1.4"/><circle cx="${x}" cy="${y}" r="1.4"/><circle cx="${x + 5}" cy="${y}" r="1.4"/></g>`;
 
-function poste(t, x, y) {
+function poste(t, x, y, agent) {
   const cx = x + 86, actif = t.etat === "en_cours", controle = t.etat === "en_verification";
   const parti = t.etat === "verifie" || t.etat === "revenu" || t.etat === "abandonnee";
   const classes = [t.etat, actif || controle ? "actif" : "", t.etat === "a_lancer" ? "vide" : ""].join(" ");
@@ -595,22 +729,48 @@ function poste(t, x, y) {
   if (controle) personnes += `<g class="controle">${buste(cx + 66, y + 38)}${pense(cx + 66, y + 24)}</g>`;
   const marque = t.etat === "verifie" ? `<path class="coche" d="M${cx - 6} ${y + 40} l4.5 4.5 l8 -9"/>`
     : t.etat === "revenu" ? `<circle class="signal" cx="${cx}" cy="${y + 40}" r="4"/>` : "";
-  const sous = controle ? `Vérifiée par ${t.verificateur_fr}` : `${t.etat_fr}${t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
-  return `<g class="${classes}">
+  const sous = controle ? `Vérifiée par ${t.verificateur_fr}` : `${libelleEtat(t)}${t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
+  const derniere = agent && agent.lignes.length ? agent.lignes[agent.lignes.length - 1] : "";
+  const activite = derniere ? `<text class="s-milieu s-activite" x="${cx}" y="${y + 137}">${propre(couper(derniere, 30))}</text>` : "";
+  const ouvrir = agent ? ` data-action="derouler" data-nom="${propre(agent.nom)}" role="button" tabindex="0" aria-label="Activité de la tâche ${propre(t.id)} : ${propre(derniere || "aucune ligne pour l'instant")}"` : "";
+  return `<g class="${classes}${agent ? " poste-actif" : ""}"${ouvrir}>${derniere ? `<title>${propre(derniere)}</title>` : ""}
     ${actif || controle ? `<path class="descente" d="M${cx} ${y + 4} v10"/>` : ""}
     ${personnes}${marque}
     <rect class="bureau" x="${cx - 46}" y="${y + 56}" width="92" height="20" rx="5"/>
     <rect class="ecran" x="${cx - 13}" y="${y + 54}" width="26" height="3" rx="1.5"/>
     <text class="s-milieu s-titre" x="${cx}" y="${y + 94}"><tspan class="s-id">${propre(t.id)}</tspan> ${propre(couper(t.titre, 25 - t.id.length))}</text>
     <text class="s-milieu" x="${cx}" y="${y + 108}">${propre(t.dosage_fr)}</text>
-    <text class="s-milieu s-faible" x="${cx}" y="${y + 122}">${propre(sous)}</text></g>`;
+    <text class="s-milieu s-faible" x="${cx}" y="${y + 122}">${propre(sous)}</text>${activite}</g>`;
+}
+
+function aFaire(vue) {
+  const d = ouvertes(vue).length, a = autorisationsDe(vue).length;
+  if (contratEnAttente(vue)) return "Contrat à valider";
+  if (d && a) return `${d + a} réponses à donner`;
+  if (a) return `${a} autorisation${a > 1 ? "s" : ""} à donner`;
+  return d ? `${d} décision à prendre` : "Rien à faire";
+}
+
+/* Sous la salle : un agent par ligne, sa dernière activité, un clic pour dérouler ses 30 dernières lignes, et son bouton d'arrêt. */
+const ROLES = { ouvrier: "ouvrier", verificateur: "vérificateur", orchestrateur: "orchestrateur" };
+function agentsHtml(vue) {
+  const actives = new Set(vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").map((t) => t.id));
+  return agentsDe(vue).map((a) => {
+    const lignes = a.lignes || [], ouvert = deroules.has(a.nom), derniere = lignes.length ? lignes[lignes.length - 1] : "Pas encore d'activité.";
+    const cle = a.tache || "orchestrateur", arretable = !rejoue && (!a.tache || actives.has(a.tache));
+    return `<div class="agent"><div class="agent-tete">
+      <button class="agent-ligne" data-action="derouler" data-nom="${propre(a.nom)}" aria-expanded="${ouvert}" title="${ouvert ? "Replier" : "Dérouler"} l'activité">
+        <span class="id">${propre(a.tache || "Chef")}</span><span class="role">${propre(ROLES[a.role] || a.role)}</span><span class="derniere">${propre(derniere)}</span></button>
+      ${arretable ? boutonArret(cle, a.tache || "") : ""}</div>
+      ${ouvert ? `<ol class="journal" data-garde="${propre(a.nom)}" aria-label="Dernières lignes d'activité">${lignes.slice(-30).map((l) => `<li>${propre(l)}</li>`).join("")}</ol>` : ""}</div>`;
+  }).join("");
 }
 
 function salle(vue) {
-  const parRang = 4, pas = 180, rangH = 140, gauche = 232, haut = 8;
+  const parRang = 4, pas = 180, rangH = 156, gauche = 232, haut = 8;
   const rangs = Math.max(1, Math.ceil(vue.taches.length / parRang)), hauteur = Math.max(150, haut + rangs * rangH), largeur = 1160;
   const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
-  const attendue = contratEnAttente(vue) || ouvertes(vue).length > 0, milieu = hauteur / 2;
+  const attendue = ilFautRepondre(vue), milieu = hauteur / 2;
   const role = vue.occupe ? "répond dans la conversation" : actifs ? `suit ${actifs} agent${actifs > 1 ? "s" : ""}`
     : attendue ? "t'attend" : vue.termine ? "a clos le chantier" : "au repos";
   let dessin = `<rect class="mur" x="1" y="${milieu - 66}" width="196" height="132" rx="14"/>
@@ -625,12 +785,12 @@ function salle(vue) {
       const fin = gauche + (Math.min(parRang, vue.taches.length - i) - 1) * pas + 86;
       dessin += `<path class="couloir" d="M197 ${milieu} C216 ${milieu} 216 ${y + 4} ${gauche + 20} ${y + 4} H${fin}"/>`;
     }
-    dessin += poste(t, x, y);
+    dessin += poste(t, x, y, agentsDe(vue).filter((a) => a.tache === t.id).pop());
   });
   const toi = `<g class="${attendue ? "attendue" : ""}"><rect class="mur" x="${largeur - 181}" y="${milieu - 66}" width="180" height="132" rx="14"/>
     <text class="s-titre" x="${largeur - 166}" y="${milieu - 44}">Toi</text>
     ${buste(largeur - 91, milieu - 14)}${attendue ? `<circle class="signal" cx="${largeur - 71}" cy="${milieu - 22}" r="4"/>` : ""}
-    <text class="s-milieu" x="${largeur - 91}" y="${milieu + 42}">${contratEnAttente(vue) ? "Contrat à valider" : ouvertes(vue).length ? `${ouvertes(vue).length} décision à prendre` : "Rien à faire"}</text>
+    <text class="s-milieu" x="${largeur - 91}" y="${milieu + 42}">${aFaire(vue)}</text>
     <text class="s-milieu s-faible" x="${largeur - 91}" y="${milieu + 56}">${attendue ? "voir « Ce qui t'attend »" : "je te préviens au besoin"}</text></g>`;
   if (!vue.taches.length) dessin += `<text class="s-milieu s-faible" x="${largeur / 2}" y="${milieu + 4}">Les postes apparaîtront ici dès que le plan sera proposé.</text>`;
   return `<svg class="salle" viewBox="0 0 ${largeur} ${hauteur}" role="img" aria-label="La salle : ${actifs} agents au travail">${dessin}${toi}</svg>`;
@@ -640,6 +800,7 @@ function afficherChantier(vue) {
   const c = vue.contrat;
   poser("anneau", vue.taches.length ? anneau(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length) : "");
   poser("salle", salle(vue));
+  poser("agents", agentsHtml(vue));
   document.getElementById("point").textContent = vue.point_d_etape;
   document.getElementById("objectif").textContent = c.objectif;
   poser("attente", attenteHtml(vue));
@@ -657,10 +818,10 @@ function afficherChantier(vue) {
        <div><span>Tokens</span><b>${nombre(vue.tokens)}</b></div></div>`);
   poser("lignes", vue.taches.map((t) => `<tr>
     <td><span class="puce">${propre(t.id)}</span></td>
-    <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}</td>
+    <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}</td>
     <td>${propre(t.dosage_fr)}</td>
     <td class="droite">${t.tentatives}</td>
-    <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(t.etat_fr)}</span></td>
+    <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span></td>
     <td class="droite">${euros(t.cout_usd)}</td><td class="droite petit">${nombre(t.tokens)}</td></tr>`).join("")
     || `<tr><td colspan="7" class="calme">Aucune tâche.</td></tr>`);
   const moteur = vue.evenements.filter((e) => (e.auteur || "moteur") === "moteur");
@@ -708,10 +869,10 @@ function graphe(vue) {
     amont.forEach((id) => { liens += courbe(lieu[id].x + L / 2, lieu[id].y + H, x + L / 2, y, etatDe[id] === "verifie"); });
     const classes = ["noeud", t.etat, t.ajoutee ? "ajoutee" : "", t.id === choisie ? "choisie" : ""].join(" ");
     noeuds += `<g class="${classes}" transform="translate(${x} ${y})" data-action="choisir" data-id="${propre(t.id)}" tabindex="0" role="button"
-      aria-label="Tâche ${propre(t.id)}, ${propre(t.titre)}, ${propre(t.etat_fr)}">
+      aria-label="Tâche ${propre(t.id)}, ${propre(t.titre)}, ${propre(libelleEtat(t))}">
       <rect width="${L}" height="${H}" rx="8"/>
       <text class="n-id" x="12" y="19">${propre(t.id)}</text>
-      <text class="n-etat" x="${L - 24}" y="19">${propre(t.etat_fr)}</text>
+      <text class="n-etat" x="${L - 24}" y="19">${propre(libelleEtat(t))}</text>
       <circle class="c-${propre(t.etat)}" cx="${L - 14}" cy="15.5" r="3"/>
       <text class="n-titre" x="12" y="37">${propre(couper(t.titre, 29))}</text>
       <text class="n-dose" x="12" y="51">${propre(t.dosage_fr)}${t.ajoutee ? " · ajoutée" : ""}</text></g>`;
@@ -726,12 +887,13 @@ function fiche(vue) {
   if (!t) return `<p class="calme">Choisis une tâche dans le graphe pour lire ses critères et son périmètre.</p>`;
   const liste = (elements, classe) => `<ul class="${classe || ""}">${elements.map((e) => `<li>${propre(e)}</li>`).join("")}</ul>`;
   const essais = (t.historique || []).map((h) => {
-    const ok = h.issue === "valide";
-    return `<li><span class="${ok ? "ok" : "non"}">${ok ? "✓" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(h.modele.charAt(0).toUpperCase() + h.modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
-      h.detail ? `<br><span class="petit">${propre(h.detail)}</span>` : ""}</span></li>`;
+    const ok = h.issue === "valide", stoppee = h.issue === "arretee";
+    const modele = String(h.modele || "");
+    return `<li><span class="${ok ? "ok" : stoppee ? "neutre" : "non"}">${ok ? "✓" : stoppee ? "–" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(modele.charAt(0).toUpperCase() + modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
+      stoppee ? `<br><span class="petit">Arrêtée par toi.</span>` : h.detail ? `<br><span class="petit">${propre(h.detail)}</span>` : ""}</span></li>`;
   }).join("");
   return `<header><span class="puce">${propre(t.id)}</span><h2>${propre(t.titre)}</h2>
-      <span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(t.etat_fr)}</span></header>
+      <span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span></header>
     <section><h3>Agent</h3><p>${propre(t.dosage_fr)} · tâche ${propre(TYPES[t.type] || t.type)}${t.ajoutee ? " · ajoutée en route" : ""}</p></section>
     ${t.pourquoi ? `<section><h3>Pourquoi</h3><p class="calme">${propre(t.pourquoi)}</p></section>` : ""}
     <section><h3>Critères de vérification</h3>${t.criteres.length ? `<ol>${t.criteres.map((c) => `<li>${propre(c)}</li>`).join("")}</ol>` : `<p class="calme">Aucun critère.</p>`}</section>
@@ -791,7 +953,12 @@ function afficher(vue) {
   infos.hidden = ![...infos.children].some((e) => e.textContent);
   document.getElementById("cpt-chantier").textContent = vue.taches.length ? `${verifiees}/${vue.taches.length}` : "";
   document.getElementById("cpt-plan").textContent = vue.taches.length || "";
-  document.getElementById("pt-conversation").classList.toggle("allume", contratEnAttente(vue) || ouvertes(vue).length > 0);
+  document.getElementById("pt-conversation").classList.toggle("allume", ilFautRepondre(vue));
+  const presents = new Set(agentsDe(vue).map((a) => a.tache || "orchestrateur"));
+  [...arretes].forEach((cle) => { if (!presents.has(cle)) arretes.delete(cle); });
+  if (armee && !presents.has(armee)) { armee = ""; clearTimeout(minuteArmee); }
+  [...deroules].forEach((nom) => { if (!agentsDe(vue).some((a) => a.nom === nom)) deroules.delete(nom); });
+  [...cartes.keys()].forEach((id) => { if (!(vue.autorisations || []).some((a) => a.id === id)) cartes.delete(id); });
   afficherConversation(vue);
   afficherChantier(vue);
   afficherPlan(vue);
@@ -811,6 +978,8 @@ window.addEventListener("hashchange", onglet);
 function attente_de(vue) {
   if (!vue.evenements.some((e) => e.auteur === "toi")) return "objectif";
   if (contratEnAttente(vue) && !vue.occupe) return "contrat";
+  const autorisation = autorisationsDe(vue)[0];
+  if (autorisation) return `autorisation:${autorisation.id}`;
   const demande = ouvertes(vue)[0];
   return demande && !vue.en_marche ? `decision:${demande.id}` : null;
 }
@@ -823,29 +992,105 @@ function avancer() {
   if (attendue && !franchies.has(attendue)) { clearInterval(minuterie); minuterie = null; }
 }
 
+/* Un avis passager, sous la zone de saisie et en tête de « Ce qui t'attend ». */
+function dire(texte) {
+  avisTexte = texte;
+  clearTimeout(minuteAvis);
+  minuteAvis = setTimeout(() => { avisTexte = ""; rafraichir(); }, 9000);
+  rafraichir();
+}
+function rafraichir() {
+  if (!derniere || derniere.aucun_projet) return;
+  afficherConversation(derniere);
+  afficherChantier(derniere);
+}
+
+/* Rend la vue du serveur, ou null si la réponse n'est pas bonne. */
 async function envoyer(adresse, corps) {
   if (rejoue) {
-    franchies.add(adresse === "/api/message" ? "objectif" : adresse === "/api/decision" ? `decision:${corps.id}` : "contrat");
+    if (adresse === "/api/arreter") { dire("Démonstration rejouée : il n'y a pas d'agent derrière, rien n'est arrêté."); return null; }
+    const cle = adresse === "/api/message" ? "objectif" : adresse === "/api/decision" ? `decision:${corps.id}`
+      : adresse === "/api/autorisation" ? `autorisation:${corps.id}` : "contrat";
+    franchies.add(cle);
     afficher(derniere);
     if (!minuterie) minuterie = setInterval(avancer, 900);
-    return;
+    return null;
   }
   const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
-  if (retour.ok) afficher(await retour.json());
+  if (!retour.ok) return null;
+  const donnees = await retour.json();
+  afficher(donnees);
+  return donnees;
+}
+
+/* Répondre à une demande d'autorisation : une seule réponse part, la carte se verrouille pendant l'envoi. */
+async function repondre(id, choix, message) {
+  const carte = etatCarte(id);
+  if (carte.envoi) return;
+  carte.envoi = true; carte.remarque = "";
+  rafraichir();
+  let donnees = null;
+  try { donnees = await envoyer("/api/autorisation", { id, choix, message: message || "" }); } catch (erreur) { donnees = null; }
+  carte.envoi = false;
+  const retour = donnees && donnees.autorisation;
+  if (rejoue) { cartes.delete(id); return rafraichir(); }
+  if (!retour) carte.remarque = "La réponse n'est pas partie. Réessaie dans un instant.";
+  else if (retour.reglee) { cartes.delete(id); dire(retour.phrase); return; }
+  else carte.remarque = retour.phrase;
+  rafraichir();
+}
+
+/* Arrêter un agent : le premier clic arme le bouton cinq secondes, le second envoie l'arrêt. */
+async function arreter(cle, tache) {
+  if (arretes.has(cle)) return;
+  if (armee === cle && performance.now() - armeeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
+  if (armee !== cle) {
+    armee = cle; armeeLe = performance.now();
+    clearTimeout(minuteArmee);
+    minuteArmee = setTimeout(() => { armee = ""; rafraichir(); }, 5000);
+    return rafraichir();
+  }
+  clearTimeout(minuteArmee); armee = "";
+  arretes.add(cle);
+  rafraichir();
+  let donnees = null;
+  try { donnees = await envoyer("/api/arreter", tache ? { tache } : {}); } catch (erreur) { donnees = null; }
+  const retour = donnees && donnees.arret;
+  if (!retour || !retour.fait) arretes.delete(cle);
+  if (retour) dire(retour.phrase); else if (!rejoue) dire("L'arrêt n'est pas parti. Réessaie dans un instant.");
 }
 
 function agir(cible) {
   const action = cible.dataset.action;
   if (action === "valider") envoyer("/api/contrat/valider");
   if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix });
+  if (action === "autoriser") repondre(cible.dataset.id, cible.dataset.choix);
+  if (action === "refuser") { etatCarte(cible.dataset.id).refus = true; rafraichir(); }
+  if (action === "refus-retour") { etatCarte(cible.dataset.id).refus = false; rafraichir(); }
+  if (action === "refus-envoyer") repondre(cible.dataset.id, "non", etatCarte(cible.dataset.id).texte.trim());
+  if (action === "detail") { const id = cible.dataset.id; if (details.has(id)) details.delete(id); else details.add(id); rafraichir(); }
+  if (action === "derouler") { const nom = cible.dataset.nom; if (deroules.has(nom)) deroules.delete(nom); else deroules.add(nom); rafraichir(); }
+  if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();
   if (action === "choisir") { choisie = cible.dataset.id; afficherPlan(derniere); }
 }
-document.addEventListener("click", (e) => { const cible = e.target.closest("[data-action]"); if (cible) agir(cible); });
+document.addEventListener("click", (e) => {
+  const cible = e.target.closest("[data-action]");
+  if (!cible) return;
+  // Le détail déplié se lit et se sélectionne : seul un clic hors de lui, sans texte sélectionné, replie la carte.
+  if (cible.dataset.action === "detail" && (e.target.closest("pre.detail") || String(window.getSelection()).length)) return;
+  agir(cible);
+});
 document.addEventListener("keydown", (e) => {
-  const cible = e.target.closest?.(".noeud");
-  if (cible && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); agir(cible); }
+  const cible = e.target.closest?.(".noeud, [role='button'][data-action]");
+  if (cible && e.target === cible && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); agir(cible); }
+});
+document.addEventListener("input", (e) => {
+  const zone = e.target;
+  if (!zone.matches || !zone.matches("textarea[data-carte]")) return;
+  etatCarte(zone.dataset.carte).texte = zone.value;
+  document.querySelectorAll("textarea[data-carte]").forEach((z) => { if (z !== zone && z.dataset.carte === zone.dataset.carte) z.value = zone.value; });
 });
 
 const zone = document.getElementById("message");
