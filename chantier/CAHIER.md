@@ -186,7 +186,17 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Dépendances** : D2
 - **Preuve** : des tests du serveur avec un agent simulé, qui changent le mode pendant qu'il tourne et simulent un refus de l'arbitre puis une retombée en `default` ; et l'essai dans le navigateur sans écran.
 - **Départ** : Sonnet, effort élevé. La tâche touche à la sécurité des agents.
-- **À vérifier avant le lancement** : sur le SDK installé, comment un refus de l'arbitre, sa mise en pause et une retombée en `default` sont annoncés. `set_permission_mode` et les cinq modes existent bien dans la version 0.2.172.
+- **Faits vérifiés le 2026-11-11** dans la documentation de Claude Code (pages « permission modes », « Agent SDK : permissions » et « Agent SDK : hooks ») et dans le SDK 0.2.172 :
+  - `set_permission_mode` et les cinq modes existent. Le changement vaut tout de suite pour les demandes d'outil suivantes.
+  - Refus de l'arbitre : l'agent en reçoit la raison dans le résultat de l'outil, le plus souvent le nom de la règle (par exemple `[Data Exfiltration]`). Le crochet `PermissionDenied`, qui annonce ces refus, n'existe que dans le SDK TypeScript, pas dans le SDK Python. Côté Python il reste le flux de messages (résultats d'outils) et le champ `permission_denials` du résultat final. La forme exacte de ces refus n'a pas pu être observée ici : à confirmer à l'essai réel F.
+  - Mise en pause : après 3 refus de suite ou 20 au total, le mode auto se met en pause et Claude Code recommence à demander ; accepter la demande relance le mode auto. Ces seuils ne se règlent pas. La documentation ne décrit ce retour que pour le terminal et pour `claude -p` ; avec le rappel `can_use_tool` du pont, les demandes doivent arriver au guichet : à confirmer à l'essai réel F.
+  - Mode auto indisponible au démarrage : la session démarre en `default`, et le message d'initialisation donne le mode réel dans `permissionMode`. En cours de session : `set_permission_mode("auto")` échoue avec « Cannot set permission mode to auto: auto mode unavailable for this model ».
+  - Retombée en cours de session : un message système de sous-type `status`, avec `permissionMode` à `default`.
+  - Modèles acceptés par le mode auto : Opus 4.6 ou plus récent, Sonnet 4.6 ou plus récent, Haiku 5.5, Fable.
+  - En entrant en mode auto, Claude Code met de côté les règles larges qui permettent d'exécuter du code (`Bash(python*)`, les commandes de lancement des gestionnaires de paquets) : les commandes permises par défaut d'Atelier passeront donc devant l'arbitre. Elles reviennent en quittant le mode.
+  - En mode `plan`, les modifications de fichiers arrivent au rappel `can_use_tool`, donc aux cartes d'autorisation, même si une règle les permet.
+  - En mode `dontAsk`, tout ce qui aurait demandé une autorisation est refusé, sans passer par `can_use_tool`.
+  - Une suppression de chemin critique (`rm -rf ~`) est refusée d'office en mode auto dans une session du SDK.
 
 ### E. Installation et connexion
 - **Pourquoi** : sur ton Mac, Atelier doit installer la bibliothèque tout seul, et te dire clairement s'il facture ton abonnement ou une clé API.
