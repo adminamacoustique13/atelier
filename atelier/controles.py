@@ -86,10 +86,6 @@ class ControlesGit:
             ["git", "config", cle], cwd=self.depot, capture_output=True, text=True
         )
         return resultat.stdout.strip()
-        exclusions = self.depot / ".git" / "info" / "exclude"
-        if exclusions.parent.exists() and ".atelier/" not in exclusions.read_text("utf-8"):
-            with exclusions.open("a", encoding="utf-8") as fichier:
-                fichier.write("\n.atelier/\n")
 
     def _git(self, *arguments: str, dossier: Path | None = None, delai: int = 120) -> str:
         # Pas de question posée par git : l'Atelier tourne sans terminal.
