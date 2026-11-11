@@ -4,12 +4,12 @@
 
 ## Suivi
 
-Enveloppe : 3 agents lancés sur 18, 0 montée en gamme sur 3. Avec la tâche D3 ajoutée le 2026-11-11, il reste 11 lancements prévus : la marge passe de 6 à 4.
+Enveloppe : 7 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 11 lancements prévus au minimum (vérification de la troisième passe de B, puis C, D1, D2, D3 et E à deux agents chacune) : la marge est à zéro.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| A | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
-| B | en vérification | Opus, effort élevé | Fable, effort élevé | 1 | 43 tests du guichet verts, contrôle de forme vert, périmètre respecté |
+| A | en vérification | Opus, effort élevé | Fable, effort élevé | 1 | 33 tests du pont verts, contrôle de forme vert, périmètre respecté |
+| B | en cours (troisième passe) | Opus, effort élevé | Fable, effort élevé | 3 | Concurrence validée dès la première vérification |
 | C | à lancer | Opus, effort élevé | Fable, effort élevé | 0 | |
 | D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
@@ -18,6 +18,14 @@ Enveloppe : 3 agents lancés sur 18, 0 montée en gamme sur 3. Avec la tâche D3
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
+
+### Historique de la tâche B
+- Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
+- Seconde chance (même ouvrier, même niveau) : les trois défauts et quatre compléments sont levés (clé `detail`, retour à la ligne visible, aucune exception, guichet simulé aligné). Seconde vérification : recalé de peu, sur deux contournements nouveaux (interpréteur seul, lanceurs absents de la liste) et un risque sur `localhost`.
+- Troisième passe, courte et bornée, au même niveau : le vérificateur a montré qu'une liste d'exclusions ne sera jamais complète. C'est la consigne qui était en cause, pas l'ouvrier : pas de montée en gamme. On ferme les cas connus et on écrit le risque qui reste.
+- À transmettre à D1 : `repondre` rend `False` aussi bien pour un « toujours » sans règle que pour un identifiant inconnu ; le serveur ne retire donc pas une carte sur `False`, il se fie à `ouvertes()`.
+- À transmettre à D2 : masquer « Toujours pour ce projet » quand `regle` est vide ; afficher la règle exacte sur la carte ; afficher `detail` à la demande.
+- À transmettre à A ou C : après un arrêt, le pont ne doit plus appeler `demander` (une demande arrivée après `annuler` attendrait tout le délai).
 
 ## Contrats communs, fixés avant le lancement
 
