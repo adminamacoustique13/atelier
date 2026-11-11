@@ -106,11 +106,16 @@ def commande_planifier(arguments) -> None:
 
 
 def commande_servir(arguments) -> None:
-    depot = Path(arguments.depot).resolve()
-    racine = Path(arguments.racine).resolve() if arguments.racine else depot.parent
+    if arguments.depot is None and arguments.racine is None:
+        arguments.depot = "."
+    depot = Path(arguments.depot).resolve() if arguments.depot else None
+    racine = Path(arguments.racine).expanduser().resolve() if arguments.racine else depot.parent
+    racine.mkdir(parents=True, exist_ok=True)
     projets = Projets(racine, creer_depot, ouvrir_depot)
-    projets.ajouter(ouvrir_depot(depot))
+    if depot:
+        projets.ajouter(ouvrir_depot(depot))
     projets.decouvrir()
+    projets.ouvrir_le_premier()
     serveur = creer_serveur(projets, arguments.port)
     print(f"Tableau de bord : http://127.0.0.1:{arguments.port}")
     print(f"Les nouveaux projets seront créés dans : {racine}")
@@ -153,7 +158,7 @@ def main() -> None:
     plan.set_defaults(action=commande_planifier)
 
     servir = commandes.add_parser("servir", help="Tableau de bord et moteur sur un vrai dépôt.")
-    servir.add_argument("--depot", default=".")
+    servir.add_argument("--depot", help="Projet à ouvrir (par défaut : le dossier courant).")
     servir.add_argument("--port", type=int, default=8765)
     aide = "Dossier où créer les nouveaux projets (par défaut : le parent du dépôt)."
     servir.add_argument("--racine", help=aide)

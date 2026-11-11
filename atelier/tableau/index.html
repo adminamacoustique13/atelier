@@ -3,7 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Atelier — tableau de bord</title>
+<title>Atelier</title>
+<meta name="apple-mobile-web-app-title" content="Atelier">
+<meta name="theme-color" content="#2b2c2f">
+<link rel="icon" type="image/png" href="/icone.png">
+<link rel="apple-touch-icon" href="/icone.png">
+<link rel="manifest" href="/manifest.webmanifest">
 <style>
 /* Verre fumé gris sur une scène floue : panneaux flottants, grands rayons, typographie fine.
    Turquoise = réussite, orange = tu es attendue. Boutons principaux en neutre plein. */
@@ -292,6 +297,14 @@ td.droite, th.droite { text-align: right; }
   .app { margin: 6px; height: calc(100% - 12px); padding: 8px 10px 10px; border-radius: 22px; }
   .onglets { gap: 16px; margin-left: 4px; }
 }
+/* Accueil, quand aucun projet n'existe encore */
+.accueil { flex: 1 1 0; display: none; align-items: center; justify-content: center; padding: 20px; }
+.sans-projet .accueil { display: flex; }
+.sans-projet .vue { display: none !important; }
+.sans-projet .onglets { visibility: hidden; }
+.accueil .carte { max-width: 460px; gap: 14px; padding: 26px 28px; }
+.accueil h1 { font-size: 20px; font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; }
+.accueil p { color: var(--discret); line-height: 1.55; }
 </style>
 </head>
 <body>
@@ -306,6 +319,15 @@ td.droite, th.droite { text-align: right; }
     <div class="pousse"></div>
     <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="pastille-cout"></span><span id="mode"></span></div>
   </header>
+
+  <section class="accueil" aria-label="Accueil">
+    <article class="carte">
+      <h1>Bienvenue dans l'Atelier</h1>
+      <p>Un projet, c'est un dossier de code avec son historique. Crée le premier : tu décriras ensuite à l'orchestrateur ce que tu veux construire, il proposera un découpage, et rien ne démarre avant ta validation.</p>
+      <p class="petit" id="lieu-accueil"></p>
+      <div class="boutons"><button class="principal" type="button" data-action="nouveau-projet">Créer un premier projet</button></div>
+    </article>
+  </section>
 
   <section class="vue" id="vue-conversation" aria-label="Conversation">
     <div class="discussion">
@@ -678,8 +700,19 @@ function afficherPlan(vue) {
 }
 
 /* ---------- Ensemble ---------- */
+function afficherAccueil(vue) {
+  const choix = document.getElementById("projet");
+  choix.innerHTML = "<option>Aucun projet</option>";
+  choix.dataset.empreinte = "";
+  choix.disabled = true;
+  document.getElementById("infos").hidden = true;
+  document.getElementById("lieu-accueil").textContent = `Les projets seront rangés dans ${vue.racine}.`;
+}
+
 function afficher(vue) {
   derniere = vue;
+  document.querySelector(".app").classList.toggle("sans-projet", Boolean(vue.aucun_projet));
+  if (vue.aucun_projet) return afficherAccueil(vue);
   const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
   const choix = document.getElementById("projet"), liste = vue.projets || [{ id: "", nom: vue.projet, courant: true }];
   const empreinte = liste.map((p) => `${p.id}/${p.nom}/${p.courant}`).join("|");
@@ -743,6 +776,7 @@ function agir(cible) {
   if (action === "valider") envoyer("/api/contrat/valider");
   if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix });
   if (action === "voir-plan") location.hash = "#plan";
+  if (action === "nouveau-projet") document.getElementById("nouveau").click();
   if (action === "choisir") { choisie = cible.dataset.id; afficherPlan(derniere); }
 }
 document.addEventListener("click", (e) => { const cible = e.target.closest("[data-action]"); if (cible) agir(cible); });

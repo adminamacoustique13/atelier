@@ -340,3 +340,29 @@ def test_un_vrai_projet_nait_avec_son_depot_git_et_son_profil(tmp_path):
     assert [p["id"] for p in autres.liste()] == ["mon-projet"]
     autres.ouvrir("mon-projet")
     assert autres.vue()["projet"] == "Mon projet"
+
+
+def test_sans_projet_l_atelier_attend_qu_on_en_cree_un(tmp_path):
+    import pytest
+
+    from atelier.modele import ProjetImpossible
+    from atelier.projets import Projets, creer_depot, ouvrir_depot
+
+    projets = Projets(tmp_path, creer_depot, ouvrir_depot)
+    projets.decouvrir()
+    projets.ouvrir_le_premier()
+    assert projets.vue() == {
+        "aucun_projet": True,
+        "projets": [],
+        "racine": str(tmp_path),
+        "mode": "réel",
+    }
+    with pytest.raises(ProjetImpossible):
+        projets.atelier()
+    projets.creer("Premier")
+    assert projets.vue()["projet"] == "Premier"
+
+    au_redemarrage = Projets(tmp_path, creer_depot, ouvrir_depot)
+    au_redemarrage.decouvrir()
+    au_redemarrage.ouvrir_le_premier()
+    assert au_redemarrage.vue()["projet"] == "Premier"

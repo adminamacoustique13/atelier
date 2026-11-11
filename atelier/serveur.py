@@ -17,6 +17,19 @@ from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire
 from atelier.moteur import Moteur, taches_du_plan
 
 PAGE = Path(__file__).parent / "tableau" / "index.html"
+ICONE = Path(__file__).parent / "tableau" / "icone.png"
+MANIFESTE = json.dumps(
+    {
+        "name": "Atelier",
+        "short_name": "Atelier",
+        "start_url": "/",
+        "display": "standalone",
+        "background_color": "#2b2c2f",
+        "theme_color": "#2b2c2f",
+        "icons": [{"src": "/icone.png", "sizes": "1024x1024", "type": "image/png"}],
+    },
+    ensure_ascii=False,
+).encode("utf-8")
 
 
 def point_d_etape(chantier: Chantier, en_marche: bool) -> str:
@@ -232,7 +245,8 @@ class Requetes(BaseHTTPRequestHandler):
 
     def _repondre(self, code: int, corps: bytes, nature: str) -> None:
         self.send_response(code)
-        self.send_header("Content-Type", f"{nature}; charset=utf-8")
+        binaire = nature.startswith("image/")
+        self.send_header("Content-Type", nature if binaire else f"{nature}; charset=utf-8")
         self.send_header("Content-Length", str(len(corps)))
         self.end_headers()
         self.wfile.write(corps)
@@ -246,6 +260,10 @@ class Requetes(BaseHTTPRequestHandler):
             return self._json(self.projets.vue())
         if self.path in ("/", "/index.html"):
             return self._repondre(200, PAGE.read_bytes(), "text/html")
+        if self.path in ("/icone.png", "/apple-touch-icon.png", "/favicon.ico"):
+            return self._repondre(200, ICONE.read_bytes(), "image/png")
+        if self.path == "/manifest.webmanifest":
+            return self._repondre(200, MANIFESTE, "application/manifest+json")
         return self._json({"erreur": "Adresse inconnue."}, 404)
 
     def do_POST(self) -> None:

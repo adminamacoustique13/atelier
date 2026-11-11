@@ -40,6 +40,24 @@ Un fichier `chantier/profil.json` dans chaque dépôt :
 - `commandes_permises` : les seules commandes qu'un agent a le droit de lancer.
 - `dosage` (facultatif) : remplace la table de départ, par exemple `{"mecanique": ["sonnet", "low"]}`.
 
+## Installer l'Atelier sur ton Mac, avec son icône dans le Dock
+
+Une seule fois, dans le Terminal :
+
+```
+git clone https://github.com/adminamacoustique13/atelier.git ~/Atelier-appli
+cd ~/Atelier-appli
+./outils/installer-mac.sh
+```
+
+Le script vérifie que Claude Code est installé, installe uv au besoin (il fournit la bonne version de Python), te demande dans quel dossier ranger tes projets, puis règle macOS pour que l'Atelier démarre tout seul à chaque ouverture de session, en arrière-plan. Il ouvre enfin le tableau de bord dans Safari.
+
+Dernière étape : dans cette fenêtre Safari, menu Fichier, puis « Ajouter au Dock ». L'Atelier a alors sa propre icône et sa propre fenêtre.
+
+Pour tout retirer : `./outils/desinstaller-mac.sh` (tes projets ne sont pas touchés). Le journal se trouve dans `~/Library/Logs/Atelier.log`.
+
+Le tableau de bord n'écoute que ton Mac (127.0.0.1). Le Mac doit rester allumé et éveillé pendant un chantier.
+
 ## Plusieurs projets
 
 Le bouton « Nouveau projet », en haut, crée un projet depuis le tableau de bord : un dossier à son nom, avec son dépôt git et son profil, puis une conversation vide avec l'orchestrateur. La liste à côté du nom permet de passer d'un projet à l'autre ; un chantier lancé continue de tourner quand on regarde un autre projet.
@@ -62,7 +80,7 @@ Les nouveaux dossiers sont créés à côté du dépôt servi (dans son dossier 
 
 ## Ce qui est testé et ce qui ne l'est pas
 
-Testé (30 tests, `python3 -m pytest -q`) : la lecture du flux de Claude Code, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
+Testé (31 tests, `python3 -m pytest -q`) : la lecture du flux de Claude Code, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
 
 Pas encore essayé avec de vrais agents : l'appel à Claude Code (`atelier/agents.py`, classe `AgentClaude`) est écrit d'après ses options réelles, mais n'a jamais tourné connecté. Même chose pour la session de la conversation (`converser`) : Claude Code accepte la ligne de commande, mais aucune vraie réponse n'a encore été reçue. C'est le premier essai à faire sur ta machine, sur un dépôt sans importance.
 

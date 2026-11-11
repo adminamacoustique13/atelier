@@ -91,7 +91,14 @@ class Projets:
                 self.dossiers[dossier.name] = dossier
 
     def atelier(self) -> Atelier:
+        if not self.courant:
+            raise ProjetImpossible("Crée d'abord un projet.")
         return self.ateliers[self.courant]
+
+    def ouvrir_le_premier(self) -> None:
+        """Au démarrage sans projet désigné, affiche le premier projet trouvé, s'il y en a un."""
+        if not self.courant and self.dossiers:
+            self.ouvrir(sorted(self.dossiers)[0])
 
     def liste(self) -> list[dict]:
         noms = {cle: cle for cle in self.dossiers}
@@ -124,6 +131,8 @@ class Projets:
         return cle
 
     def vue(self) -> dict:
+        if not self.courant:
+            return {"aucun_projet": True, "projets": [], "racine": str(self.racine), "mode": "réel"}
         donnees = self.atelier().vue()
         donnees["projets"] = self.liste()
         donnees["racine"] = str(self.racine)
