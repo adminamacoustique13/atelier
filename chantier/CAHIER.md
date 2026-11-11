@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Ga est vérifiée ; D3a est en cours ; restent D3b et Gb.
+État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Ga, D2.1 et D3a sont vérifiées ; D3b est en cours ; reste Gb, puis la clôture.
 
 ## Suivi
 
-Compteur : 41 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur : 43 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -18,8 +18,8 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
 | D2 | vérifié | Sonnet, effort moyen | Opus, effort moyen, puis vérification mécanique | 2 | Essai dans le navigateur : 89 vérifications passées deux fois de suite ; captures relues par l'orchestrateur |
 | D2.1 | vérifié | Sonnet, effort faible | mécanique seule | 1 | Une ligne de style ; l'essai du tableau de bord passe de 89 à 95 vérifications ; capture relue par l'orchestrateur |
-| D3a | en vérification | Opus, effort élevé | Fable, complète | 1 | 596 tests verts trois fois de suite, contrôle de forme vert, périmètre respecté |
-| D3b | à lancer, après D3a | Sonnet, effort moyen | bornée | 0 | |
+| D3a | vérifié | Opus, effort élevé | Fable, complète, puis vérification mécanique | 2 | 599 tests verts ; 19 valeurs refusées par la route et 9 profils écrits à la main sans faille ; 25 tours à cinq agents sans écart |
+| D3b | en cours | Sonnet, effort moyen | mécanique, avec relecture des captures | 1 | |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
 | E.1 | vérifié | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | Validé du premier coup : 457 tests verts ; 29 870 enchaînements du vérificateur sans écart, et 111 110 pour R1 et R2 |
 | Ga | vérifié | Sonnet, effort moyen | Opus, bornée | 1 | Validé du premier coup : 27 tests verts ; douze cas de dossier abîmé ou de phrase trompeuse essayés par le vérificateur, aucun défaut bloquant |
@@ -94,6 +94,13 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - À transmettre à Gb : ne lancer qu'une mise à jour à la fois ; s'arrêter seulement si `fait` est vrai ; journaliser `detail` sans jamais l'afficher ; appeler `verifier` hors du fil qui répond aux requêtes (une interrogation peut durer 60 secondes) ; en démonstration, ne pas arrêter le serveur sur le `fait` du double simulé.
 - Deux retouches du module confiées à Gb : tirer explicitement `origin main` (aujourd'hui le pull suit l'amont de `main`, alors que la vérification regarde `origin/main`) ; ne pas prendre « Cannot fast-forward to multiple branches » pour une histoire divergente.
 - Restes mineurs, à reprendre à la clôture : pas de phrase dédiée pour un fichier non suivi en conflit ni pour une branche sans amont ; `GIT_SSH_COMMAND` écrase un réglage ssh propre à la personne.
+
+### Historique de la tâche D3a
+- Vérification complète : recalé de peu. Rien de grave : aucun agent n'obtient plus de droits que prévu, `bypassPermissions` est refusé partout, aucun interblocage, le changement de mode part vraiment vers Claude Code. Deux défauts : le fil ne redisait pas un écart de mode déjà dit quand il se reproduisait après un nouveau choix ; un échec ordinaire dont la sortie contenait la phrase du refus était pris pour un refus de l'arbitre (la consigne disait « contient » au lieu de « commence par »).
+- Seconde passe (même ouvrier) : les deux défauts sont corrigés, avec trois tests qui échouaient avant ; les explications de « Répétition » et de l'arbitre sont rendues exactes. Vérification mécanique seule, par décision de la personne responsable de ne plus tout faire revérifier.
+- Défaut mineur connu, non corrigé : si un même tour passe de « Refuser sans demander » à l'arbitre, un refus du premier mode peut être annoncé comme un refus de l'arbitre.
+- Ce que chaque mode change réellement, établi par le vérificateur : en « Me demander », seules les commandes non permises d'avance demandent une carte ; en « Répétition », les modifications de fichiers demandent une carte mais les commandes permises du profil peuvent écrire ; en « Refuser sans demander », les refus n'apparaissent nulle part ; l'arbitre ne juge que ce qui aurait demandé une carte, plus les commandes qui exécutent du code.
+- À transmettre à F : la liste « À essayer en vrai » de la fiche de relais D3a.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
