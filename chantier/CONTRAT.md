@@ -16,6 +16,8 @@ Amendé le 2026-11-11 par la personne responsable : la tâche E reçoit une quat
 
 Amendé le 2026-11-11 par la personne responsable : l'enveloppe passe de 36 à 44 agents lancés.
 
+Amendé le 2026-11-11 par la personne responsable : le plafond du nombre d'agents lancés est retiré. Le compteur reste tenu et affiché à chaque point d'étape. Les deux autres limites de l'enveloppe ne changent pas.
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 
@@ -36,7 +38,7 @@ Ce qui ne change pas : la connexion par ton abonnement, le modèle et l'effort p
 - La logique de dosage, d'escalade et de vérification (`dosage.py`, `consignes.py`, et l'enchaînement dans `moteur.py`), en dehors de ce que la tâche D1 y ajoute pour l'arrêt.
 
 ## Enveloppe
-- Agents lancés au maximum : 44 (porté de 18 à 24, à 36, puis à 44, le 2026-11-11 : les tâches D3, G, H et I ont été ajoutées, et presque chaque tâche a demandé au moins une seconde passe)
+- Agents lancés : sans plafond depuis le 2026-11-11 (il avait été porté de 18 à 24, à 36, puis à 44 le même jour). L'orchestrateur tient le compte et le donne à chaque point d'étape.
 - Tentatives par tâche au maximum : 3 (le premier essai, la seconde chance, puis un cran au-dessus)
 - Montées en gamme au maximum : 3 sur l'ensemble du chantier
 

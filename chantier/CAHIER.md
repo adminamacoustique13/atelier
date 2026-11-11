@@ -4,7 +4,7 @@
 
 ## Suivi
 
-Enveloppe : 31 agents lancés sur 44 (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). La personne responsable a porté l'enveloppe de 18 à 24, à 36, puis à 44, le 2026-11-11. Il reste 5 lancements prévus au minimum (la vérification de E, puis D3 et G à deux agents chacune, les vérifications de D2 et de I étant en cours), plus la simplification de clôture : la marge est de 7 environ.
+Compteur : 31 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11, après quatre relèvements le même jour (18, 24, 36, 44) ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur. Il reste 5 lancements prévus au minimum (la vérification de E, puis D3 et G à deux agents chacune, les vérifications de D2 et de I étant en cours), plus la simplification de clôture.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
