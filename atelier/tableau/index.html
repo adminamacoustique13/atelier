@@ -300,6 +300,9 @@ button.discret { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 
 .maj-phrase { flex: none; margin: -4px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
 .maj-phrase .page { display: block; color: var(--faible); }
 #maj[disabled] { opacity: 0.6; cursor: default; }
+.nouveau-chantier { align-items: center; gap: 10px; }
+.nouveau-chantier .petit { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+#nouveau-chantier[disabled] { opacity: 0.6; cursor: default; }
 button.discret.confirme { color: var(--refus); border-color: color-mix(in srgb, var(--refus) 60%, transparent); font-weight: 500; }
 .autorisation { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .autor-corps { display: flex; flex-direction: column; gap: 6px; min-width: 0; cursor: pointer; border-radius: 8px; }
@@ -421,7 +424,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
   <section class="vue defilante" id="vue-chantier" aria-label="Chantier">
     <div class="pages">
       <div class="grille">
-        <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div></article>
+        <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="boutons nouveau-chantier"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div></article>
         <article class="carte"><h2>Ce qui t'attend</h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
       </div>
       <article class="carte" id="carte-mode" hidden><h2>Mode des ouvriers</h2><div class="modes-cadre"><div id="mode-ouvriers"></div><div id="mode-ouvriers-etat" aria-live="polite"></div></div></article>
@@ -1223,6 +1226,48 @@ async function mettreAJour() {
   direMaj(faite.phrase, majAttente ? 0 : 15000);
 }
 
+/* Le bouton « Nouveau chantier » : le chantier en cours est archivé côté serveur, et le projet repart d'une
+   page blanche, avec un orchestrateur sans souvenir. Le premier clic arme le bouton cinq secondes, le second envoie. */
+let ncArme = false, ncArmeLe = 0, minuteNc = null, ncEnvoi = false, ncPhrase = "", minuteNcPhrase = null;
+function afficherNouveauChantier() {
+  const bouton = document.getElementById("nouveau-chantier"), zone = document.getElementById("nouveau-chantier-phrase");
+  if (!bouton || !zone) return;
+  bouton.disabled = ncEnvoi;
+  bouton.classList.toggle("confirme", ncArme && !ncEnvoi);
+  bouton.textContent = ncEnvoi ? "Archivage en cours" : ncArme ? "Confirmer le nouveau chantier" : "Nouveau chantier";
+  zone.textContent = ncPhrase;
+}
+function direNouveauChantier(texte, duree = 20000) {
+  ncPhrase = texte;
+  clearTimeout(minuteNcPhrase);
+  if (texte && duree) minuteNcPhrase = setTimeout(() => { ncPhrase = ""; afficherNouveauChantier(); }, duree);
+  afficherNouveauChantier();
+}
+async function nouveauChantier() {
+  if (ncEnvoi) return;
+  if (!ncArme) {
+    ncArme = true; ncArmeLe = performance.now();
+    clearTimeout(minuteNc);
+    minuteNc = setTimeout(() => { ncArme = false; afficherNouveauChantier(); }, 5000);
+    return direNouveauChantier(""); // une phrase d'avant n'a plus lieu d'être
+  }
+  if (performance.now() - ncArmeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
+  clearTimeout(minuteNc); ncArme = false;
+  if (rejoue) return direNouveauChantier("Démonstration rejouée : rien n'est archivé.");
+  ncEnvoi = true;
+  direNouveauChantier("");
+  let donnees = null;
+  try {
+    const retour = await fetch("/api/chantier/nouveau", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (retour.ok) donnees = await retour.json();
+  } catch (erreur) { donnees = null; }
+  ncEnvoi = false;
+  const fait = donnees && donnees.nouveau_chantier;
+  if (!fait || typeof fait.phrase !== "string") return direNouveauChantier("La demande n'est pas partie. Réessaie dans un instant.");
+  if (Array.isArray(donnees.taches)) afficher(donnees);
+  direNouveauChantier(fait.phrase);
+}
+
 function agir(cible) {
   const action = cible.dataset.action;
   if (action === "valider") envoyer("/api/contrat/valider");
@@ -1235,6 +1280,7 @@ function agir(cible) {
   if (action === "derouler") { const nom = cible.dataset.nom; if (deroules.has(nom)) deroules.delete(nom); else deroules.add(nom); rafraichir(); }
   if (action === "mode") choisirMode(cible.dataset.mode);
   if (action === "maj") mettreAJour();
+  if (action === "nouveau-chantier") nouveauChantier();
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();

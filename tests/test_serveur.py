@@ -1757,3 +1757,116 @@ def test_la_fonction_d_arret_sort_avec_le_code_zero_apres_avoir_vide_les_sorties
     monkeypatch.setattr(principal.os, "_exit", lambda code: sorties.append(code))
     principal.arreter_le_processus()
     assert sorties == [0]
+
+
+# --- Un nouveau chantier dans le même projet -----------------------------------------------
+
+
+def test_un_nouveau_chantier_archive_l_ancien_et_repart_de_zero(tableau, tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")])
+    serveur = tableau(atelier)
+    atelier.message("Premier objectif")
+    assert attendre(lambda: not atelier.occupe)
+    ancienne_session = atelier.moteur.chantier.session
+    assert ancienne_session
+
+    code, vue = serveur.appeler("/api/chantier/nouveau")
+
+    assert code == 200 and vue["nouveau_chantier"]["fait"] is True
+    phrase = vue["nouveau_chantier"]["phrase"]
+    assert phrase.startswith("Nouveau chantier ouvert. Le précédent est archivé dans ")
+    assert phrase.endswith("Le code du projet n'a pas changé.")
+    nouveau = atelier.moteur.chantier
+    assert nouveau.taches == [] and nouveau.session == "" and nouveau.contrat.valide is False
+    assert nouveau.contrat.objectif == "" and nouveau.projet == "essai"
+    textes = [e["texte"] for e in nouveau.evenements]
+    accueil = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
+    assert textes == [accueil, phrase]
+    assert vue["taches"] == [] and "Premier objectif" not in json.dumps(vue, ensure_ascii=False)
+    # L'ancien chantier est lisible dans son archive, et l'état sur disque est le nouveau.
+    (archive,) = (tmp_path / ".atelier" / "archives").iterdir()
+    ancien = json.loads((archive / "etat.json").read_text("utf-8"))
+    assert ancien["session"] == ancienne_session and [t["id"] for t in ancien["taches"]] == ["A"]
+    assert "Premier objectif" in [e["texte"] for e in ancien["evenements"]]
+    assert (archive / "CAHIER.md").read_text("utf-8").startswith("# Cahier des charges")
+    courant = json.loads((tmp_path / ".atelier" / "etat.json").read_text("utf-8"))
+    assert courant["taches"] == [] and courant["session"] == ""
+
+
+def test_apres_un_nouveau_chantier_l_orchestrateur_repart_d_une_session_neuve(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    atelier.message("Premier objectif")
+    assert attendre(lambda: not atelier.occupe)
+    ancienne_session = atelier.moteur.chantier.session
+    assert atelier.nouveau_chantier()["fait"] is True
+    atelier.message("Second objectif")
+    assert attendre(lambda: not atelier.occupe)
+    nouvelle_session = atelier.moteur.chantier.session
+    assert nouvelle_session and nouvelle_session != ancienne_session
+    dernier = atelier.moteur.agent.appels[-1]
+    assert dernier["session"] == nouvelle_session and dernier["reprise"] is False
+
+
+def test_un_nouveau_chantier_est_refuse_tant_que_l_orchestrateur_repond(tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")])
+    atelier.message("Objectif")
+    assert attendre(lambda: not atelier.occupe)
+    avant = atelier.moteur.chantier
+    atelier.occupe = True
+    resultat = atelier.nouveau_chantier()
+    atelier.occupe = False
+    assert resultat == {
+        "fait": False,
+        "phrase": "Un agent travaille ou l'orchestrateur répond : attends qu'il ait fini, "
+        "ou arrête-le, avant d'ouvrir un nouveau chantier.",
+    }
+    assert atelier.moteur.chantier is avant
+    assert not (tmp_path / ".atelier" / "archives").exists()
+
+
+def test_un_nouveau_chantier_est_refuse_tant_qu_un_agent_travaille(tableau, tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")], delai_s=5)
+    tableau(atelier)
+    atelier.lancer()
+    assert attendre(atelier.en_marche)
+    avant = atelier.moteur.chantier
+    assert atelier.nouveau_chantier()["fait"] is False
+    assert atelier.moteur.chantier is avant
+    assert not (tmp_path / ".atelier" / "archives").exists()
+
+
+def test_un_chantier_encore_vide_n_est_pas_archive(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    resultat = atelier.nouveau_chantier()
+    assert resultat == {
+        "fait": False,
+        "phrase": "Ce chantier est encore vide : il n'y a rien à archiver.",
+    }
+    assert not (tmp_path / ".atelier" / "archives").exists()
+
+
+def test_deux_nouveaux_chantiers_de_suite_gardent_deux_archives(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    for objectif in ("Un", "Deux"):
+        atelier.message(objectif)
+        assert attendre(lambda: not atelier.occupe)
+        assert atelier.nouveau_chantier()["fait"] is True
+    archives = sorted((tmp_path / ".atelier" / "archives").iterdir())
+    assert len(archives) == 2
+    objectifs = [
+        [e["texte"] for e in json.loads((a / "etat.json").read_text("utf-8"))["evenements"]]
+        for a in archives
+    ]
+    assert "Un" in objectifs[0] and "Deux" in objectifs[1]
+
+
+def test_le_nouveau_fil_redit_ce_qui_est_su_de_la_facturation(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    atelier.annoncer_connexion({})
+    atelier.message("Objectif")
+    assert attendre(lambda: not atelier.occupe)
+    assert atelier.nouveau_chantier()["fait"] is True
+    textes = [e["texte"] for e in atelier.moteur.chantier.evenements]
+    assert any(t.startswith("Aucune variable ANTHROPIC_API_KEY") for t in textes) or any(
+        t.startswith("Une variable ANTHROPIC_API_KEY") for t in textes
+    )

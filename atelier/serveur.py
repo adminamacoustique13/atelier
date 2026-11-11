@@ -12,6 +12,7 @@ import threading
 import uuid
 from collections import deque
 from contextlib import suppress
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -366,6 +367,14 @@ class Activite:
 ACCEPTER_OUTILS, REFUSER_OUTILS = "Accepter ce réglage", "Refuser"
 
 
+ACCUEIL = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
+CHANTIER_OCCUPE = (
+    "Un agent travaille ou l'orchestrateur répond : attends qu'il ait fini, ou arrête-le, "
+    "avant d'ouvrir un nouveau chantier."
+)
+CHANTIER_VIDE = "Ce chantier est encore vide : il n'y a rien à archiver."
+
+
 class Atelier:
     """Relie un dépôt, un chantier, le moteur et le tableau de bord."""
 
@@ -413,8 +422,7 @@ class Atelier:
         self.sur_vue = None
         self.moteur = Moteur(chantier, agent, controles, profil, sur_changement=self._sauver)
         if not chantier.taches and not chantier.evenements:
-            accueil = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
-            chantier.noter(accueil, auteur="orchestrateur")
+            chantier.noter(ACCUEIL, auteur="orchestrateur")
         if isinstance(profil, dict) and "mode_ouvriers" in profil and not mode_valide(lu):
             phrase = phrase_mode_illisible(lu)
             if not chantier.evenements or chantier.evenements[-1]["texte"] != phrase:
@@ -782,6 +790,51 @@ class Atelier:
             self.moteur.chantier.noter(phrase)
         self._sauver()
 
+    # --- un nouveau chantier dans le même projet --------------------------------
+
+    def nouveau_chantier(self) -> dict:
+        """Archive le chantier en cours et repart d'un chantier vide, dans le même projet.
+
+        La conversation, le contrat et les tâches partent dans `.atelier/archives/` ; le code du
+        projet n'est pas touché. L'orchestrateur repart d'une session neuve, sans souvenir de
+        l'ancienne. Refusé tant qu'un agent travaille ou que l'orchestrateur répond.
+        """
+        with self.moteur.verrou:
+            if self.en_marche() or self.occupe:
+                return {"fait": False, "phrase": CHANTIER_OCCUPE}
+            ancien = self.moteur.chantier
+            if not ancien.taches and not any(e["auteur"] == "toi" for e in ancien.evenements):
+                return {"fait": False, "phrase": CHANTIER_VIDE}
+            avait_annonce = any(e["texte"] in DEPARTS for e in ancien.evenements)
+            archive = self._archiver(ancien)
+            nouveau = Chantier(projet=ancien.projet, contrat=Contrat(objectif=""))
+            nouveau.noter(ACCUEIL, auteur="orchestrateur")
+            phrase = (
+                f"Nouveau chantier ouvert. Le précédent est archivé dans {archive} : "
+                "sa conversation, son contrat et ses tâches y restent lisibles. "
+                "Le code du projet n'a pas changé."
+            )
+            nouveau.noter(phrase)
+            self.moteur.chantier = nouveau
+            self.brouillon = {"texte": "", "outils": []}
+        if avait_annonce:
+            self.annoncer_connexion()  # le nouveau fil redit ce qui est su de la facturation
+        else:
+            self._sauver()
+        return {"fait": True, "phrase": phrase}
+
+    def _archiver(self, chantier: Chantier) -> str:
+        """Range l'état et le cahier du chantier dans un dossier daté, et rend son chemin court."""
+        racine = self.depot / ".atelier" / "archives"
+        nom = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        dossier, rang = racine / nom, 1
+        while dossier.exists():  # deux archives dans la même seconde
+            rang += 1
+            dossier = racine / f"{nom}-{rang}"
+        chantier.sauver(dossier / "etat.json")
+        ecrire_cahier(chantier, dossier / "CAHIER.md")
+        return f".atelier/archives/{dossier.name}"
+
     # --- l'arrêt -----------------------------------------------------------------
 
     def arreter(self, tache=None) -> dict:
@@ -1065,6 +1118,7 @@ ROUTES = {
     "/api/arreter": lambda r, c: {"arret": r.atelier.arreter(c.get("tache"))},
     "/api/mode": lambda r, c: {"changement_mode": r.atelier.changer_mode(c["mode"])},
     "/api/mise-a-jour": lambda r, c: r.mettre_a_jour(),
+    "/api/chantier/nouveau": lambda r, c: {"nouveau_chantier": r.atelier.nouveau_chantier()},
 }
 
 

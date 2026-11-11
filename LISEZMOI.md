@@ -143,6 +143,12 @@ Le bouton « Nouveau projet », en haut, crée un projet depuis le tableau de bo
 
 Les nouveaux dossiers sont créés à côté du dépôt servi (dans son dossier parent), ou dans le dossier donné par `--racine`. Au démarrage, l'atelier y retrouve tous les dépôts git et les projets qui ont déjà un chantier.
 
+### Un nouveau chantier dans le même projet
+
+Un projet garde un seul chantier à la fois, avec sa conversation, son contrat et ses tâches, et l'orchestrateur se souvient de tout ce qui s'y est dit. Quand un chantier est fini et que tu veux en commencer un autre dans le même projet, ouvre l'onglet Chantier et clique « Nouveau chantier », puis « Confirmer le nouveau chantier ».
+
+Le chantier en cours est alors archivé dans le dossier `.atelier/archives/` du projet (son état dans `etat.json`, son cahier dans `CAHIER.md`), et tu repars d'une page blanche : plus de tâches, un contrat vide, et un orchestrateur qui ne se souvient de rien. Le code du projet n'est pas touché. Le bouton refuse tant qu'un agent travaille ou que l'orchestrateur répond.
+
 ### Reprendre un dépôt existant
 
 La même fenêtre propose « Reprendre un dépôt existant » : on colle l'adresse du dépôt (par exemple `https://github.com/compte/projet`) et l'Atelier le récupère dans le dossier des projets, puis l'ouvre. Rien n'est modifié dans le dépôt lui-même : l'état interne de l'Atelier (`.atelier/`) est exclu de git sur cet ordinateur seulement, et le cahier du chantier (`chantier/CAHIER.md`) sera commité avec la première tâche, comme dans un projet neuf.
