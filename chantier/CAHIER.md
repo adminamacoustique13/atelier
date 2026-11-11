@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Ga, D2.1 et D3a sont vérifiées ; D3b est en cours ; reste Gb, puis la clôture.
+État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Ga, D2.1, D3a et D3b sont vérifiées ; Gb est en cours ; restera la clôture.
 
 ## Suivi
 
-Compteur : 43 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur : 44 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -19,11 +19,11 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D2 | vérifié | Sonnet, effort moyen | Opus, effort moyen, puis vérification mécanique | 2 | Essai dans le navigateur : 89 vérifications passées deux fois de suite ; captures relues par l'orchestrateur |
 | D2.1 | vérifié | Sonnet, effort faible | mécanique seule | 1 | Une ligne de style ; l'essai du tableau de bord passe de 89 à 95 vérifications ; capture relue par l'orchestrateur |
 | D3a | vérifié | Opus, effort élevé | Fable, complète, puis vérification mécanique | 2 | 599 tests verts ; 19 valeurs refusées par la route et 9 profils écrits à la main sans faille ; 25 tours à cinq agents sans écart |
-| D3b | en cours | Sonnet, effort moyen | mécanique, avec relecture des captures | 1 | |
+| D3b | vérifié | Sonnet, effort moyen | mécanique, avec relecture des captures | 1 | Essai dans le navigateur : 82 vérifications passées ; captures `D3-mode-reel.png` et `D3-etroit.png` relues par l'orchestrateur |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
 | E.1 | vérifié | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | Validé du premier coup : 457 tests verts ; 29 870 enchaînements du vérificateur sans écart, et 111 110 pour R1 et R2 |
 | Ga | vérifié | Sonnet, effort moyen | Opus, bornée | 1 | Validé du premier coup : 27 tests verts ; douze cas de dossier abîmé ou de phrase trompeuse essayés par le vérificateur, aucun défaut bloquant |
-| Gb | à lancer, après D3b et Ga | Sonnet, effort moyen | bornée | 0 | |
+| Gb | en cours | Sonnet, effort moyen | mécanique, avec relecture des captures | 1 | |
 | I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
