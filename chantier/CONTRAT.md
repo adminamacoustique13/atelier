@@ -12,6 +12,8 @@ Amendé le 2026-11-11 par la personne responsable : une tâche H retire du dép�
 
 Amendé le 2026-11-11 par la personne responsable : une tâche I corrige une course dans `atelier/controles.py`, antérieure au chantier et hors de son objectif initial (deux commandes `git worktree remove` lancées hors du verrou de fusion). Pour elle seule, la zone rouge « modifier les garde-fous » est levée sur ce fichier, pour cette correction et rien d'autre.
 
+Amendé le 2026-11-11 par la personne responsable : la tâche E reçoit une quatrième tentative, un cran au-dessus (Opus), pour son dernier défaut.
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 
