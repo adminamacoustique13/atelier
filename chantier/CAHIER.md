@@ -4,15 +4,16 @@
 
 ## Suivi
 
-Enveloppe : 2 agents lancés sur 18, 0 montée en gamme sur 3.
+Enveloppe : 3 agents lancés sur 18, 0 montée en gamme sur 3. Avec la tâche D3 ajoutée le 2026-11-11, il reste 11 lancements prévus : la marge passe de 6 à 4.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
 | A | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
-| B | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
+| B | en vérification | Opus, effort élevé | Fable, effort élevé | 1 | 43 tests du guichet verts, contrôle de forme vert, périmètre respecté |
 | C | à lancer | Opus, effort élevé | Fable, effort élevé | 0 | |
 | D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | F | revient à la personne responsable | | | | |
 
@@ -139,6 +140,28 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Dépendances** : D1
 - **Preuve** : un essai automatique dans un navigateur sans écran, sur `python3 -m atelier demo`. On y règle une demande simulée et on arrête un agent simulé, captures d'écran à l'appui pour toi.
 - **Départ** : Sonnet, effort moyen.
+
+### D3. Le mode des ouvriers — ajoutée le 2026-11-11 par la personne responsable
+- **Pourquoi** : choisir depuis le tableau de bord jusqu'où les ouvriers avancent sans te demander, y compris en laissant un arbitre (le mode `auto` de Claude Code) décider à ta place. La tâche touche à la sécurité des agents.
+- **Le menu** : « Mode des ouvriers », dans l'onglet Chantier, avec cinq choix :
+  - « Me demander » (`default`) ;
+  - « Accepter les modifications » (`acceptEdits`) ;
+  - « Répétition » (`plan`) ;
+  - « Refuser sans demander » (`dontAsk`) ;
+  - « Laisser un arbitre décider » (`auto`).
+- **Critères** :
+  1. Le choix est enregistré dans `chantier/profil.json` et appliqué à chaud aux agents en marche par `set_permission_mode`.
+  2. Le vérificateur et l'orchestrateur restent en lecture seule, quel que soit le choix.
+  3. Pas de bypass.
+  4. En mode auto, chaque action refusée par l'arbitre apparaît dans le fil de l'agent, avec la raison du refus.
+  5. Si le mode auto n'est pas disponible pour le modèle d'un agent, ou si le SDK le fait retomber en mode `default`, le fil le dit en une phrase, et le menu indique le mode réellement appliqué.
+  6. Quand l'arbitre se met en pause après trop de refus, les demandes repassent par les cartes d'autorisation, sans rien perdre.
+- **Périmètre** : `atelier/sdk.py`, `atelier/agents.py`, `atelier/serveur.py`, `atelier/tableau/index.html`, et leurs tests (`tests/test_sdk.py`, `tests/test_agents.py`, `tests/test_serveur.py`). À resserrer au lancement, selon ce que C, D1 et D2 auront livré.
+- **Contrats** : attend le pont (A), les agents (C), les routes et la vue (D1), les cartes (D2).
+- **Dépendances** : D2
+- **Preuve** : des tests du serveur avec un agent simulé, qui changent le mode pendant qu'il tourne et simulent un refus de l'arbitre puis une retombée en `default` ; et l'essai dans le navigateur sans écran.
+- **Départ** : Sonnet, effort élevé. La tâche touche à la sécurité des agents.
+- **À vérifier avant le lancement** : sur le SDK installé, comment un refus de l'arbitre, sa mise en pause et une retombée en `default` sont annoncés. `set_permission_mode` et les cinq modes existent bien dans la version 0.2.172.
 
 ### E. Installation et connexion
 - **Pourquoi** : sur ton Mac, Atelier doit installer la bibliothèque tout seul, et te dire clairement s'il facture ton abonnement ou une clé API.

@@ -2,6 +2,8 @@
 
 Validé le 2026-11-11 par la personne responsable.
 
+Amendé le 2026-11-11 par la personne responsable : le mode `auto` de Claude Code entre dans le périmètre (tâche D3 du cahier), sans bypass.
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 
@@ -17,7 +19,6 @@ Ce qui ne change pas : la connexion par ton abonnement, le modèle et l'effort p
 ## Hors périmètre
 - Raymonde, Pupitre et AMA-OS (ils viendront après, sur le même modèle).
 - Les sous-agents propres au SDK : Atelier continue de lancer lui-même chaque agent, pour garder la main sur le dosage et la vérification.
-- Le mode `auto` de Claude Code (un modèle qui accorde les autorisations à ta place).
 - L'accès depuis le téléphone et toute écoute réseau au-delà de la machine.
 - Les droits d'écriture de l'orchestrateur en conversation : il reste en lecture seule.
 - La logique de dosage, d'escalade et de vérification (`dosage.py`, `consignes.py`, et l'enchaînement dans `moteur.py`), en dehors de ce que la tâche D1 y ajoute pour l'arrêt.
