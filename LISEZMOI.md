@@ -46,6 +46,8 @@ L'orchestrateur, en conversation, n'a jamais ces commandes : il lit le dépôt e
 
 ## Installer l'Atelier sur ton Mac, avec son icône dans le Dock
 
+Sur un PC, le script d'installation ne marche pas : la marche à suivre est dans `LISEZMOI-PC.md`.
+
 Une seule fois, dans le Terminal :
 
 ```
