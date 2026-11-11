@@ -318,6 +318,25 @@ def test_outil_relaye_sous_forme_courte(ouvrir):
     assert du_type(evenements, "outil") == [decrire_outil({"name": "Bash", "input": entree})]
 
 
+def test_outil_de_lecture_relaye_sous_sa_forme_courte(ouvrir):
+    session, _, evenements = ouvrir([outil("Read", {"file_path": "coeur/calcul.py"}), fin()])
+    session.envoyer("Lis.")
+    assert du_type(evenements, "outil") == ["Lit coeur/calcul.py"]
+
+
+def test_un_message_inconnu_ou_illisible_ne_casse_rien(ouvrir):
+    autre = SystemMessage(subtype="autre", data={})
+    sans_delta = StreamEvent(uuid="u", session_id=UUID, event={"type": "x"})
+    delta_vide = StreamEvent(uuid="u", session_id=UUID, event={"delta": {"type": "text_delta"}})
+    session, _, evenements = ouvrir(
+        [init(), object(), autre, sans_delta, delta_vide, texte("Bon"), texte("jour"),
+         fin(result="Bonjour")]  # fmt: skip
+    )
+    resultat = session.envoyer("Salue.")
+    assert (resultat.ok, resultat.texte) == (True, "Bonjour")
+    assert du_type(evenements, "texte") == ["Bon", "jour"] and du_type(evenements, "outil") == []
+
+
 def test_un_rappel_qui_leve_ne_tue_pas_la_session(ouvrir):
     def rappel(_evenement):
         raise RuntimeError("Le tableau de bord est tombé.")

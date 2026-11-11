@@ -301,64 +301,6 @@ def decrire_outil(bloc: dict) -> str:
     return f"{verbe} {objet}".strip()[:120]
 
 
-# La lecture de l'ancienne sortie de Claude Code en ligne de commande. Atelier ne la lance
-# plus ; elle reste parce que les tests d'origine s'en servent et qu'elle fixe les règles que
-# le pont reproduit (`atelier.sdk.lire_resultat`).
-
-
-def _suivre(evenement: dict, morceaux: list[str], sur_texte, sur_outil) -> None:
-    """Relaie un événement du flux : un bout de texte, ou un outil qui démarre."""
-    if evenement.get("type") == "stream_event":
-        delta = (evenement.get("event") or {}).get("delta") or {}
-        if delta.get("type") == "text_delta" and delta.get("text"):
-            morceaux.append(delta["text"])
-            if sur_texte:
-                sur_texte(delta["text"])
-    elif evenement.get("type") == "assistant" and sur_outil:
-        for bloc in (evenement.get("message") or {}).get("content") or []:
-            if isinstance(bloc, dict) and bloc.get("type") == "tool_use":
-                sur_outil(decrire_outil(bloc))
-
-
-def lire_flux_claude(lignes, sur_texte=None, sur_outil=None) -> Resultat:
-    """Lit la réponse de Claude Code au fil de l'eau, une ligne JSON après l'autre."""
-    morceaux: list[str] = []
-    final = None
-    for ligne in lignes:
-        try:
-            evenement = json.loads(ligne)
-        except ValueError:
-            continue
-        if not isinstance(evenement, dict):
-            continue
-        if evenement.get("type") == "result":
-            final = evenement
-        else:
-            _suivre(evenement, morceaux, sur_texte, sur_outil)
-    if final is None:
-        return Resultat(ok=False, erreur="Claude Code s'est arrêté sans répondre.")
-    resultat = lire_sortie_claude(json.dumps(final))
-    if resultat.ok and not resultat.texte:
-        resultat.texte = "".join(morceaux)
-    return resultat
-
-
-def lire_sortie_claude(sortie: str, erreurs: str = "") -> Resultat:
-    """Traduit la sortie JSON de Claude Code en résultat."""
-    try:
-        donnees = json.loads(sortie)
-    except ValueError:
-        return Resultat(ok=False, erreur=(erreurs or sortie or "Sortie vide.")[-500:])
-    usage = donnees.get("usage") or {}
-    tokens = int(usage.get("input_tokens", 0)) + int(usage.get("output_tokens", 0))
-    texte = str(donnees.get("result", ""))
-    if donnees.get("is_error"):
-        return Resultat(ok=False, erreur=texte or "Erreur signalée par Claude Code.", tokens=tokens)
-    return Resultat(
-        ok=True, texte=texte, cout_usd=float(donnees.get("total_cost_usd") or 0), tokens=tokens
-    )
-
-
 @dataclass
 class AgentSimule:
     """Joue un scénario écrit d'avance : pour la démonstration et les tests.

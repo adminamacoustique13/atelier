@@ -48,7 +48,7 @@ def lire_source(api_key_source) -> str:
 
 
 def lire_resultat(final, morceaux: list[str]) -> Resultat:
-    """Traduit le message de fin du SDK en résultat, avec les règles de `lire_sortie_claude`."""
+    """Traduit le message de fin du SDK en résultat : texte, coût et tokens, ou échec."""
     if final is None:
         return Resultat(ok=False, erreur=SANS_REPONSE)
     usage = getattr(final, "usage", None) or {}

@@ -21,8 +21,6 @@ from atelier.agents import (  # noqa: E402
     AgentClaude,
     AgentSimule,
     Resultat,
-    lire_flux_claude,
-    lire_sortie_claude,
 )
 from atelier.consignes import ROLE_ORCHESTRATEUR  # noqa: E402
 from atelier.controles import ControlesSimules  # noqa: E402
@@ -85,45 +83,37 @@ def du_type(evenements, type_):
     return [e["contenu"] for e in evenements if e["type"] == type_]
 
 
-# --- Critère 1 : les mêmes résultats qu'avec `claude -p` -----------------------------------
+# --- Critère 1 : les résultats rendus par l'agent --------------------------------------------
 
 
 @pytest.mark.parametrize(
-    "result, is_error",
-    [("Fini.", False), ("Quota dépassé.", True), ("", True)],
+    "result, is_error, attendu",
+    [
+        ("Fini.", False, Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)),
+        ("Quota dépassé.", True, Resultat(ok=False, erreur="Quota dépassé.", tokens=120)),
+        ("", True, Resultat(ok=False, erreur="Erreur signalée par Claude Code.", tokens=120)),
+    ],
 )
-def test_executer_rend_le_meme_resultat_que_claude_p(result, is_error):
+def test_executer_rend_le_resultat_attendu(result, is_error, attendu):
     agent, _ = claude([init(), texte("Je "), outil("Read", {"file_path": "a.py"}),
                        fin(result=result, is_error=is_error, cout=0.12)])  # fmt: skip
-    sortie = {"is_error": is_error, "result": result, "total_cost_usd": 0.12, "usage": USAGE}
-    assert lancer(agent) == lire_sortie_claude(json.dumps(sortie))
+    assert lancer(agent) == attendu
 
 
-def flux_equivalents(result, is_error):
-    """Un même tour de Claude Code, vu par le SDK et par `claude -p --output-format stream-json`."""
-    bloc = {"type": "tool_use", "name": "Read", "input": {"file_path": "a.py"}}
-    sdk = [init(), outil("Read", {"file_path": "a.py"}), texte("Bon"), texte("jour"),
-           fin(result=result, is_error=is_error, cout=0.5)]  # fmt: skip
-    lignes = [
-        {"type": "system", "subtype": "init"},
-        {"type": "assistant", "message": {"content": [bloc]}},
-        {"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": "Bon"}}},
-        {"type": "stream_event", "event": {"delta": {"type": "text_delta", "text": "jour"}}},
-        {"type": "result", "is_error": is_error, "result": result, "total_cost_usd": 0.5,
-         "usage": USAGE},
-    ]  # fmt: skip
-    return sdk, [json.dumps(ligne) for ligne in lignes]
-
-
-@pytest.mark.parametrize("result, is_error", [("Bonjour", False), ("", False), ("Non.", True)])
-def test_converser_rend_le_meme_resultat_que_claude_p(result, is_error):
-    sdk, lignes = flux_equivalents(result, is_error)
-    agent, _ = claude(sdk)
+@pytest.mark.parametrize(
+    "result, is_error, attendu",
+    [
+        ("Bonjour", False, Resultat(ok=True, texte="Bonjour", cout_usd=0.5, tokens=120)),
+        ("", False, Resultat(ok=True, texte="Bonjour", cout_usd=0.5, tokens=120)),
+        ("Non.", True, Resultat(ok=False, erreur="Non.", tokens=120)),
+    ],
+)
+def test_converser_rend_le_resultat_attendu(result, is_error, attendu):
+    agent, _ = claude([init(), outil("Read", {"file_path": "a.py"}), texte("Bon"), texte("jour"),
+                       fin(result=result, is_error=is_error, cout=0.5)])  # fmt: skip
     textes, outils = [], []
-    resultat = converser(agent, textes.append, outils.append)
-    textes_avant, outils_avant = [], []
-    assert resultat == lire_flux_claude(lignes, textes_avant.append, outils_avant.append)
-    assert (textes, outils) == (textes_avant, outils_avant) == (["Bon", "jour"], ["Lit a.py"])
+    assert converser(agent, textes.append, outils.append) == attendu
+    assert (textes, outils) == (["Bon", "jour"], ["Lit a.py"])
 
 
 def test_executer_traduit_le_modele_et_garde_l_effort(tmp_path):
@@ -171,7 +161,7 @@ def test_chaque_session_est_fermee_meme_apres_une_erreur():
     assert lancer(agent).ok
     assert lancer(agent).erreur == "Le SDK de Claude a échoué : connexion perdue"
     assert converser(agent).ok
-    assert len(fabrique.clients) == 3  # une session par appel, comme un `claude -p` par appel
+    assert len(fabrique.clients) == 3  # une session par appel
     assert all(client.deconnecte for client in fabrique.clients)
 
 
@@ -453,10 +443,10 @@ def test_source_de_connexion_connue_des_le_debut_du_tour():
     assert agent.source_connexion == "abonnement"
 
 
-# --- Critère 6 : plus aucun `claude -p` -----------------------------------------------------
+# --- Critère 6 : aucun processus lancé par agents.py --------------------------------------
 
 
-def test_plus_aucun_claude_p_n_est_lance(monkeypatch):
+def test_aucun_processus_n_est_lance_par_les_agents(monkeypatch):
     source = Path(agents.__file__).read_text("utf-8")
     assert "subprocess" not in source and '"-p"' not in source
 

@@ -2,7 +2,7 @@ import subprocess
 
 import pytest
 
-from atelier.agents import AgentSimule, lire_sortie_claude
+from atelier.agents import AgentSimule
 from atelier.consignes import consigne_ouvrier, lire_verdict
 from atelier.controles import ControlesGit, ControlesSimules, hors_perimetre, se_chevauchent
 from atelier.modele import Chantier, Contrat, Tache
@@ -174,17 +174,6 @@ def test_la_consigne_porte_les_criteres_le_perimetre_et_les_remarques():
     assert "Aucun commit" in texte
 
 
-def test_lecture_de_la_sortie_de_claude_code():
-    erreur = lire_sortie_claude('{"is_error": true, "result": "Authentication error"}')
-    assert not erreur.ok and "Authentication" in erreur.erreur
-    succes = lire_sortie_claude(
-        '{"is_error": false, "result": "fait", "total_cost_usd": 0.12,'
-        ' "usage": {"input_tokens": 100, "output_tokens": 50}}'
-    )
-    assert succes.ok and succes.cout_usd == 0.12 and succes.tokens == 150
-    assert not lire_sortie_claude("pas du json").ok
-
-
 def test_avec_un_vrai_depot_git_le_travail_verifie_est_fusionne_et_le_reste_jete(tmp_path):
     def git(*arguments):
         subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)
@@ -249,38 +238,6 @@ def test_la_conversation_propose_un_plan_puis_le_chantier_se_deroule(tmp_path):
     appels = [a for a in atelier.moteur.agent.appels if a.get("role") == "conversation"]
     assert [a["reprise"] for a in appels] == [False, True]
     assert appels[0]["session"] == appels[1]["session"]
-
-
-def test_le_flux_de_claude_code_est_relaye_au_fil_de_l_eau():
-    import json
-
-    from atelier.agents import lire_flux_claude
-
-    def ligne(**champs):
-        return json.dumps(champs)
-
-    outil = {"type": "tool_use", "name": "Read", "input": {"file_path": "coeur/calcul.py"}}
-    flux = [
-        ligne(type="system", subtype="init"),
-        "ligne illisible",
-        ligne(type="assistant", message={"content": [outil]}),
-        ligne(type="stream_event", event={"delta": {"type": "text_delta", "text": "Bon"}}),
-        ligne(type="stream_event", event={"delta": {"type": "text_delta", "text": "jour"}}),
-        ligne(
-            type="result",
-            is_error=False,
-            result="Bonjour",
-            total_cost_usd=0.5,
-            usage={"input_tokens": 10, "output_tokens": 5},
-        ),
-    ]
-    textes, outils = [], []
-    resultat = lire_flux_claude(flux, textes.append, outils.append)
-    assert resultat.ok and resultat.texte == "Bonjour" and resultat.tokens == 15
-    assert textes == ["Bon", "jour"] and outils == ["Lit coeur/calcul.py"]
-    assert not lire_flux_claude(flux[:-1]).ok
-    erreur = lire_flux_claude([ligne(type="result", is_error=True, result="Non connecté.")])
-    assert not erreur.ok and "Non connecté" in erreur.erreur
 
 
 def test_un_plan_se_lit_meme_avec_des_objets_imbriques_et_des_champs_inconnus():
