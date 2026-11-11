@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C est lancée.
+État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C est vérifiée, D1 et H sont lancées en parallèle.
 
 ## Suivi
 
-Enveloppe : 14 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 12 lancements prévus au minimum (D1, D2, D3, E, G et H à deux agents chacune), plus la simplification de clôture : la marge est de 8 environ.
+Enveloppe : 16 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 10 lancements prévus au minimum (les vérifications de D1 et de H, puis D2, D3, E et G à deux agents chacune), plus la simplification de clôture.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
@@ -12,13 +12,13 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 |---|---|---|---|---|---|
 | A | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 71 tests du pont verts, dont deux avec le vrai client du SDK sur un faux exécutable ; deux vérifications, 800 courses sans blocage |
 | B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
-| C | en vérification (seconde chance) | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts quinze fois de suite, contrôle de forme vert, périmètre respecté |
-| D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
+| C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
+| D1 | en cours | Sonnet, effort élevé | Opus, effort élevé | 1 | |
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
-| H | à lancer (accord donné le 2026-11-11) | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| H | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
@@ -36,7 +36,10 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 ### Historique de la tâche C
 - Première vérification : recalé de peu. Les sept critères sont remplis et prouvés (75 casses du code essayées, 64 détectées) ; ancienne ligne de commande et nouvelles options comparées point par point, mêmes décisions du moteur. Défaut : après un arrêt, l'appel rendait la main avant que la session soit fermée, et un fichier écrit par l'agent arrêté pouvait tomber dans la tentative suivante. Trou de la consigne : elle ne disait pas quand un appel arrêté doit rendre la main.
 - Seconde chance (même ouvrier, même niveau) : la règle est écrite (au retour de l'appel, la session est fermée et le client déconnecté) ; le filtre de `autorisations` ne garde que les règles simples. L'ouvrier signale un échec isolé de deux tests, non reproduit en 140 passages : le vérificateur cherche un test instable.
-- À transmettre à D1 : la liste « À savoir pour la tâche D1 » de la fiche de relais C.
+- Seconde vérification : validé. Les sept points sont levés ; rien de cassé par la correction (aucun interblocage, aucun fil restant, `arreter` répond en 0,1 ms).
+- Le test instable est trouvé, et il ne vient pas de C : `test_avec_un_vrai_depot_git_le_travail_verifie_est_fusionne_et_le_reste_jete` échoue environ une fois sur 70 sous charge, à cause d'une course dans `atelier/controles.py` (`git worktree remove` lancé hors du verrou de fusion, lignes 119-120 et 214-215). Elle existait avant le chantier. C'est un vrai défaut du code : il ferait tomber le fil du moteur quand une tâche est refusée pendant qu'une autre démarre. Correction essayée par le vérificateur sur une copie (prendre le verrou aux deux endroits) : 0 échec sur 200. Le fichier est un garde-fou, hors de l'objectif : question posée à la personne responsable.
+- Restes mineurs, à reprendre à la clôture : quatre bornes de temps dans les tests du pont et des agents, jamais vues en échec ; aucun cas `Bash(a,b)` dans le test du filtre ; le filtre écarte sans le dire une règle écrite à la main qui contient une virgule.
+- Transmis à D1 : la liste « À savoir pour la tâche D1 » de la fiche de relais C.
 - À transmettre à F : la liste « À essayer en vrai » de la fiche de relais C.
 - Limite connue, à dire dans le bilan : « sans outil d'écriture » veut dire sans les outils Edit, Write, MultiEdit et NotebookEdit. Le vérificateur garde, comme avant le chantier, les commandes permises du projet, dont certaines écrivent sur le disque.
 
