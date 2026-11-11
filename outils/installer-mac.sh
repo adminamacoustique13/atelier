@@ -14,7 +14,6 @@ set -euo pipefail
 DEPOT="$(cd "$(dirname "$0")/.." && pwd)"
 ETIQUETTE="fr.atelier.serveur"
 PORT="${ATELIER_PORT:-8765}"
-ADRESSE="http://127.0.0.1:${PORT}"
 # ATELIER_ESSAI=<dossier> : essai à blanc, tout est écrit dans ce dossier et rien n'est lancé.
 ESSAI="${ATELIER_ESSAI:-}"
 MAISON="${ESSAI:-${HOME}}"
@@ -112,7 +111,23 @@ if [ -z "${ESSAI}" ]; then
     || arreter "Python 3.10 ou plus récent n'a pas pu être préparé."
 fi
 
-# 5. L'agent de lancement : macOS démarre l'Atelier à l'ouverture de session et le relance s'il s'arrête.
+# 5. Un port libre pour le tableau de bord. On arrête d'abord une version précédente de l'Atelier,
+#    puis on cherche à partir de 8765 un port qu'aucun autre programme n'occupe.
+if [ -z "${ESSAI}" ]; then
+  launchctl bootout "gui/$(id -u)/${ETIQUETTE}" 2>/dev/null || true
+  sleep 1
+fi
+if [ -z "${ATELIER_PORT:-}" ] && command -v lsof >/dev/null; then
+  while lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; do
+    OCCUPANT="$(lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1}')"
+    printf 'Le port %s est déjà pris par « %s » : essai du suivant.\n' "${PORT}" "${OCCUPANT:-un autre programme}"
+    PORT=$((PORT + 1))
+    [ "${PORT}" -le 8800 ] || arreter "aucun port libre entre 8765 et 8800."
+  done
+fi
+ADRESSE="http://127.0.0.1:${PORT}"
+
+# 6. L'agent de lancement : macOS démarre l'Atelier à l'ouverture de session et le relance s'il s'arrête.
 PLIST="${MAISON}/Library/LaunchAgents/${ETIQUETTE}.plist"
 JOURNAL="${MAISON}/Library/Logs/Atelier.log"
 mkdir -p "$(dirname "${PLIST}")" "$(dirname "${JOURNAL}")"
@@ -171,10 +186,9 @@ if [ -n "${ESSAI}" ]; then
 fi
 
 plutil -lint "${PLIST}" >/dev/null || arreter "le fichier de lancement est invalide (${PLIST})."
-launchctl bootout "gui/$(id -u)/${ETIQUETTE}" 2>/dev/null || true
 launchctl bootstrap "gui/$(id -u)" "${PLIST}"
 
-# 6. Attendre que le tableau de bord réponde, puis l'ouvrir dans Safari.
+# 7. Attendre que le tableau de bord réponde, puis l'ouvrir dans Safari.
 dire "Démarrage de l'Atelier…"
 # Le premier démarrage peut prendre un peu de temps : uv prépare Python.
 for _ in $(seq 1 120); do
