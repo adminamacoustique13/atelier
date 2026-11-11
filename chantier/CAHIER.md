@@ -18,6 +18,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1, puis D2 et E en parallèle, 
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| H | en attente d'une décision de la personne responsable | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
@@ -237,6 +238,26 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Départ** : Sonnet, effort moyen.
 - **À préciser au lancement** : ce que fait le clic quand le dossier d'Atelier n'est pas sur `main` ou contient des modifications locales ; ce que dit le fil quand Atelier n'a pas été lancé par l'agent de lancement (il ne reviendrait pas tout seul) ; si le redémarrage installe bien une dépendance nouvelle.
 
+### H. Le ménage de l'ancien câblage — demandée le 2026-11-11 par la personne responsable
+- **Pourquoi** : une fois `claude -p` remplacé, il ne doit rester dans le dépôt aucun lien avec l'ancien câblage, ni code mort, ni phrase qui décrit Atelier comme lançant Claude Code en ligne de commande.
+- **État des lieux au 2026-11-11** :
+  - `atelier/agents.py` garde les anciens lecteurs `lire_flux_claude`, `lire_sortie_claude` et `_suivre`. Ils ne servent plus au produit ; ils sont restés parce que deux des 35 tests d'origine les testent (`test_lecture_de_la_sortie_de_claude_code` et `test_le_flux_de_claude_code_est_relaye_au_fil_de_l_eau`, dans `tests/test_moteur.py`), et que des tests de C comparent le pont à leur résultat.
+  - `atelier/__main__.py` attrape encore `subprocess.SubprocessError`.
+  - `atelier/sdk.py` cite `lire_sortie_claude` dans un commentaire.
+  - `outils/installer-mac.sh` exige l'exécutable `claude`, et `LISEZMOI.md` décrit encore la ligne de commande : ces deux fichiers sont repris par la tâche E.
+- **Critères** :
+  1. `atelier/agents.py` ne contient plus `lire_flux_claude`, `lire_sortie_claude` ni `_suivre`, ni rien qui ne servait qu'à eux.
+  2. Les tests qui comparaient le pont au résultat des anciens lecteurs comparent à des valeurs écrites en clair, sans perdre un seul cas.
+  3. Les deux tests d'origine qui ne testaient que les anciens lecteurs sont retirés ; chaque règle qu'ils vérifiaient reste couverte par un test du pont.
+  4. Aucun commentaire, aucune docstring, aucun message et aucune page de documentation ne décrit plus Atelier comme lançant Claude Code en ligne de commande.
+  5. `subprocess` ne sert plus qu'à git et aux contrôles du projet.
+- **Périmètre** : tout le dépôt, sauf `chantier/` et `DECISIONS.md`, qui gardent l'histoire. Dans `tests/test_moteur.py`, uniquement le retrait des deux tests nommés ci-dessus.
+- **Contrats** : ne change aucun comportement.
+- **Dépendances** : G (elle passe en dernier, pour balayer aussi ce que les tâches précédentes auront écrit).
+- **Preuve** : une recherche dans le dépôt, hors `chantier/` et `DECISIONS.md`, ne trouve plus `claude -p`, `lire_flux_claude`, `lire_sortie_claude` ni « en ligne de commande » à propos de Claude Code ; la suite de tests et le contrôle de forme restent verts.
+- **Départ** : Sonnet, effort moyen. C'est un retrait bien cadré, mais il touche aux tests.
+- **Ce qui attend la personne responsable** : le critère 3 touche à une zone rouge du contrat (modifier les 35 tests existants), et la tâche fait dépasser l'enveloppe.
+
 ### F. Premier essai réel sur ton Mac — revient à la personne responsable
 - **Pourquoi** : aucune machine du chantier n'est connectée à ton compte Claude. La seule preuve qu'Atelier marche vraiment, c'est un essai chez toi.
 - **Ce que tu feras** (environ 15 minutes, sur un dépôt sans importance) :
@@ -245,4 +266,4 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   3. demander une petite tâche qui a besoin d'une commande non permise ;
   4. accepter la carte « une fois », puis refuser la suivante avec une indication ;
   5. arrêter un agent en cours.
-- **Dépendances** : toutes les tâches précédentes, G comprise.
+- **Dépendances** : toutes les tâches précédentes, G et H comprises.
