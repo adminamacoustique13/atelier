@@ -6,6 +6,7 @@ Il n'écoute que sur la machine elle-même (127.0.0.1) : rien n'est exposé au r
 from __future__ import annotations
 
 import json
+import os
 import threading
 import uuid
 from collections import deque
@@ -39,6 +40,80 @@ MANIFESTE = json.dumps(
     },
     ensure_ascii=False,
 ).encode("utf-8")
+
+
+VARIABLE_CLE = "ANTHROPIC_API_KEY"
+CONNEXION_DEMO = (
+    "Démonstration : les agents sont simulés, rien de réel n'est appelé et rien n'est facturé."
+)
+CONNEXION_CLE_PRESENTE = (
+    "Une variable ANTHROPIC_API_KEY est présente dans l'environnement de l'Atelier : si Claude "
+    "l'utilise, c'est cette clé API qui sera facturée, et non ton abonnement. Pour la retirer, "
+    "regarde d'abord comment l'Atelier a été lancé : le LISEZMOI explique où elle est posée et "
+    "la commande exacte pour l'enlever, puis comment relancer l'Atelier."
+)
+CONNEXION_ATTENDUE = (
+    "Aucune variable ANTHROPIC_API_KEY dans l'environnement de l'Atelier. "
+    "La source réelle de connexion sera dite dès que le premier agent aura commencé."
+)
+CONNEXION_ABONNEMENT = (
+    "Le SDK de Claude annonce qu'aucune clé API n'est utilisée : le travail est compté sur ton "
+    "abonnement Claude. Si tu n'es pas connecté à ton compte, ou si tu passes par une passerelle "
+    "d'entreprise, ouvre le Terminal, lance « claude » puis tape « /status » pour le vérifier."
+)
+CONNEXION_ABONNEMENT_MALGRE_VARIABLE = (
+    "Le SDK de Claude annonce qu'aucune clé API n'est utilisée, bien qu'une variable "
+    "ANTHROPIC_API_KEY soit présente dans l'environnement de l'Atelier. Je n'en sais pas plus : "
+    "pour vérifier ce qui est facturé, ouvre le Terminal, lance « claude » puis tape « /status »."
+)
+CONNEXION_CLE = (
+    "Confirmé par le SDK de Claude : une clé API est utilisée, comme la variable "
+    "ANTHROPIC_API_KEY le laissait prévoir. C'est cette clé qui est facturée, et non ton "
+    "abonnement Claude."
+)
+CONNEXION_CLE_SANS_VARIABLE = (
+    "Le SDK de Claude annonce qu'une clé API est utilisée, alors qu'aucune variable "
+    "ANTHROPIC_API_KEY n'était visible : elle vient d'un réglage de Claude Code, ou d'une "
+    "connexion faite avec une clé plutôt qu'avec ton abonnement. C'est cette clé qui est "
+    "facturée, et non ton abonnement. Pour le vérifier, ouvre le Terminal, lance « claude » "
+    "puis tape « /status ». Si tu t'es connecté avec une clé, tape « /login » et choisis ton "
+    "compte ; si elle vient d'un réglage (un bloc « env » ou un « apiKeyHelper » de "
+    "~/.claude/settings.json), retire ce réglage."
+)
+DEPARTS = (CONNEXION_DEMO, CONNEXION_CLE_PRESENTE, CONNEXION_ATTENDUE)
+CONFIRMATIONS = (
+    CONNEXION_ABONNEMENT,
+    CONNEXION_ABONNEMENT_MALGRE_VARIABLE,
+    CONNEXION_CLE,
+    CONNEXION_CLE_SANS_VARIABLE,
+)
+# Quand le texte d'une phrase change, l'ancien texte s'ajoute ici. Il reste reconnu comme
+# annonce de connexion mais ne vaut aucune phrase actuelle : l'annonce suivante est réécrite
+# (une de trop au pire), et le fil ne reste jamais sur une ancienne phrase devenue fausse.
+ANCIENNES_ANNONCES: tuple[str, ...] = ()
+ANNONCES = DEPARTS + CONFIRMATIONS + ANCIENNES_ANNONCES  # reconnues à leur texte exact
+
+
+def cle_api_presente(environnement=None) -> bool:
+    """Dit si la variable ANTHROPIC_API_KEY existe et n'est pas vide. Sa valeur n'est jamais lue."""
+    environnement = os.environ if environnement is None else environnement
+    return bool(str(environnement.get(VARIABLE_CLE, "")).strip())
+
+
+def annonce_de_depart(mode: str, cle_presente: bool) -> str:
+    """La phrase du fil au démarrage : ce qui est su de l'environnement, sans appel réel."""
+    if mode == "démonstration":
+        return CONNEXION_DEMO
+    return CONNEXION_CLE_PRESENTE if cle_presente else CONNEXION_ATTENDUE
+
+
+def annonce_de_source(source: str, cle_presente: bool) -> str:
+    """La phrase du fil quand un agent a appris la vraie source ; vide si elle est inconnue."""
+    if source == "abonnement":
+        return CONNEXION_ABONNEMENT_MALGRE_VARIABLE if cle_presente else CONNEXION_ABONNEMENT
+    if source == "clé API":
+        return CONNEXION_CLE if cle_presente else CONNEXION_CLE_SANS_VARIABLE
+    return ""
 
 
 def point_d_etape(chantier: Chantier, en_marche: bool, autorisations: int = 0) -> str:
@@ -173,7 +248,14 @@ class Atelier:
     """Relie un dépôt, un chantier, le moteur et le tableau de bord."""
 
     def __init__(
-        self, depot: Path, chantier: Chantier, agent, controles, profil, mode="réel", guichet=None
+        self,
+        depot: Path,
+        chantier: Chantier,
+        agent,
+        controles,
+        profil,
+        mode="réel",
+        guichet=None,
     ):
         self.depot = Path(depot)
         self.mode = mode
@@ -188,6 +270,8 @@ class Atelier:
         if guichet is not None:
             agent.guichet = guichet
         agent.sur_evenement = self.activite.ajouter
+        self._cle_presente = False
+        self._source_annoncee = True  # tant que `annoncer_connexion` n'a pas été appelée
         self.fil: threading.Thread | None = None
         self.fil_message: threading.Thread | None = None
         self.occupe = False
@@ -197,6 +281,53 @@ class Atelier:
         if not chantier.taches and not chantier.evenements:
             accueil = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
             chantier.noter(accueil, auteur="orchestrateur")
+        self._sauver()
+
+    def _noter_annonce(self, phrase: str, comparee_a: tuple) -> None:
+        """Écrit la phrase, sauf si la dernière annonce du fil prise dans `comparee_a` est elle.
+
+        Un départ se compare au dernier départ (`DEPARTS`, règle R1). Une confirmation se compare
+        à la dernière annonce de connexion, toutes familles confondues (`ANNONCES`, règle R2).
+        Un texte retiré (`ANCIENNES_ANNONCES`) compte dans les deux cas, et ne vaut jamais
+        `phrase` : s'il est le plus récent, l'annonce est réécrite.
+        """
+        with self.moteur.verrou:
+            fil = self.moteur.chantier.evenements
+            derniere = next((e["texte"] for e in reversed(fil) if e["texte"] in comparee_a), "")
+            if derniere != phrase:
+                self.moteur.chantier.noter(phrase, auteur="orchestrateur")
+
+    def annoncer_connexion(self, environnement=None) -> None:
+        """Dit dans le fil, à l'ouverture du projet, ce qui est su de la facturation.
+
+        En démonstration, rien n'est réel : une phrase suffit. Sinon la phrase dit seulement si la
+        variable ANTHROPIC_API_KEY est dans l'environnement de l'Atelier, puis la vraie source est
+        annoncée dès qu'un agent l'a apprise. Le départ n'est écrit que s'il diffère du dernier
+        départ du fil ; la confirmation, que si la dernière annonce de connexion n'est pas déjà
+        elle : un simple redémarrage n'ajoute rien au fil.
+        """
+        self._cle_presente = cle_api_presente(environnement)
+        depart = annonce_de_depart(self.mode, self._cle_presente)
+        self._noter_annonce(depart, DEPARTS + ANCIENNES_ANNONCES)
+        self._source_annoncee = self.mode == "démonstration"  # sinon : à confirmer plus tard
+        if not self._source_annoncee:
+            self.moteur.agent.sur_evenement = self._sur_evenement
+        self._sauver()
+
+    def _sur_evenement(self, evenement: dict) -> None:
+        """Rappel des agents : range l'activité, et annonce une fois la source de connexion."""
+        self.activite.ajouter(evenement)
+        if self._source_annoncee:
+            return
+        source = getattr(self.moteur.agent, "source_connexion", "")
+        phrase = annonce_de_source(source, self._cle_presente)
+        if not phrase:
+            return
+        with self.moteur.verrou:
+            if self._source_annoncee:
+                return
+            self._source_annoncee = True
+            self._noter_annonce(phrase, ANNONCES)
         self._sauver()
 
     def _sauver(self) -> None:

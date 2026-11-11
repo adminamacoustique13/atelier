@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import tempfile
 import time
 from pathlib import Path
@@ -76,9 +75,11 @@ def projet_simule(dossier: Path, nom: str, delai_s: float) -> Atelier:
     agent = AgentSimule(scenario, delai_s, plan=plan)
     # Un vrai guichet : la demande d'exemple du premier ouvrier attend un clic sur la carte.
     guichet = Guichet()
-    return Atelier(
+    atelier = Atelier(
         dossier, chantier, agent, ControlesSimules(), {}, mode="démonstration", guichet=guichet
     )
+    atelier.annoncer_connexion()
+    return atelier
 
 
 def atelier_de_demonstration(delai_s: float) -> Atelier:
@@ -111,17 +112,34 @@ def commande_planifier(arguments) -> None:
     print(f"{len(taches)} tâches proposées. Lance « servir » pour relire et valider le contrat.")
 
 
-def commande_servir(arguments) -> None:
+def avec_annonce(fabrique):
+    """Enveloppe une fabrique de projets : chaque projet ouvert annonce sa source de connexion."""
+
+    def fabriquer(*arguments) -> Atelier:
+        atelier = fabrique(*arguments)
+        atelier.annoncer_connexion()
+        return atelier
+
+    return fabriquer
+
+
+def monter_projets(arguments) -> tuple[Projets, Path]:
+    """Ouvre les projets de `servir` : chacun annonce sa source de connexion à son ouverture."""
     if arguments.depot is None and arguments.racine is None:
         arguments.depot = "."
     depot = Path(arguments.depot).resolve() if arguments.depot else None
     racine = Path(arguments.racine).expanduser().resolve() if arguments.racine else depot.parent
     racine.mkdir(parents=True, exist_ok=True)
-    projets = Projets(racine, creer_depot, ouvrir_depot)
+    projets = Projets(racine, avec_annonce(creer_depot), avec_annonce(ouvrir_depot))
     if depot:
-        projets.ajouter(ouvrir_depot(depot))
+        projets.ajouter(avec_annonce(ouvrir_depot)(depot))
     projets.decouvrir()
     projets.ouvrir_le_premier()
+    return projets, racine
+
+
+def commande_servir(arguments) -> None:
+    projets, racine = monter_projets(arguments)
     serveur = creer_serveur(projets, arguments.port)
     print(f"Tableau de bord : http://127.0.0.1:{arguments.port}")
     print(f"Les nouveaux projets seront créés dans : {racine}")
@@ -195,5 +213,5 @@ def main() -> None:
 if __name__ == "__main__":
     try:
         main()
-    except (KeyboardInterrupt, subprocess.SubprocessError):
+    except KeyboardInterrupt:
         raise SystemExit(0) from None

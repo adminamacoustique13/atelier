@@ -6,7 +6,8 @@
 # Lancé seul, il télécharge l'Atelier dans ~/Atelier-appli ; lancé depuis le dépôt, il l'utilise.
 # Pour tout retirer ensuite :                   ./outils/desinstaller-mac.sh
 #
-# Rien n'est installé hors de ton dossier personnel, à part uv si tu ne l'as pas déjà.
+# Tout s'installe dans ton dossier personnel, sans sudo : uv (installeur officiel, si tu ne l'as pas
+# déjà), puis la bibliothèque claude-agent-sdk (dans le dossier .venv de l'Atelier, via uv).
 # Le tableau de bord n'écoute que ton Mac (127.0.0.1) : il n'est pas visible depuis le réseau.
 
 set -euo pipefail
@@ -42,22 +43,27 @@ if [ ! -f "${DEPOT}/atelier/__main__.py" ]; then
   exec bash "${DESTINATION}/outils/installer-mac.sh" ${1+"$@"}
 fi
 
-# 1. Claude Code doit être installé : c'est lui qui fait travailler les agents.
+# 1. La commande « claude » n'est pas ce qui fait travailler les agents : la bibliothèque
+#    claude-agent-sdk (étape 4) embarque son propre Claude Code. Elle sert à te connecter à ton
+#    abonnement Claude (lance « claude » dans le Terminal, une fois). Son absence n'arrête rien :
+#    on prévient seulement, car sans connexion (ni clé API) les agents ne pourront pas travailler.
 CLAUDE="$(command -v claude || true)"
-[ -n "${CLAUDE}" ] || arreter "Claude Code est introuvable. Installe-le et connecte-toi (claude), puis relance ce script."
+if [ -z "${CLAUDE}" ]; then
+  dire "La commande « claude » est introuvable. Ce n'est pas bloquant : l'Atelier embarque son propre Claude Code."
+  dire "Elle te sert à te connecter à ton abonnement Claude. Installe-la (https://claude.com/claude-code), puis lance « claude » une fois pour te connecter à ton compte."
+fi
 
 # 2. uv apporte la bonne version de Python (3.10 ou plus récente), sans toucher à celle du Mac.
 UV="$(command -v uv || true)"
 [ -n "${UV}" ] || { [ -x "${HOME}/.local/bin/uv" ] && UV="${HOME}/.local/bin/uv"; } || true
 if [ -z "${UV}" ]; then
-  dire "Installation de uv, qui fournira Python à l'Atelier…"
-  if command -v brew >/dev/null; then
-    brew install uv
-  else
-    curl -LsSf https://astral.sh/uv/install.sh | sh
-  fi
+  dire "Installation de uv avec l'installeur officiel (dans ton dossier personnel), qui fournira Python à l'Atelier…"
+  curl -LsSf https://astral.sh/uv/install.sh | sh
   UV="$(command -v uv || echo "${HOME}/.local/bin/uv")"
   [ -x "${UV}" ] || arreter "uv n'a pas pu être installé."
+  dire "uv a été installé dans ${UV}."
+else
+  dire "uv trouvé : ${UV}."
 fi
 
 # 3. Le dossier où l'Atelier rangera les projets.
@@ -104,11 +110,18 @@ RACINE="${RACINE:-${DEFAUT}}"
 mkdir -p "${RACINE}"
 RACINE="$(cd "${RACINE}" && pwd)"
 
-# 4. Préparer Python pour l'Atelier (télécharge la bonne version au besoin).
-dire "Préparation de Python…"
+# 4. Préparer Python et la bibliothèque claude-agent-sdk (déclarée dans pyproject.toml). uv les
+#    installe dans le dossier .venv de l'Atelier, donc chez toi, sans sudo. L'agent de lancement
+#    passe lui aussi par « uv run », qui remet cette installation à jour au démarrage : une mise
+#    à jour de l'Atelier qui change la dépendance est donc reprise sans rien refaire ici. Le fichier
+#    uv.lock, versionné avec l'Atelier, fixe la version exacte de la bibliothèque (testée) ; « uv sync »
+#    et « uv run » le lisent par défaut.
+dire "Préparation de Python et de la bibliothèque claude-agent-sdk…"
 if [ -z "${ESSAI}" ]; then
-  (cd "${DEPOT}" && "${UV}" run --quiet python -c "import sys; assert sys.version_info >= (3, 10)") \
-    || arreter "Python 3.10 ou plus récent n'a pas pu être préparé."
+  (cd "${DEPOT}" && "${UV}" sync --quiet) \
+    || arreter "uv n'a pas pu installer les dépendances de l'Atelier. Internet est-il coupé ? Si uv est ancien, mets-le à jour avec « uv self update », ou avec « brew upgrade uv » s'il a été installé par Homebrew, puis relance ce script."
+  (cd "${DEPOT}" && "${UV}" run --quiet python -c "import sys, claude_agent_sdk; assert sys.version_info >= (3, 10)") \
+    || arreter "Python 3.10 ou plus récent, ou la bibliothèque claude-agent-sdk, n'a pas pu être préparé."
 fi
 
 # 5. Un port libre pour le tableau de bord. On arrête d'abord une version précédente de l'Atelier,
@@ -131,8 +144,8 @@ ADRESSE="http://127.0.0.1:${PORT}"
 PLIST="${MAISON}/Library/LaunchAgents/${ETIQUETTE}.plist"
 JOURNAL="${MAISON}/Library/Logs/Atelier.log"
 mkdir -p "$(dirname "${PLIST}")" "$(dirname "${JOURNAL}")"
-# launchd démarre avec un PATH minimal : on lui donne celui où se trouvent claude, git et uv.
-CHEMIN="$(dirname "${CLAUDE}"):$(dirname "${UV}"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+# launchd démarre avec un PATH minimal : on lui donne celui où se trouvent git et uv.
+CHEMIN="$(dirname "${UV}"):/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 
 cat >"${PLIST}" <<EOF
 <?xml version="1.0" encoding="UTF-8"?>

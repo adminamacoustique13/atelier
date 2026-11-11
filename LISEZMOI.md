@@ -1,8 +1,8 @@
 # Atelier
 
-Un chef de chantier en code pour des agents Claude Code. Il lance les agents avec le modèle et l'effort choisis pour chaque tâche, contrôle leur travail, fait passer un vérificateur, monte d'un cran après un échec et s'arrête quand il sort du contrat.
+Un chef de chantier en code pour des agents Claude. Il lance les agents avec le modèle et l'effort choisis pour chaque tâche, contrôle leur travail, fait passer un vérificateur, monte d'un cran après un échec et s'arrête quand il sort du contrat.
 
-Aucune dépendance : Python 3.10 ou plus, git, et Claude Code installé et connecté.
+Une seule dépendance : la bibliothèque `claude-agent-sdk` (voir « La dépendance et la connexion » plus bas). Il te faut aussi Python 3.10 ou plus, git, et un compte Claude connecté ou une clé API.
 
 ## Les commandes
 
@@ -14,7 +14,7 @@ Ouvre le tableau de bord sur http://127.0.0.1:8765 avec des agents simulés. Rie
 ```
 python3 -m atelier planifier "ton objectif" --depot /chemin/du/projet
 ```
-Demande à Claude Code de découper l'objectif en tâches et prépare le contrat. Appel réel.
+Demande à Claude de découper l'objectif en tâches et prépare le contrat. Appel réel.
 
 ```
 python3 -m atelier servir --depot /chemin/du/projet
@@ -54,13 +54,64 @@ cd ~/Atelier-appli
 ./outils/installer-mac.sh
 ```
 
-Le script vérifie que Claude Code est installé, installe uv au besoin (il fournit la bonne version de Python), te demande dans quel dossier ranger tes projets, puis règle macOS pour que l'Atelier démarre tout seul à chaque ouverture de session, en arrière-plan. Il ouvre enfin le tableau de bord dans Safari.
+Le script installe uv au besoin (avec l'installeur officiel, dans ton dossier personnel, par défaut `~/.local/bin` ; il fournit la bonne version de Python), puis la bibliothèque `claude-agent-sdk` par uv, dans le dossier `.venv` de l'Atelier. Rien n'est installé hors de ton dossier personnel, et il ne demande jamais `sudo`. Le fichier `uv.lock`, livré avec l'Atelier, fixe la version exacte de la bibliothèque qui a été testée. Le script te demande dans quel dossier ranger tes projets, puis règle macOS pour que l'Atelier démarre tout seul à chaque ouverture de session, en arrière-plan. Il ouvre enfin le tableau de bord dans Safari. À chaque démarrage, uv remet la bibliothèque à jour si l'Atelier en demande une autre version : après une mise à jour de l'Atelier, tu n'as rien à refaire.
+
+Si la commande `claude` n'est pas installée, le script te prévient sans s'arrêter : l'Atelier n'en a pas besoin pour travailler, elle te sert seulement à te connecter à ton abonnement (lance `claude` une fois dans le Terminal).
 
 Dernière étape : dans cette fenêtre Safari, menu Fichier, puis « Ajouter au Dock ». L'Atelier a alors sa propre icône et sa propre fenêtre.
 
-Pour tout retirer : `./outils/desinstaller-mac.sh` (tes projets ne sont pas touchés). Le journal se trouve dans `~/Library/Logs/Atelier.log`.
+Pour tout retirer : `./outils/desinstaller-mac.sh` (tes projets ne sont pas touchés). Le script ne supprime pas le dossier `.venv` où uv a rangé la bibliothèque ; pour le retirer toi-même : `rm -rf ~/Atelier-appli/.venv` (ou le `.venv` du dépôt où tu as installé l'Atelier). Le journal se trouve dans `~/Library/Logs/Atelier.log`.
 
 Le tableau de bord n'écoute que ton Mac (127.0.0.1). Le Mac doit rester allumé et éveillé pendant un chantier.
+
+## La dépendance et la connexion
+
+Les agents passent par `claude-agent-sdk`, la bibliothèque d'Anthropic (licence MIT). Elle embarque son propre Claude Code : l'Atelier ne lance donc pas de commande `claude` à part, et la bibliothèque n'envoie de données qu'à Claude. La connexion par ton abonnement est conservée : si tu es connecté à ton compte Claude sur ce Mac, c'est lui qui est utilisé.
+
+À l'ouverture de chaque projet, l'Atelier écrit dans son fil ce qu'il sait de la facturation, et seulement cela. Il le fait en deux temps, et n'écrit une phrase que si elle a changé depuis la dernière du même genre : un simple redémarrage n'ajoute rien.
+
+1. **À l'ouverture**, avant tout travail, il ne peut dire qu'une chose : une variable `ANTHROPIC_API_KEY` est-elle présente dans son environnement, ou non. Sans variable, il ne dit pas « abonnement » : une clé peut aussi venir d'un réglage de Claude Code ou d'une connexion faite avec une clé. Avec une variable, il prévient que c'est cette clé API qui sera facturée, et non ton abonnement. Il ne lit jamais sa valeur, seulement sa présence.
+2. **Dès que le premier agent a commencé**, la bibliothèque dit d'où vient la connexion, et l'Atelier le répète dans le fil :
+   - **abonnement** : aucune clé API n'est utilisée. Cela ne prouve pas que tu es connecté à ton compte (ou que tu passes par une passerelle d'entreprise) : le fil t'invite à le vérifier avec `claude` puis `/status` dans le Terminal ;
+   - **clé API** : le travail est facturé à cette clé. Si aucune variable n'était visible, le fil le dit en clair (la clé vient d'un réglage de Claude Code ou d'une connexion faite avec une clé) et explique comment vérifier (`claude`, puis `/status`) et revenir à l'abonnement (`/login`, ou le retrait du réglage en cause) ;
+   - **abonnement alors qu'une variable est présente** : le fil rapporte ce que dit la bibliothèque, sans conclure davantage, et te renvoie à `/status`.
+
+En démonstration, le fil dit que les agents sont simulés et que rien n'est facturé.
+
+### Retirer une variable `ANTHROPIC_API_KEY` oubliée
+
+Lancé par l'agent de lancement (le cas normal après l'installation), l'Atelier n'hérite pas du shell de ton Terminal : une variable écrite dans `~/.zshrc` ou `~/.zprofile` ne l'atteint pas, et la retirer de ces fichiers ne change rien pour lui. Elle ne lui arrive que de deux façons.
+
+- **Par `launchctl setenv`** (réglage de ta session macOS, pour tous les programmes lancés ensuite). Pour voir si elle est posée, sans afficher sa valeur : `[ -n "$(launchctl getenv ANTHROPIC_API_KEY)" ] && echo posée || echo absente`. Pour la retirer : `launchctl unsetenv ANTHROPIC_API_KEY`. Une variable posée par `launchctl setenv` ne survit pas à un redémarrage du Mac : si elle revient, c'est qu'une autre source la repose.
+- **Par le Terminal, si tu lances l'Atelier à la main** (`python3 -m atelier servir`) : il hérite alors du Terminal. Pour voir : `[ -n "$ANTHROPIC_API_KEY" ] && echo posée || echo absente`. Pour la retirer : `unset ANTHROPIC_API_KEY`, et retire aussi sa ligne `export` de `~/.zshrc` pour qu'elle ne revienne pas.
+
+Dans les deux cas, il faut ensuite relancer l'Atelier. Sous l'agent de lancement, dans le Terminal : `launchctl kickstart -k gui/$(id -u)/fr.atelier.serveur` (relancer `./outils/installer-mac.sh` fait la même chose). À la main : arrête-le avec Ctrl-C et relance la commande.
+
+La clé peut aussi venir d'un réglage de Claude Code (un bloc `env` ou un `apiKeyHelper` dans `~/.claude/settings.json`) ou d'une connexion faite avec une clé : l'Atelier ne le voit alors pas dans son environnement, et c'est le fil qui le signale une fois le premier agent commencé. Regarde alors `claude` puis `/status`. Si tu t'étais connecté avec une clé, tape `/login` et choisis ton compte. Si la clé vient d'un réglage, retire ce réglage de `~/.claude/settings.json` (le bloc `env` ou la ligne `apiKeyHelper`) : `/login` n'y change rien.
+
+## Les autorisations
+
+Quand un agent veut lancer une commande ou un outil que rien ne permet encore, il s'arrête et une carte d'autorisation apparaît dans le tableau de bord. Elle a jusqu'à trois boutons :
+
+- **Autoriser une fois** : l'agent poursuit, mais la question reviendra la prochaine fois ;
+- **Toujours pour ce projet** : l'Atelier retient une règle et l'inscrit dans le profil du projet. Ce bouton manque quand aucune règle sûre n'existe pour la demande : il ne reste alors que « Autoriser une fois » et « Refuser » ;
+- **Refuser**, avec une indication facultative que l'agent lit pour changer de méthode.
+
+Attention à « Toujours pour ce projet » : la règle retenue couvre toute commande qui commence de la même façon. Une règle sur un outil qui exécute du code (`python3 -m`, `npm run`) autorise en pratique n'importe quelle commande, puisque ce que l'outil lance dépend de ce qu'on lui donne ou du code du projet. Réserve ce bouton aux commandes simples, et préfère « Autoriser une fois » dans le doute. Un filtre écarte les lanceurs les plus connus, mais aucune liste ne les connaît tous.
+
+Tu peux aussi écrire des règles à l'avance dans `chantier/profil.json`, avec la clé `autorisations` : une liste de règles Claude Code, ajoutées aux outils permis de chaque agent. Elles ont la même forme que dans `.claude/settings.json`, mais l'Atelier ne garde que les règles simples : un nom d'outil, suivi ou non d'une seule paire de parenthèses au contenu non vide, sans virgule ni parenthèse à l'intérieur. Les autres sont écartées sans prévenir. Exemple gardée : `Bash(npm install:*)`. Exemple écartée : `Bash(git commit -m (test))` (parenthèse dans le contenu).
+
+```json
+{
+  "autorisations": ["Bash(npm install:*)", "WebFetch(domain:docs.python.org)"]
+}
+```
+
+La clé `commandes_permises` reste lue comme avant. En lecture seule (l'orchestrateur, les vérificateurs), les règles qui visent des outils d'écriture sont ignorées.
+
+## Arrêter un agent
+
+Le bouton « Arrêter » interrompt un agent en cours. Une tâche arrêtée te revient : elle n'a ni seconde chance ni montée en gamme, et tu la reprends avec « Relancer au même niveau ». Tu peux aussi arrêter la réponse de l'orchestrateur en pleine écriture : ce qu'il avait écrit est gardé, et la conversation continue au message suivant.
 
 ## Plusieurs projets
 
@@ -92,7 +143,7 @@ L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en l
 
 ## Les trois onglets
 
-- **Conversation** : tu écris à l'orchestrateur. C'est une session Claude Code (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.
+- **Conversation** : tu écris à l'orchestrateur. C'est une session Claude (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.
 - **Chantier** : le tableau de bord (point d'étape, ce qui t'attend, dosage, enveloppe, tâches, fil).
 - **Plan** : le graphe des tâches et de ce qui attend quoi. Un clic sur une tâche montre ses critères, son périmètre et ses tentatives.
 
@@ -106,9 +157,9 @@ L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en l
 
 ## Ce qui est testé et ce qui ne l'est pas
 
-Testé (31 tests, `python3 -m pytest -q`) : la lecture du flux de Claude Code, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
+Testé (`python3 -m pytest -q`) : le pont vers `claude-agent-sdk` sur un faux client, les cartes d'autorisation, l'arrêt d'un agent, l'annonce de la source de connexion, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
 
-Pas encore essayé avec de vrais agents : l'appel à Claude Code (`atelier/agents.py`, classe `AgentClaude`) est écrit d'après ses options réelles, mais n'a jamais tourné connecté. Même chose pour la session de la conversation (`converser`) : Claude Code accepte la ligne de commande, mais aucune vraie réponse n'a encore été reçue. C'est le premier essai à faire sur ta machine, sur un dépôt sans importance.
+Pas encore essayé avec de vrais agents : aucune machine du chantier n'était connectée à un compte Claude. Le pont (`atelier/sdk.py`) et les agents (`atelier/agents.py`, classe `AgentClaude`) n'ont tourné que sur des faux clients, jamais sur le vrai Claude Code embarqué : ni les ouvriers, ni les vérificateurs, ni la conversation, ni les cartes d'autorisation, ni l'annonce de la source de connexion. C'est le premier essai à faire sur ton Mac, sur un dépôt sans importance.
 
 ## Les fichiers
 
@@ -117,7 +168,8 @@ Pas encore essayé avec de vrais agents : l'appel à Claude Code (`atelier/agent
 | `atelier/dosage.py` | Table de départ, échelles, montée d'un cran, choix du vérificateur |
 | `atelier/modele.py` | Tâche, contrat, chantier, et leur écriture en fichiers |
 | `atelier/consignes.py` | Les consignes de l'ouvrier, du vérificateur et du découpage |
-| `atelier/agents.py` | Claude Code en ligne de commande, et le simulateur |
+| `atelier/agents.py` | Les agents : celui qui passe par le pont vers Claude, et le simulateur |
+| `atelier/sdk.py` | Le pont vers `claude-agent-sdk` : sessions, autorisations, arrêt |
 | `atelier/controles.py` | Périmètre, commandes du profil, copies de travail et fusion git |
 | `atelier/moteur.py` | Le chef de chantier |
 | `atelier/serveur.py` | Le serveur local du tableau de bord |
