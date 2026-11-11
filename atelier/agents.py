@@ -12,6 +12,23 @@ from atelier.consignes import BALISE_PLAN, ROLE_ORCHESTRATEUR
 
 OUTILS_LECTURE = ["Read", "Glob", "Grep"]
 OUTILS_ECRITURE = ["Edit", "Write"]
+# Git en lecture seule : regarder l'historique et les branches, jamais les changer.
+GIT_LECTURE = [
+    f"Bash(git {c}:*)"
+    for c in (
+        "status",
+        "diff",
+        "log",
+        "show",
+        "ls-files",
+        "remote -v",
+        "remote get-url",
+        "branch --show-current",
+        "branch -a",
+        "branch -v",
+        "rev-parse",
+    )
+]
 
 RAISONS_SIMULEES = {
     "bacle": "Un critère de la consigne a été négligé.",
@@ -42,7 +59,7 @@ class AgentClaude:
     def _outils(self, lecture_seule: bool) -> list[str]:
         """Rend la liste des outils permis : lecture, commandes du projet, écriture si permise."""
         commandes = [f"Bash({c}:*)" for c in self.profil.get("commandes_permises", [])]
-        outils = OUTILS_LECTURE + commandes + ["Bash(git status:*)", "Bash(git diff:*)"]
+        outils = OUTILS_LECTURE + commandes + GIT_LECTURE
         return outils if lecture_seule else outils + OUTILS_ECRITURE
 
     def executer(

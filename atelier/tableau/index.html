@@ -133,6 +133,13 @@ button:focus-visible, a:focus-visible, select:focus-visible, .noeud:focus-visibl
 .prose { font-size: 13.5px; line-height: 1.58; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 8px; }
 .prose code { font-family: var(--mono); font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--creux); }
 .prose b { font-weight: 600; }
+.prose ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.prose pre { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--creux); overflow-x: auto; }
+.prose pre code { padding: 0; background: none; white-space: pre; }
+.distant { color: var(--discret); }
+.distant.relie::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--reussite); vertical-align: 1px; }
+.distant.souci { color: var(--refus); }
+.distant.souci::before { background: var(--refus); }
 .gestes { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 11.5px; color: var(--faible); }
 .points { display: inline-flex; gap: 4px; padding: 6px 0; }
 .points i { width: 4px; height: 4px; border-radius: 50%; background: var(--discret); animation: battre 1.2s ease-in-out infinite; }
@@ -311,7 +318,7 @@ td.droite, th.droite { text-align: right; }
 <body>
 <div class="app">
   <header class="tete">
-    <div class="pilule marque"><i class="logo" aria-hidden="true"></i><b>Atelier</b><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus" id="nouveau">Nouveau projet</button></div>
+    <div class="pilule marque"><i class="logo" aria-hidden="true"></i><b>Atelier</b><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus" id="nouveau">Nouveau projet</button><button type="button" class="distant" id="distant" hidden>Dépôt en ligne</button></div>
     <nav class="pilule onglets" aria-label="Onglets">
       <a href="#conversation" data-onglet="conversation">Conversation<i class="pt" id="pt-conversation" title="Quelque chose t'attend"></i></a>
       <a href="#chantier" data-onglet="chantier">Chantier<span class="cpt" id="cpt-chantier"></span></a>
@@ -400,6 +407,21 @@ td.droite, th.droite { text-align: right; }
   </form>
 </dialog>
 
+<dialog id="liaison" aria-labelledby="titre-liaison">
+  <form id="form-liaison">
+    <h2 id="titre-liaison">Dépôt en ligne</h2>
+    <p class="petit" id="etat-liaison"></p>
+    <label class="etiquette" for="adresse-liaison">Adresse du dépôt (GitHub ou autre)</label>
+    <input id="adresse-liaison" type="text" placeholder="https://github.com/compte/projet" autocomplete="off" spellcheck="false" required>
+    <p class="petit">Crée le dépôt vide sur GitHub, sans LISEZMOI ni licence, puis colle son adresse. L'Atelier y envoie tout ce qui est déjà enregistré, puis chaque tâche vérifiée, avec le cahier du chantier.</p>
+    <p class="alerte" id="erreur-liaison" role="alert"></p>
+    <div class="boutons">
+      <button class="principal" type="submit" id="relier">Relier et envoyer</button>
+      <button type="button" id="annuler-liaison">Fermer</button>
+    </div>
+  </form>
+</dialog>
+
 <script>
 const INSTANTANES = /*INSTANTANES*/[];
 const EFFORTS = { low: "faible", medium: "moyen", high: "élevé", xhigh: "très élevé", max: "max" };
@@ -416,9 +438,31 @@ const couper = (texte, n) => (texte.length > n ? texte.slice(0, n - 1).trimEnd()
 const ouvertes = (vue) => vue.demandes.filter((d) => d.reponse === null && !franchies.has(`decision:${d.id}`));
 const contratEnAttente = (vue) => vue.taches.length > 0 && !vue.contrat.valide;
 
+/* Texte de l'orchestrateur : paragraphes, listes à tirets, gras, code en ligne et blocs de code. */
+const enLigne = (t) => t.replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>");
+function paragraphes(texte) {
+  const html = [];
+  for (const bloc of propre(texte).split(/\n{2,}/)) {
+    let liste = [], lignes = [];
+    const vider = () => {
+      if (lignes.length) html.push(`<p>${enLigne(lignes.join("<br>"))}</p>`);
+      if (liste.length) html.push(`<ul>${liste.map((l) => `<li>${enLigne(l)}</li>`).join("")}</ul>`);
+      lignes = []; liste = [];
+    };
+    for (const ligne of bloc.split("\n")) {
+      if (!ligne.trim()) continue;
+      const puce = ligne.match(/^\s*[-*•] (.*)$/);
+      if (puce) { if (lignes.length) vider(); liste.push(puce[1]); }
+      else { if (liste.length) vider(); lignes.push(ligne); }
+    }
+    vider();
+  }
+  return html.join("");
+}
 function riche(texte) {
-  return propre(texte).split(/\n{2,}/).filter(Boolean).map((p) => `<p>${p
-    .replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/`([^`]+)`/g, "<code>$1</code>").replace(/\n/g, "<br>")}</p>`).join("");
+  return String(texte ?? "").split(/^```[^\n]*$/m).map((morceau, i) => i % 2
+    ? `<pre><code>${propre(morceau.replace(/^\n|\n$/g, ""))}</code></pre>`
+    : paragraphes(morceau)).join("");
 }
 
 /* ---------- Morceaux communs ---------- */
@@ -732,6 +776,14 @@ function afficher(vue) {
     choix.dataset.empreinte = empreinte;
   }
   choix.disabled = liste.length < 2;
+  const distant = document.getElementById("distant"), lien = vue.distant;
+  distant.hidden = !lien || rejoue;
+  if (lien) {
+    distant.classList.toggle("relie", Boolean(lien.adresse));
+    distant.classList.toggle("souci", Boolean(lien.probleme));
+    distant.textContent = lien.probleme ? "Envoi en échec" : lien.adresse ? "En ligne" : "Relier à un dépôt en ligne";
+    distant.title = lien.probleme || lien.adresse || "";
+  }
   document.getElementById("mode").textContent = rejoue ? "Démonstration rejouée" : vue.mode === "réel" ? "" : "Démonstration";
   document.getElementById("pastille-agents").textContent = vue.taches.length ? `Agents ${vue.agents_lances} / ${c.max_agents}` : "";
   document.getElementById("pastille-cout").textContent = vue.cout_usd ? `Coût équivalent ${euros(vue.cout_usd)}` : "";
@@ -873,6 +925,30 @@ document.getElementById("form-clonage").addEventListener("submit", async (e) => 
   dialogue.close();
   location.hash = "#conversation";
   changerDeProjet(donnees);
+});
+
+const liaison = document.getElementById("liaison");
+document.getElementById("distant").addEventListener("click", () => {
+  const lien = (derniere && derniere.distant) || {};
+  document.getElementById("adresse-liaison").value = lien.adresse || "";
+  document.getElementById("erreur-liaison").textContent = lien.probleme || "";
+  document.getElementById("etat-liaison").textContent = lien.adresse
+    ? "Ce projet est relié : chaque tâche vérifiée y est envoyée. Tu peux changer l'adresse ou relancer l'envoi."
+    : "Ce projet n'existe pour l'instant que sur cet ordinateur.";
+  document.getElementById("relier").textContent = lien.adresse ? "Envoyer maintenant" : "Relier et envoyer";
+  liaison.showModal();
+});
+document.getElementById("annuler-liaison").addEventListener("click", () => liaison.close());
+document.getElementById("form-liaison").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const bouton = document.getElementById("relier"), erreur = document.getElementById("erreur-liaison");
+  const texte = bouton.textContent;
+  bouton.disabled = true; bouton.textContent = "Envoi en cours…"; erreur.textContent = "";
+  const { ok, donnees } = await demander("/api/projet/relier", { adresse: document.getElementById("adresse-liaison").value });
+  bouton.disabled = false; bouton.textContent = texte;
+  if (!ok) { erreur.textContent = donnees.erreur || "Le projet n'a pas pu être relié."; return; }
+  liaison.close();
+  afficher(donnees);
 });
 
 async function boucle() { await charger(); setTimeout(boucle, derniere && derniere.occupe ? 400 : 1500); }

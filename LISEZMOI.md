@@ -80,6 +80,12 @@ gh auth setup-git
 
 Un dépôt déjà présent ailleurs sur le Mac peut aussi être déplacé (ou cloné) dans le dossier des projets : il apparaît dans la liste au prochain démarrage de l'Atelier.
 
+### Relier un projet à GitHub
+
+Le bouton « Relier à un dépôt en ligne », en haut à côté du nom du projet, relie le projet à un dépôt GitHub (ou autre). Crée d'abord le dépôt vide sur GitHub, sans LISEZMOI ni licence, puis colle son adresse : l'Atelier y envoie tout ce qui est déjà enregistré. Ensuite, chaque tâche vérifiée y part toute seule, suivie du cahier du chantier. Le bouton devient « En ligne » ; si un envoi échoue, il passe à « Envoi en échec » avec l'explication, et le travail reste enregistré sur l'ordinateur en attendant.
+
+L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en ligne) mais ne le modifie jamais : la liaison passe par ce bouton, pas par des commandes à taper.
+
 ## Les trois onglets
 
 - **Conversation** : tu écris à l'orchestrateur. C'est une session Claude Code (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.

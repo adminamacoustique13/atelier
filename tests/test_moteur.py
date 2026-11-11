@@ -390,6 +390,11 @@ def test_on_reprend_un_depot_existant_et_l_etat_reste_hors_de_son_historique(tmp
     racine = tmp_path / "racine"
     racine.mkdir()
     projets = Projets(racine, creer_depot, ouvrir_depot)
+    assert projets.creer("Neuf") == "neuf"
+    branche = subprocess.run(
+        ["git", "branch", "--show-current"], cwd=racine / "neuf", capture_output=True, text=True
+    ).stdout.strip()
+    assert branche == "main"
     assert projets.cloner(f"  {source}/ ") == "mon-code"
     clone = racine / "mon-code"
     assert (clone / "LISEZMOI.md").read_text() == "bonjour\n"
@@ -413,4 +418,53 @@ def test_on_reprend_un_depot_existant_et_l_etat_reste_hors_de_son_historique(tmp
     autres = Projets(racine, creer_depot, ouvrir_depot)
     (racine / "pas-un-depot").mkdir()
     autres.decouvrir()
-    assert [p["id"] for p in autres.liste()] == ["mon-code"]
+    assert sorted(p["id"] for p in autres.liste()) == ["mon-code", "neuf"]
+
+
+def test_un_projet_relie_a_un_depot_en_ligne_y_envoie_chaque_tache(tmp_path, monkeypatch):
+    import pytest
+
+    # Un ordinateur où git ne connaît pas encore le nom de la personne.
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", str(tmp_path / "aucune-config"))
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+
+    def git(dossier, *args):
+        return subprocess.run(
+            ["git", *args], cwd=dossier, check=True, capture_output=True, text=True
+        ).stdout
+
+    projet, en_ligne = tmp_path / "projet", tmp_path / "en-ligne.git"
+    projet.mkdir()
+    git(projet, "init", "-q", "-b", "main")
+    (projet / "LISEZMOI.md").write_text("socle\n", "utf-8")
+    git(projet, "add", "-A")
+    git(projet, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "socle")
+    (projet / "chantier").mkdir()
+    (projet / "chantier" / "CAHIER.md").write_text("# Cahier\n", "utf-8")
+    git(tmp_path, "init", "-q", "--bare", "-b", "main", str(en_ligne))
+
+    controles = ControlesGit(projet)
+    assert controles.distant() == ""
+    controles.relier(str(en_ligne))
+    assert controles.distant() == str(en_ligne)
+    assert "Cahier du chantier" in git(en_ligne, "log", "--format=%s", "main")
+
+    c = chantier([tache("A")])
+    # L'Atelier réécrit le cahier pendant le chantier.
+    (projet / "chantier" / "CAHIER.md").write_text("# Cahier\n\nA en cours\n", "utf-8")
+    Moteur(c, AgentSimule(perimetres={"A": ["a.py"]}), controles).executer()
+    envoye = git(en_ligne, "log", "--format=%s", "main")
+    assert "A : Tâche A" in envoye and "Cahier : A enregistrée" in envoye
+    assert controles.envoi == ""
+    assert git(projet, "status", "--porcelain", "--", "chantier").strip() == ""
+
+    # Un dépôt en ligne qui a déjà son propre historique : refus expliqué, rien n'est perdu.
+    autre = tmp_path / "autre"
+    git(tmp_path, "clone", "-q", str(en_ligne), str(autre))
+    (autre / "x.txt").write_text("x", "utf-8")
+    git(autre, "add", "-A")
+    git(autre, "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "ailleurs")
+    git(autre, "push", "-q", "origin", "main")
+    with pytest.raises(ValueError, match="contient déjà"):
+        controles.relier(str(en_ligne))
+    assert "A : Tâche A" in git(projet, "log", "--format=%s")

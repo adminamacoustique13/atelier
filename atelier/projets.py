@@ -11,7 +11,7 @@ import unicodedata
 from pathlib import Path
 
 from atelier.agents import AgentClaude
-from atelier.controles import ControlesGit
+from atelier.controles import ControlesGit, expliquer_refus_git
 from atelier.modele import Chantier, Contrat, ProjetImpossible
 from atelier.serveur import Atelier
 
@@ -38,20 +38,6 @@ def exclure_etat(depot: Path) -> None:
         exclusions.write_text(
             actuel.rstrip("\n") + ("\n" if actuel.strip() else "") + ".atelier/\n"
         )
-
-
-def expliquer_refus_de_clonage(message: str) -> str:
-    """Traduit en clair les refus de git les plus courants au moment de récupérer un dépôt."""
-    if any(m in message for m in ("Username", "Authentication", "Permission denied", "403")):
-        return (
-            "GitHub demande une connexion. Soit l'adresse est fausse, soit le dépôt est privé "
-            "et git n'est pas encore connecté à ton compte sur cet ordinateur."
-        )
-    if "not found" in message or "does not exist" in message or "does not appear" in message:
-        return "Aucun dépôt à cette adresse. Vérifie-la en l'ouvrant dans le navigateur."
-    if "Could not resolve host" in message:
-        return "Pas d'accès au réseau, ou nom de site mal écrit."
-    return message
 
 
 def ouvrir_depot(depot: Path) -> Atelier:
@@ -94,7 +80,7 @@ def creer_depot(dossier: Path, nom: str) -> Atelier:
     profil = json.dumps({"nom": nom, "commandes": []}, ensure_ascii=False, indent=2)
     (dossier / "chantier" / "profil.json").write_text(profil + "\n", "utf-8")
     (dossier / ".gitignore").write_text(".atelier/\n", "utf-8")
-    _git(dossier, "init", "-q")
+    _git(dossier, "init", "-q", "-b", "main")
     identite = []
     if not subprocess.run(
         ["git", "config", "user.email"], cwd=dossier, capture_output=True, text=True
@@ -191,7 +177,7 @@ class Projets:
             try:
                 _git(self.racine, "clone", "--quiet", "--", adresse, str(dossier), delai=600)
             except ProjetImpossible as erreur:
-                raise ProjetImpossible(expliquer_refus_de_clonage(str(erreur))) from erreur
+                raise ProjetImpossible(expliquer_refus_git(str(erreur))) from erreur
             atelier = self._ouvrir(dossier)
         finally:
             with self.verrou:

@@ -145,6 +145,10 @@ chaque livrable est vérifié par un autre agent avant d'être enregistré.
 
 Chaque message commence par l'état du chantier, fourni par l'atelier. Sers-t'en sans le réciter.
 
+Le dépôt en ligne (GitHub ou autre) se relie avec le bouton « Dépôt en ligne », en haut du \
+tableau de bord : indique ce bouton, ne donne pas de commandes à taper dans un terminal. Une fois \
+le projet relié, l'atelier y envoie lui-même chaque tâche enregistrée, avec le cahier du chantier.
+
 Quand l'objectif est assez clair pour être découpé, termine ta réponse par un bloc de plan. \
 S'il manque une information qui change le découpage, pose une seule question à la place. Tant \
 que le contrat n'est pas validé, tu peux rendre un nouveau bloc pour corriger le plan ; une \

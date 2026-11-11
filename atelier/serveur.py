@@ -119,7 +119,20 @@ class Atelier:
                 "texte": self.brouillon["texte"].split(BALISE_PLAN)[0],
                 "outils": list(self.brouillon["outils"]),
             }
-            return vue(self.moteur.chantier, self.en_marche(), self.mode, self.occupe, brouillon)
+            donnees = vue(self.moteur.chantier, self.en_marche(), self.mode, self.occupe, brouillon)
+        controles = self.moteur.controles
+        if hasattr(controles, "distant"):
+            donnees["distant"] = {"adresse": controles.distant(), "probleme": controles.envoi}
+        return donnees
+
+    def relier(self, adresse: str) -> None:
+        """Relie le projet à un dépôt en ligne (GitHub ou autre)."""
+        if not hasattr(self.moteur.controles, "relier"):
+            raise ProjetImpossible("La démonstration n'a pas de vrai dépôt à relier.")
+        try:
+            self.moteur.controles.relier(adresse)
+        except ValueError as erreur:
+            raise ProjetImpossible(str(erreur)) from erreur
 
     def lancer(self) -> None:
         """Démarre le moteur en arrière-plan, s'il ne tourne pas déjà."""
@@ -169,6 +182,12 @@ class Atelier:
         chantier = self.moteur.chantier
         lignes = [point_d_etape(chantier, self.en_marche())]
         lignes += [f"- {t.id} {t.titre} : {ETATS_FR.get(t.etat, t.etat)}" for t in chantier.taches]
+        controles = self.moteur.controles
+        if hasattr(controles, "distant"):
+            adresse = controles.distant()
+            lignes.append(f"Dépôt en ligne : {adresse}" if adresse else "Dépôt en ligne : aucun")
+            if controles.envoi:
+                lignes.append(f"Dernier envoi en échec : {controles.envoi}")
         return "\n".join(lignes)
 
     def _interroger(self, texte: str):
@@ -280,6 +299,8 @@ class Requetes(BaseHTTPRequestHandler):
                 self.projets.creer(corps["nom"])
             elif self.path == "/api/projets/cloner":
                 self.projets.cloner(corps["adresse"])
+            elif self.path == "/api/projet/relier":
+                self.atelier.relier(corps["adresse"])
             elif self.path == "/api/projets/ouvrir":
                 self.projets.ouvrir(corps["id"])
             else:
