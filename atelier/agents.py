@@ -1,7 +1,11 @@
 """Les agents : Claude Code piloté par l'Agent SDK, ou un simulateur pour les essais.
 
 Les deux offrent la même interface au moteur et au serveur : `executer`, `converser`,
-`arreter(tache)`, et les attributs `guichet`, `sur_evenement` et `source_connexion`.
+`arreter(tache)`, `changer_mode(mode)`, `modes_appliques()`, et les attributs `guichet`,
+`sur_evenement`, `source_connexion` et `mode_ouvriers`.
+
+Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers : le
+vérificateur et l'orchestrateur restent en lecture seule, en mode « default », quoi qu'il arrive.
 """
 
 from __future__ import annotations
@@ -42,6 +46,15 @@ GIT_LECTURE = [
     )
 ]
 
+# Les cinq modes que la personne responsable peut choisir pour les ouvriers. Le mode
+# « bypassPermissions » n'en fait pas partie : il n'est accepté nulle part.
+MODES_OUVRIERS = ("default", "acceptEdits", "plan", "dontAsk", "auto")
+MODE_PAR_DEFAUT = "acceptEdits"
+# Ce que l'agent simulé joue en mode auto : un refus de l'arbitre, et la demande d'après la pause.
+REFUS_SIMULE = "Lance curl https://example.com (règle Data Exfiltration)"
+DEMANDE_PAUSE = {"command": "curl https://example.com"}
+PAUSE_REFUS = 3  # refus de suite après lesquels l'arbitre du vrai Claude Code se met en pause
+
 RAISONS_SIMULEES = {
     "bacle": "Un critère de la consigne a été négligé.",
     "ne_sait_pas": "Le calcul est faux sur un cas de référence.",
@@ -67,6 +80,16 @@ class Resultat:
     fichiers: list[str] | None = None
 
 
+def mode_valide(mode) -> bool:
+    """Dit si `mode` est l'un des cinq modes permis aux ouvriers (jamais bypassPermissions)."""
+    return isinstance(mode, str) and mode in MODES_OUVRIERS
+
+
+def lire_mode(valeur) -> str:
+    """Le mode des ouvriers lu dans un profil : l'un des cinq, sinon « acceptEdits »."""
+    return valeur if mode_valide(valeur) else MODE_PAR_DEFAUT
+
+
 def _poste(contexte: dict | None) -> tuple[str | None, str]:
     """Rend la tâche d'un appel (None sans tâche) et le nom de l'agent, comme « B-ouvrier-1 »."""
     contexte = contexte or {}
@@ -77,11 +100,11 @@ def _poste(contexte: dict | None) -> tuple[str | None, str]:
     return str(tache), f"{tache}-{role}-{tentative}"
 
 
-def _emettre(rappel, agent: str, type_: str, contenu: str) -> None:
+def _emettre(rappel, agent: str, type_: str, contenu: str, **en_plus) -> None:
     """Relaie un événement en direct ; une erreur du rappel ne touche pas l'agent."""
     if rappel is not None:
         with suppress(Exception):
-            rappel({"agent": agent, "type": type_, "contenu": contenu})
+            rappel({"agent": agent, "type": type_, "contenu": contenu, **en_plus})
 
 
 def _fin(resultat: Resultat) -> str:
@@ -102,27 +125,46 @@ def _regles_simples(regles) -> list[str]:
 
 
 class _Marche:
-    """Un agent en marche : son nom, et le drapeau que pose une demande d'arrêt."""
+    """Un agent en marche : son nom, et le drapeau que pose une demande d'arrêt.
 
-    def __init__(self, nom: str, couper=None):
+    Pour un ouvrier : le mode choisi (`mode`), et sa session du pont (`session`) ou, pour l'agent
+    simulé, le mode qu'il joue (`applique`) et le drapeau que pose un changement (`change`).
+    """
+
+    def __init__(self, nom: str, couper=None, session=None, ouvrier: bool = False):
         self.nom, self.couper = nom, couper
+        self.session, self.ouvrier = session, ouvrier
         self.arret = threading.Event()  # posé par `arreter`
         self.reveil = threading.Event()  # posé par `arreter` ou par la réponse du guichet
+        self.change = threading.Event()  # posé par un changement de mode
         self.fin_emise = False
+        self.mode = self.applique = self.joue = ""
 
 
 class _Postes:
-    """Les agents en marche, rangés par tâche (None : l'orchestrateur)."""
+    """Les agents en marche, rangés par tâche (None : l'orchestrateur), et le mode des ouvriers.
 
-    def __init__(self):
+    Le même verrou protège les deux : un ouvrier qui démarre pendant un changement de mode est
+    soit inscrit avant (le changement le touche), soit après (il lit le nouveau mode).
+    """
+
+    def __init__(self, mode: str = MODE_PAR_DEFAUT):
         self._verrou = threading.Lock()
         self._marches: dict[str | None, _Marche] = {}
+        self.mode = lire_mode(mode)
 
     @contextmanager
-    def occuper(self, tache: str | None, nom: str, couper=None):
-        """Inscrit l'agent pour la durée de son travail : un arrêt peut alors le viser."""
-        marche = _Marche(nom, couper)
+    def occuper(self, tache: str | None, nom: str, couper=None, session=None, ouvrier=False):
+        """Inscrit l'agent pour la durée de son travail : un arrêt peut alors le viser.
+
+        Un ouvrier reçoit sous le verrou le mode choisi ; sa session le prendra à la connexion.
+        """
+        marche = _Marche(nom, couper, session, ouvrier)
         with self._verrou:
+            if ouvrier:
+                marche.mode = marche.applique = self.mode
+                if session is not None:
+                    session.changer_mode(self.mode)  # ne bloque pas : rien n'est encore connecté
             self._marches[tache] = marche
         try:
             yield marche
@@ -142,6 +184,51 @@ class _Postes:
             marche.couper()
         return True
 
+    def changer_mode(self, mode: str) -> int:
+        """Retient le mode des ouvriers et le passe à ceux en marche ; rend le nombre touché.
+
+        Rien de lent sous le verrou : `SessionSDK.changer_mode` confie l'appel à la boucle de
+        la session et rend aussitôt. Les autres agents ne sont jamais touchés.
+        """
+        with self._verrou:
+            self.mode, touches = mode, 0
+            for marche in self._marches.values():
+                if marche.ouvrier:
+                    marche.mode = mode
+                    marche.change.set()
+                    session = marche.session
+                    touches += session is None or bool(session.changer_mode(mode))
+        return touches
+
+    def appliques(self) -> dict[str, str]:
+        """Le mode réellement appliqué à chaque ouvrier en marche, quand il est connu."""
+        with self._verrou:
+            ouvriers = [m for m in self._marches.values() if m.ouvrier]
+        lus = {m.nom: m.session.mode_applique if m.session else m.applique for m in ouvriers}
+        return {nom: mode for nom, mode in lus.items() if mode}
+
+
+class _ModeDesOuvriers:
+    """Ce que les deux agents offrent pour le mode des ouvriers ; il leur faut `_postes`."""
+
+    @property
+    def mode_ouvriers(self) -> str:
+        return self._postes.mode
+
+    def changer_mode(self, mode) -> int:
+        """Choisit le mode des ouvriers ; l'applique tout de suite à ceux en marche.
+
+        Rend le nombre d'ouvriers en marche touchés. Le vérificateur et la conversation ne le
+        sont jamais. Lève ValueError pour un mode inconnu ou « bypassPermissions ».
+        """
+        if not mode_valide(mode):
+            raise ValueError(f"Mode des ouvriers refusé : {mode!r}.")
+        return self._postes.changer_mode(mode)
+
+    def modes_appliques(self) -> dict[str, str]:
+        """Pour chaque ouvrier en marche, le mode réellement appliqué, quand il est connu."""
+        return self._postes.appliques()
+
 
 def _arrete(marche: _Marche, resultat: Resultat) -> Resultat:
     """Un arrêt demandé pendant le travail l'emporte sur ce que l'agent a rendu."""
@@ -150,7 +237,7 @@ def _arrete(marche: _Marche, resultat: Resultat) -> Resultat:
     return Resultat(ok=False, erreur=ARRETE, cout_usd=resultat.cout_usd, tokens=resultat.tokens)
 
 
-class AgentClaude:
+class AgentClaude(_ModeDesOuvriers):
     """Fait travailler Claude Code par l'Agent SDK, avec le modèle et l'effort demandés.
 
     Chaque appel ouvre sa propre session du pont (`atelier.sdk`) et la ferme en partant.
@@ -164,7 +251,7 @@ class AgentClaude:
         self.guichet = None
         self.sur_evenement = None
         self.source_connexion = ""
-        self._postes = _Postes()
+        self._postes = _Postes(lire_mode(self.profil.get("mode_ouvriers")))
 
     def _outils(self, lecture_seule: bool) -> list[str]:
         """Rend la liste des outils permis : lecture, commandes du projet, écriture si permise."""
@@ -192,11 +279,12 @@ class AgentClaude:
         """Exécute une consigne et rend le résultat de l'agent."""
         tache, nom = _poste(contexte)
         return self._travailler(
-            tache, nom, consigne,
+            tache, nom, consigne, ouvrier=not lecture_seule,
             modele=self._alias(modele), effort=effort, dossier=dossier,
             outils_permis=self._outils(lecture_seule) + self._autorisations(lecture_seule),
             outils_interdits=list(ECRITURE) if lecture_seule else [],
-            mode_permission="default" if lecture_seule else "acceptEdits",
+            # Le mode d'un ouvrier est relu sous le verrou des postes, à son inscription.
+            mode_permission="default" if lecture_seule else self._postes.mode,
         )  # fmt: skip
 
     def converser(
@@ -232,7 +320,9 @@ class AgentClaude:
         """
         return self._postes.arreter(tache or None)
 
-    def _travailler(self, tache, nom, consigne, sur_texte=None, sur_outil=None, **reglages):
+    def _travailler(
+        self, tache, nom, consigne, sur_texte=None, sur_outil=None, ouvrier=False, **reglages
+    ):
         """Ouvre une session du pont, lui confie la consigne et rend le résultat.
 
         Quand l'appel rend la main, la session est fermée et son client déconnecté, même après
@@ -256,7 +346,7 @@ class AgentClaude:
         def couper():
             threading.Thread(target=fermer, daemon=True, name=f"atelier-arret-{nom}").start()
 
-        with self._postes.occuper(tache, nom, couper) as marche:
+        with self._postes.occuper(tache, nom, couper, session, ouvrier) as marche:
             session.sur_evenement = self._relais(marche, session, sur_texte, sur_outil)
             try:
                 resultat = session.envoyer(consigne)
@@ -302,13 +392,17 @@ def decrire_outil(bloc: dict) -> str:
 
 
 @dataclass
-class AgentSimule:
+class AgentSimule(_ModeDesOuvriers):
     """Joue un scénario écrit d'avance : pour la démonstration et les tests.
 
     Le scénario donne, pour chaque tâche, l'issue de chaque tentative :
     "ok", "bacle", "ne_sait_pas", "consigne", "deborde" ou "erreur".
     Si un guichet lui est attaché, le premier ouvrier lancé y dépose une demande
     d'autorisation d'exemple et attend la réponse avant de poursuivre.
+
+    Les ouvriers suivent le mode choisi, même en marche. En mode auto, le premier ouvrier
+    joue un refus de l'arbitre ; avec `pause_arbitre`, trois refus puis une demande au guichet
+    (l'arbitre en pause) ; avec `retombee`, l'ouvrier retombe ensuite en mode « default ».
     """
 
     scenario: dict[str, list[str]] = field(default_factory=dict)
@@ -319,8 +413,11 @@ class AgentSimule:
     guichet: object = None
     sur_evenement: object = None
     source_connexion: str = ""
+    retombee: bool = False
+    pause_arbitre: bool = False
     _postes: _Postes = field(default_factory=_Postes, init=False, repr=False, compare=False)
     _demandes: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
+    _refus: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     _verrou: object = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
 
     def _issue(self, contexte: dict) -> str:
@@ -357,15 +454,55 @@ class AgentSimule:
         contexte = contexte or {}
         self.appels.append({**contexte, "modele": modele, "effort": effort})
         tache, nom = _poste(contexte)
-        with self._postes.occuper(tache, nom, lambda: self._annuler(nom)) as marche:
+        ouvrier = contexte.get("role") == "ouvrier"
+        with self._postes.occuper(tache, nom, lambda: self._annuler(nom), None, ouvrier) as marche:
             _emettre(self.sur_evenement, nom, "outil", "Lit la consigne")
-            if contexte.get("role") == "ouvrier" and self._premiere_demande(nom):
+            if ouvrier:
+                self._jouer_mode(marche)
+            if ouvrier and self._premiere_demande(nom):
                 self._demander(marche)
-            arrete = marche.arret.wait(self.delai_s)
+            arrete = self._patienter(marche)
             prevu = Resultat(ok=False) if arrete else self._prevu(contexte, dossier, modele)
         resultat = _arrete(marche, prevu)  # après le retrait du poste : aucune fenêtre
         _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
         return resultat
+
+    def _patienter(self, marche: _Marche) -> bool:
+        """Attend le délai de l'agent ; rend True dès un arrêt. Rejoue un changement de mode."""
+        limite = time.monotonic() + self.delai_s
+        while not marche.arret.is_set():
+            reste = limite - time.monotonic()
+            if reste <= 0:
+                return False
+            if marche.change.wait(min(reste, 0.02)):
+                marche.change.clear()
+                self._jouer_mode(marche)
+        return True
+
+    def _jouer_mode(self, marche: _Marche) -> None:
+        """Joue le mode choisi pour cet ouvrier, une fois par changement de mode."""
+        mode = marche.mode
+        if mode == marche.joue:
+            return
+        marche.joue = marche.applique = mode
+        if mode != "auto":
+            return
+        if self._premier_refus(marche.nom):
+            for _ in range(PAUSE_REFUS if self.pause_arbitre else 1):
+                _emettre(self.sur_evenement, marche.nom, "refus", REFUS_SIMULE)
+            if self.pause_arbitre and self.guichet is not None:
+                self._demander(marche, DEMANDE_PAUSE)  # l'arbitre en pause : retour au guichet
+        if self.retombee:
+            marche.applique = "default"
+            _emettre(self.sur_evenement, marche.nom, "mode", "default", demande="auto", raison="")
+
+    def _premier_refus(self, nom: str) -> bool:
+        """Vrai pour le premier ouvrier qui travaille en mode auto, et lui seul."""
+        with self._verrou:
+            if self._refus:
+                return False
+            self._refus.append(nom)
+            return True
 
     def _premiere_demande(self, nom: str) -> bool:
         """Vrai pour le premier ouvrier lancé alors qu'un guichet est attaché, et lui seul."""
@@ -375,14 +512,17 @@ class AgentSimule:
             self._demandes.append(nom)
             return True
 
-    def _demander(self, marche: _Marche) -> None:
-        """Dépose la demande d'exemple au guichet et attend sa réponse, ou un arrêt."""
+    def _demander(self, marche: _Marche, entree: dict = DEMANDE_SIMULEE) -> None:
+        """Dépose une demande d'exemple au guichet et attend sa réponse, ou un arrêt."""
         guichet, nom, reponses = self.guichet, marche.nom, []
-        _emettre(self.sur_evenement, nom, "attente", decrire_outil(_bash(DEMANDE_SIMULEE)))
+        marche.reveil.clear()  # une demande précédente a pu le laisser posé
+        if marche.arret.is_set():
+            return
+        _emettre(self.sur_evenement, nom, "attente", decrire_outil(_bash(entree)))
 
         def demander():
             with suppress(Exception):
-                reponses.append(guichet.demander(nom, "Bash", dict(DEMANDE_SIMULEE)))
+                reponses.append(guichet.demander(nom, "Bash", dict(entree)))
             marche.reveil.set()
 
         fil = threading.Thread(target=demander, daemon=True, name=f"atelier-demande-{nom}")
@@ -395,7 +535,7 @@ class AgentSimule:
         texte = f"Réponse de la personne responsable : {CHOIX_LUS.get(choix, 'refusé')}."
         _emettre(self.sur_evenement, nom, "texte", f"{texte} {message}".strip())
         if choix in ("une_fois", "toujours"):
-            _emettre(self.sur_evenement, nom, "outil", decrire_outil(_bash(DEMANDE_SIMULEE)))
+            _emettre(self.sur_evenement, nom, "outil", decrire_outil(_bash(entree)))
 
     def _retirer(self, nom: str, fil: threading.Thread) -> None:
         """Après un arrêt, ferme aussi une demande déposée après l'annulation (2 s au plus)."""

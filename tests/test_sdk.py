@@ -26,13 +26,16 @@ from claude_agent_sdk import (  # noqa: E402
     StreamEvent,
     SystemMessage,
     ToolPermissionContext,
+    ToolResultBlock,
     ToolUseBlock,
+    UserMessage,
 )
 
 from atelier.agents import decrire_outil  # noqa: E402
 from atelier.guichet import Guichet  # noqa: E402
 from atelier.sdk import (  # noqa: E402
     SessionSDK,
+    lire_refus,
     lire_resultat,
     lire_source,
     regle_sdk,
@@ -57,19 +60,34 @@ def texte(morceau):
     return StreamEvent(uuid="u", session_id=UUID, event={"type": "x", "delta": delta})
 
 
-def outil(nom, entree):
-    return AssistantMessage(content=[ToolUseBlock(id="t1", name=nom, input=entree)], model="opus")
+def outil(nom, entree, identifiant="t1"):
+    bloc = ToolUseBlock(id=identifiant, name=nom, input=entree)
+    return AssistantMessage(content=[bloc], model="opus")
 
 
-def init(source="none"):
-    return SystemMessage(subtype="init", data={"apiKeySource": source, "session_id": UUID})
+def init(source="none", mode=None):
+    donnees = {"apiKeySource": source, "session_id": UUID}
+    if mode is not None:
+        donnees["permissionMode"] = mode
+    return SystemMessage(subtype="init", data=donnees)
 
 
-def fin(result="Fini.", is_error=False, cout=0.12):
+def statut(mode):
+    """Le message par lequel Claude Code annonce un nouveau mode en cours de session."""
+    return SystemMessage(subtype="status", data={"permissionMode": mode, "session_id": UUID})
+
+
+def resultat_outil(identifiant, contenu, erreur=True):
+    """Le résultat d'un outil, tel que l'agent le reçoit (un message « utilisateur »)."""
+    bloc = ToolResultBlock(tool_use_id=identifiant, content=contenu, is_error=erreur)
+    return UserMessage(content=[bloc])
+
+
+def fin(result="Fini.", is_error=False, cout=0.12, refus=None):
     return ResultMessage(
         subtype="success", duration_ms=1, duration_api_ms=1, is_error=is_error, num_turns=1,
         session_id=UUID, total_cost_usd=cout, result=result,
-        usage={"input_tokens": 100, "output_tokens": 20},
+        usage={"input_tokens": 100, "output_tokens": 20}, permission_denials=refus,
     )  # fmt: skip
 
 
@@ -95,15 +113,22 @@ class Geste:
 BLOQUE = object()  # étape du scénario : l'agent ne rend plus la main
 
 
+INDISPONIBLE_SDK = "Cannot set permission mode to auto: auto mode unavailable for this model"
+
+
 class FauxClient:
-    def __init__(self, options, scenario, lent=None, demande_pendant_interrupt=None):
+    def __init__(self, options, scenario, lent=None, demande_pendant_interrupt=None,
+                 sans_auto=False):  # fmt: skip
         self.options, self.scenario, self.lent = options, scenario, lent or {}
         self.demande_pendant_interrupt = demande_pendant_interrupt
+        self.sans_auto = sans_auto  # comme un modèle pour lequel le mode auto n'existe pas
         self.consignes, self.decisions, self.fils, self.detachees = [], [], [], []
+        self.modes_demandes, self.modes, self.fils_modes = [], [], []
         self.connecte = self.interrompu = self.deconnecte = False
         self.travail_annule = self.deconnexion_annulee = False
 
     async def connect(self):
+        await asyncio.sleep(self.lent.get("connect", 0))
         self.connecte = True
 
     async def query(self, consigne):
@@ -133,6 +158,15 @@ class FauxClient:
                 raise etape
             else:
                 yield etape
+
+    async def set_permission_mode(self, mode):
+        """Comme le vrai : asynchrone, et refusé pour le mode auto quand il n'existe pas."""
+        self.modes_demandes.append(mode)
+        self.fils_modes.append(threading.current_thread())
+        await asyncio.sleep(self.lent.get("mode", 0))
+        if self.sans_auto and mode == "auto":
+            raise Exception(INDISPONIBLE_SDK)
+        self.modes.append(mode)
 
     async def interrupt(self):
         await asyncio.sleep(self.lent.get("interrupt", 0))
@@ -795,7 +829,10 @@ if "-v" in sys.argv[1:]:
 with open(os.environ["FAUX_CLI_PID"], "a") as f:
     f.write(f"{os.getpid()}\n")
 SESSION, BLOQUE = "UUID", os.environ.get("FAUX_CLI_MODE") == "bloque"
-verrou, interrompu = threading.Lock(), threading.Event()
+ATTEND_MODE = os.environ.get("FAUX_CLI_MODE") == "attend_mode"
+verrou, interrompu, change = threading.Lock(), threading.Event(), threading.Event()
+OPTION = "--permission-mode"
+DEPART = sys.argv[sys.argv.index(OPTION) + 1] if OPTION in sys.argv else ""
 
 def dire(message):
     with verrou:
@@ -803,13 +840,18 @@ def dire(message):
         sys.stdout.flush()
 
 def tour():
-    dire({"type": "system", "subtype": "init", "session_id": SESSION, "apiKeySource": "none"})
+    dire({"type": "system", "subtype": "init", "session_id": SESSION, "apiKeySource": "none",
+          "permissionMode": DEPART})
     for mot in ("Bon", "jour."):
         delta = {"type": "text_delta", "text": mot}
         dire({"type": "stream_event", "uuid": "s", "session_id": SESSION,
               "event": {"type": "content_block_delta", "index": 0, "delta": delta}})
     if BLOQUE:
         interrompu.wait()
+    if ATTEND_MODE:  # le tour attend qu'un changement de mode soit accepté
+        change.wait(5)
+        dire({"type": "system", "subtype": "status", "session_id": SESSION,
+              "permissionMode": "plan"})
     dire({"type": "result", "subtype": "success", "duration_ms": 1, "duration_api_ms": 1,
           "is_error": interrompu.is_set(), "num_turns": 1, "session_id": SESSION,
           "total_cost_usd": 0.25, "result": "Fini.",
@@ -818,8 +860,19 @@ def tour():
 for ligne in sys.stdin:
     message = json.loads(ligne)
     if message.get("type") == "control_request":
-        if message["request"].get("subtype") == "interrupt":
+        demande = message["request"]
+        if demande.get("subtype") == "interrupt":
             interrompu.set()
+        if demande.get("subtype") == "set_permission_mode":
+            with open(os.environ["FAUX_CLI_PID"] + ".modes", "a") as f:
+                f.write(demande["mode"] + "\n")
+            if demande["mode"] == "auto":
+                dire({"type": "control_response", "response": {"subtype": "error",
+                      "request_id": message["request_id"],
+                      "error": "Cannot set permission mode to auto: "
+                               "auto mode unavailable for this model"}})
+                continue
+            change.set()
         dire({"type": "control_response", "response": {"subtype": "success",
               "request_id": message["request_id"], "response": {}}})
     elif message.get("type") == "user":
@@ -843,12 +896,12 @@ def vrai_client(tmp_path, ouvrir):
     script.write_text(f"#!{sys.executable}\n{FAUX_CLI}", "utf-8")
     script.chmod(0o755)
 
-    def ouvrir_vrai(mode=""):
+    def ouvrir_vrai(mode="", **reglages):
         def fabrique(options):
             env = {"FAUX_CLI_PID": str(pids), "FAUX_CLI_MODE": mode}
             return ClaudeSDKClient(dataclasses.replace(options, cli_path=str(script), env=env))
 
-        session, _, evenements = ouvrir(fabrique_client=fabrique)
+        session, _, evenements = ouvrir(fabrique_client=fabrique, **reglages)
         return session, evenements, lambda: [int(p) for p in pids.read_text().split()]
 
     return ouvrir_vrai
@@ -874,3 +927,425 @@ def test_vrai_client_l_arret_ne_laisse_pas_claude_code_vivant(vrai_client):
     assert rendus[0].erreur == ARRETE
     (pid,) = lire_pids()
     assert attendre(lambda: not vivant(pid))
+
+
+def test_vrai_client_le_changement_de_mode_part_vers_claude_code(vrai_client, tmp_path):
+    """Le mode de départ et chaque changement arrivent au faux exécutable, qui les note ; il
+    refuse « auto » comme Claude Code quand le modèle ne l'a pas."""
+    session, evenements, _ = vrai_client("attend_mode", mode_permission="acceptEdits")
+    fil, rendus = en_fond(session)
+    assert attendre(lambda: "jour." in du_type(evenements, "texte"))
+    assert session.mode_applique == "acceptEdits"  # lu dans le message de départ
+    assert session.changer_mode("auto") is True
+    assert attendre(lambda: du_type(evenements, "mode"))
+    assert session.changer_mode("plan") is True
+    fil.join(GARDE_S)
+    assert rendus[0].ok
+    modes = (tmp_path / "pids.modes").read_text().split()
+    assert modes == ["auto", "plan"]
+    (refus,) = [e for e in evenements if e["type"] == "mode"]
+    assert refus == {
+        "agent": AGENT, "type": "mode", "contenu": "acceptEdits", "demande": "auto",
+        "raison": "le mode auto n'est pas disponible pour son modèle",
+    }  # fmt: skip
+    assert (session.mode_permission, session.mode_applique) == ("plan", "plan")
+
+
+# --- Le mode des ouvriers ---------------------------------------------------------------
+
+TEXTE_REFUS = (
+    "Permission for this action was denied by the Claude Code auto mode classifier. "
+    "Reason: [Exfil Scouting]. You may try a different approach that does not send data out."
+)
+CURL = {"command": "curl https://example.com"}
+
+
+def attendre_le_tour():
+    """Une étape de scénario : le faux client attend que le test lui fasse signe."""
+    signal = threading.Event()
+
+    async def attendre_signal(_client):
+        limite = time.monotonic() + GARDE_S
+        while not signal.is_set() and time.monotonic() < limite:
+            await asyncio.sleep(0.005)
+
+    return Geste(attendre_signal), signal
+
+
+def jusqu_a(condition):
+    """Une étape de scénario : le faux client attend que `condition(client)` soit vraie."""
+
+    async def attendre_condition(client):
+        limite = time.monotonic() + GARDE_S
+        while not condition(client) and time.monotonic() < limite:
+            await asyncio.sleep(0.005)
+
+    return Geste(attendre_condition)
+
+
+@pytest.mark.parametrize("mode", ["bypassPermissions", "AUTO", "", None, 42, ["auto"]])
+def test_le_pont_refuse_bypass_et_tout_mode_inconnu(ouvrir, mode):
+    with pytest.raises(ValueError):
+        SessionSDK(AGENT, "opus", "high", mode_permission=mode)
+    geste, signal = attendre_le_tour()
+    session, fabrique, _ = ouvrir([geste, fin()], mode_permission="auto")
+    fil, rendus = en_fond(session)
+    assert commence(fabrique)
+    assert session.changer_mode(mode) is False
+    signal.set()
+    fil.join(GARDE_S)
+    assert rendus[0].ok and fabrique.clients[0].modes_demandes == []
+    assert session.mode_permission == "auto"
+
+
+@pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk", "auto"])
+def test_les_cinq_modes_sont_transmis_au_depart(ouvrir, mode):
+    session, fabrique, _ = ouvrir([fin()], mode_permission=mode)
+    assert session.envoyer("Va.").ok
+    assert fabrique.clients[0].options.permission_mode == mode
+
+
+def test_changer_mode_sans_tour_en_cours_vaut_pour_la_connexion(ouvrir):
+    session, fabrique, _ = ouvrir([fin()], mode_permission="acceptEdits")
+    assert session.changer_mode("plan") is False  # aucun tour : rien n'est touché en marche
+    assert session.envoyer("Va.").ok
+    client = fabrique.clients[0]
+    assert client.options.permission_mode == "plan" and client.modes_demandes == []
+
+
+def test_changer_mode_pendant_un_tour_part_vers_le_client_sans_bloquer(ouvrir):
+    session, fabrique, evenements = ouvrir(
+        [init(mode="acceptEdits"), jusqu_a(lambda c: c.modes), fin()],
+        mode_permission="acceptEdits", client={"lent": {"mode": 0.3}},
+    )  # fmt: skip
+    fil, rendus = en_fond(session)
+    assert attendre(lambda: session.mode_applique == "acceptEdits")
+    debut = time.monotonic()
+    assert session.changer_mode("dontAsk") is True
+    assert time.monotonic() - debut < 0.1  # l'appelant n'attend pas Claude Code
+    fil.join(GARDE_S)
+    assert rendus[0].ok
+    client = fabrique.clients[0]
+    assert client.modes == ["dontAsk"]
+    assert client.fils_modes[0].name == f"atelier-sdk-{AGENT}"  # dans la boucle de la session
+    assert (session.mode_permission, session.mode_applique) == ("dontAsk", "dontAsk")
+    assert du_type(evenements, "mode") == []  # un changement demandé et réussi ne dit rien
+
+
+def test_un_changement_refuse_garde_le_mode_d_avant_et_dit_le_mode_reel(ouvrir):
+    session, fabrique, evenements = ouvrir(
+        [init(mode="acceptEdits"), jusqu_a(lambda c: c.modes_demandes), texte("Je continue."),
+         fin()],
+        mode_permission="acceptEdits", client={"sans_auto": True},
+    )  # fmt: skip
+    fil, rendus = en_fond(session)
+    assert attendre(lambda: session.mode_applique == "acceptEdits")
+    assert session.changer_mode("auto") is True
+    fil.join(GARDE_S)
+    assert rendus[0].ok and rendus[0].texte == "Fini."  # rien d'autre ne casse
+    assert attendre(lambda: du_type(evenements, "mode"))
+    (evenement,) = [e for e in evenements if e["type"] == "mode"]
+    assert evenement == {
+        "agent": AGENT, "type": "mode", "contenu": "acceptEdits", "demande": "auto",
+        "raison": "le mode auto n'est pas disponible pour son modèle",
+    }  # fmt: skip
+    assert (session.mode_permission, session.mode_applique) == ("acceptEdits", "acceptEdits")
+
+
+def test_changer_mode_sur_une_session_qui_s_arrete_ou_se_ferme(ouvrir):
+    session, fabrique, _ = ouvrir([BLOQUE])
+    fil, rendus = en_fond(session)
+    assert commence(fabrique)
+    session.arreter()
+    assert session.changer_mode("plan") is False
+    fil.join(GARDE_S)
+    assert rendus[0].erreur == ARRETE
+    session.fermer()
+    assert session.changer_mode("auto") is False
+    assert fabrique.clients[0].modes_demandes == []
+
+
+def test_le_plus_recent_de_deux_changements_l_emporte(ouvrir):
+    session, fabrique, _ = ouvrir(
+        [jusqu_a(lambda c: c.modes[-1:] == ["auto"]), fin()], client={"lent": {"mode": 0.1}}
+    )
+    fil, rendus = en_fond(session)
+    assert commence(fabrique)
+    assert session.changer_mode("plan") and session.changer_mode("auto")
+    fil.join(GARDE_S)
+    assert rendus[0].ok and session.mode_permission == "auto"
+    assert fabrique.clients[0].modes[-1] == "auto"
+
+
+def test_un_changement_pendant_la_connexion_est_applique_apres_elle(ouvrir):
+    session, fabrique, _ = ouvrir([jusqu_a(lambda c: c.modes), fin()], mode_permission="default",
+                                  client={"lent": {"connect": 0.3}})  # fmt: skip
+    fil, rendus = en_fond(session)
+    assert attendre(lambda: fabrique.clients)
+    client = fabrique.clients[0]
+    assert not client.connecte  # le client est créé avec l'ancien mode, et se connecte
+    assert session.changer_mode("auto") is True
+    fil.join(GARDE_S)
+    assert rendus[0].ok
+    assert client.options.permission_mode == "default" and client.modes == ["auto"]
+    assert session.mode_permission == "auto"
+
+
+def test_une_demande_ouverte_au_guichet_survit_au_changement_de_mode(ouvrir):
+    guichet = Guichet(delai_s=GARDE_S)
+    session, fabrique, _ = ouvrir(
+        [Permission("Bash", CURL), fin()], guichet=guichet, mode_permission="acceptEdits"
+    )
+    fil, rendus = en_fond(session)
+    try:
+        assert attendre(lambda: guichet.ouvertes())
+        assert session.changer_mode("auto") is True
+        client = fabrique.clients[0]
+        assert attendre(lambda: client.modes == ["auto"])
+        (demande,) = guichet.ouvertes()  # toujours ouverte
+        assert guichet.repondre(demande["id"], "une_fois")
+        fil.join(GARDE_S)
+    finally:
+        guichet.annuler(AGENT)
+    assert rendus[0].ok and client.decisions == [PermissionResultAllow()]
+
+
+def test_en_mode_auto_une_demande_arrive_au_guichet_et_la_reponse_revient(ouvrir):
+    """L'arbitre en pause : Claude Code redemande par `can_use_tool`, donc par le guichet."""
+    guichet = FauxGuichet(Reponse("non", message="Pas de réseau."))
+    session, fabrique, evenements = ouvrir(
+        [init(mode="auto"), Permission("Bash", CURL), fin()], guichet=guichet,
+        mode_permission="auto",
+    )  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert guichet.demandes == [(AGENT, "Bash", CURL)]
+    assert fabrique.clients[0].decisions == [PermissionResultDeny(message="Pas de réseau.")]
+    assert du_type(evenements, "attente") == ["Lance curl https://example.com"]
+
+
+# --- Le mode réel -------------------------------------------------------------------------
+
+
+def modes_dits(evenements):
+    return [(e["contenu"], e["demande"], e["raison"]) for e in evenements if e["type"] == "mode"]
+
+
+def test_le_depart_dans_le_mode_demande_ne_dit_rien(ouvrir):
+    session, _, evenements = ouvrir([init(mode="plan"), fin()], mode_permission="plan")
+    assert session.envoyer("Va.").ok
+    assert session.mode_applique == "plan" and modes_dits(evenements) == []
+
+
+def test_le_mode_auto_indisponible_au_depart_est_dit(ouvrir):
+    session, _, evenements = ouvrir([init(mode="default"), fin()], mode_permission="auto")
+    assert session.envoyer("Va.").ok
+    assert session.mode_applique == "default"
+    assert modes_dits(evenements) == [
+        ("default", "auto", "le mode auto n'est pas disponible pour son modèle")
+    ]
+
+
+def test_une_retombee_en_cours_de_session_est_dite_une_fois_par_changement(ouvrir):
+    session, _, evenements = ouvrir(
+        [init(mode="auto"), statut("default"), statut("default"), statut("auto"), fin()],
+        mode_permission="auto",
+    )
+    assert session.envoyer("Va.").ok
+    assert modes_dits(evenements) == [("default", "auto", ""), ("auto", "auto", "")]
+    assert session.mode_applique == "auto"
+
+
+def test_la_fin_de_la_repetition_est_dite_avec_sa_raison(ouvrir):
+    session, _, evenements = ouvrir([init(mode="plan"), statut("default"), fin()],
+                                    mode_permission="plan")  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert modes_dits(evenements) == [
+        ("default", "plan", "il a fini sa répétition et passe à l'exécution de son plan")
+    ]
+
+
+def test_un_statut_qui_accompagne_un_changement_demande_ne_dit_rien(ouvrir):
+    session, _, evenements = ouvrir(
+        [init(mode="acceptEdits"), jusqu_a(lambda c: c.modes_demandes), statut("auto"),
+         jusqu_a(lambda c: c.modes), statut("auto"), fin()],
+        mode_permission="acceptEdits", client={"lent": {"mode": 0.1}},
+    )  # fmt: skip
+    fil, rendus = en_fond(session)
+    assert attendre(lambda: session.mode_applique == "acceptEdits")
+    assert session.changer_mode("auto") is True
+    fil.join(GARDE_S)
+    assert rendus[0].ok and modes_dits(evenements) == []
+    assert session.mode_applique == "auto"
+
+
+def test_un_message_de_mode_illisible_ne_casse_rien(ouvrir):
+    illisibles = [SystemMessage(subtype="status", data={"permissionMode": 42}),
+                  SystemMessage(subtype="status", data={}), statut("")]  # fmt: skip
+    session, _, evenements = ouvrir([*illisibles, fin()], mode_permission="auto")
+    assert session.envoyer("Va.").ok
+    assert session.mode_applique == "" and modes_dits(evenements) == []
+
+
+# --- Les refus de l'arbitre ---------------------------------------------------------------
+
+
+def refus_dits(evenements):
+    return du_type(evenements, "refus")
+
+
+def test_un_refus_de_l_arbitre_est_annonce_aussitot_et_une_seule_fois(ouvrir):
+    autre = {"tool_name": "WebFetch", "tool_use_id": "t9", "tool_input": {"url": "https://x.y"}}
+    denials = [{"tool_name": "Bash", "tool_use_id": "t7", "tool_input": CURL}, autre, autre]
+    session, _, evenements = ouvrir(
+        [init(mode="auto"), outil("Bash", CURL, "t7"), resultat_outil("t7", TEXTE_REFUS),
+         texte("Je fais autrement."), fin(refus=denials)],
+        mode_permission="auto",
+    )  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert refus_dits(evenements) == [
+        "Lance curl https://example.com (règle Exfil Scouting)",
+        "WebFetch (raison non précisée)",
+    ]
+    types = [e["type"] for e in evenements]
+    assert types.index("refus") < types.index("texte")  # aussitôt, pas en fin de tour
+    (premier, _) = [e for e in evenements if e["type"] == "refus"]
+    assert (premier["outil"], premier["raison"]) == (
+        "Lance curl https://example.com", "règle Exfil Scouting"
+    )  # fmt: skip
+
+
+def test_un_refus_en_blocs_de_texte_est_reconnu(ouvrir):
+    blocs = [{"type": "text", "text": TEXTE_REFUS}]
+    session, _, evenements = ouvrir(
+        [init(mode="auto"), outil("Bash", CURL, "t3"), resultat_outil("t3", blocs), fin()],
+        mode_permission="auto",
+    )  # fmt: skip
+    session.envoyer("Va.")
+    assert refus_dits(evenements) == ["Lance curl https://example.com (règle Exfil Scouting)"]
+
+
+def test_un_echec_ordinaire_n_est_jamais_un_refus_de_l_arbitre(ouvrir):
+    guichet = FauxGuichet(Reponse("non"))
+    denials = [{"tool_name": "Bash", "tool_use_id": "t1", "tool_input": CURL}]
+    session, _, evenements = ouvrir(
+        [init(mode="auto"),
+         outil("Bash", {"command": "npm test"}, "t2"),
+         resultat_outil("t2", "Exit code 1\nnpm ERR! Test failed."),
+         outil("Grep", {"pattern": "classifier"}, "t4"),
+         resultat_outil("t4", TEXTE_REFUS, erreur=False),  # un texte lu, pas un refus
+         Permission("Bash", CURL),  # refusé par la personne, au guichet
+         resultat_outil("t1", "La personne responsable a refusé cet outil."),
+         fin(refus=denials)],
+        mode_permission="auto", guichet=guichet,
+    )  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert refus_dits(evenements) == []
+
+
+@pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk"])
+def test_hors_du_mode_auto_les_refus_du_tour_ne_sont_pas_de_l_arbitre(ouvrir, mode):
+    denials = [{"tool_name": "Bash", "tool_use_id": "t7", "tool_input": CURL}]
+    session, _, evenements = ouvrir([init(mode=mode), fin(refus=denials)], mode_permission=mode)
+    assert session.envoyer("Va.").ok
+    assert refus_dits(evenements) == []
+
+
+def test_un_refus_sans_identifiant_ou_mal_forme_ne_casse_rien(ouvrir):
+    denials = [{"tool_name": "Bash", "tool_input": CURL}, "illisible", None,
+               {"tool_name": "Bash", "tool_use_id": "t5", "tool_input": ["pas", "un", "objet"]}]
+    session, _, evenements = ouvrir([init(mode="auto"), fin(refus=denials)],
+                                    mode_permission="auto")  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert refus_dits(evenements) == ["Lance (raison non précisée)"]
+
+
+def test_la_memoire_des_appels_et_des_refus_est_bornee(ouvrir):
+    scenario = [outil("Read", {"file_path": f"f{n}.py"}, f"a{n}") for n in range(600)]
+    scenario += [resultat_outil(f"a{n}", TEXTE_REFUS) for n in range(600)]
+    session, _, evenements = ouvrir([init(mode="auto"), *scenario, fin()],
+                                    mode_permission="auto")  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert len(session._appels) <= 256 and len(session._refus) <= 256
+    assert len(refus_dits(evenements)) == 600
+
+
+@pytest.mark.parametrize(
+    "texte_lu, attendu",
+    [
+        (TEXTE_REFUS, "règle Exfil Scouting"),
+        ("Permission for this action was denied by the Claude Code auto mode classifier. "
+         "Reason: [Data Exfiltration].", "règle Data Exfiltration"),
+        ("Permission for this action was denied by the Claude Code auto mode classifier.",
+         "Permission for this action was denied by the Claude Code auto mode classifier."),
+        ("Exit code 1", ""),
+        ("Permission denied (publickey).", ""),
+        (None, ""),
+        (42, ""),
+    ],
+)  # fmt: skip
+def test_lire_refus(texte_lu, attendu):
+    assert lire_refus(texte_lu) == attendu
+
+
+def test_raison_d_echec_et_texte_du_resultat():
+    from atelier.sdk import raison_d_echec, texte_du_resultat
+
+    assert raison_d_echec(Exception(INDISPONIBLE_SDK)) == (
+        "le mode auto n'est pas disponible pour son modèle"
+    )
+    assert raison_d_echec(TimeoutError()) == "Claude Code n'a pas pris le changement (TimeoutError)"
+    assert raison_d_echec(Exception("Control request timeout: set_permission_mode")) == (
+        "Claude Code n'a pas pris le changement (Control request timeout: set_permission_mode)"
+    )
+    assert texte_du_resultat("a") == "a"
+    assert texte_du_resultat([{"type": "text", "text": "a"}, "x", {"text": "b"}]) == "a\nb"
+    assert texte_du_resultat(None) == "" and texte_du_resultat(42) == ""
+
+
+def test_un_changement_trop_lent_ne_bloque_pas_la_boucle_et_reste_borne(ouvrir):
+    session, fabrique, evenements = ouvrir(
+        [init(mode="acceptEdits"), jusqu_a(lambda c: c.modes_demandes), texte("pendant"), fin()],
+        mode_permission="acceptEdits", client={"lent": {"mode": 2}},
+    )  # fmt: skip
+    session.delai_mode_s = 0.2
+    fil, rendus = en_fond(session)
+    assert attendre(lambda: session.mode_applique == "acceptEdits")
+    assert session.changer_mode("plan") is True
+    fil.join(GARDE_S)
+    assert rendus[0].ok and fabrique.clients[0].modes == []  # le tour a fini sans l'attendre
+    assert attendre(lambda: modes_dits(evenements), 1)
+    assert modes_dits(evenements) == [
+        ("acceptEdits", "plan", "Claude Code n'a pas pris le changement (TimeoutError)")
+    ]
+    assert session.mode_permission == "acceptEdits"
+
+
+def test_la_phrase_du_refus_au_milieu_d_une_sortie_ou_hors_du_mode_auto_n_est_pas_un_refus(
+    ouvrir,
+):
+    """Un grep ou un test en échec peut afficher la phrase du refus (elle est dans ce dépôt) ;
+    et sans mode auto pendant le tour, il n'y a pas d'arbitre pour refuser."""
+    grep = {"command": "grep -rn classifier atelier tests && pytest -q"}
+    sortie = f"Exit code 1\ntests/test_sdk.py:957:    {TEXTE_REFUS}\nFAILED tests/test_sdk.py::x"
+    for mode in ("auto", "acceptEdits"):
+        session, _, evenements = ouvrir(
+            [init(mode=mode), outil("Bash", grep, "b1"), resultat_outil("b1", sortie), fin()],
+            mode_permission=mode,
+        )
+        assert session.envoyer("Va.").ok
+        assert refus_dits(evenements) == []
+    for mode in ("acceptEdits", "default", "plan", "dontAsk"):
+        session, _, evenements = ouvrir(
+            [init(mode=mode), outil("Bash", CURL, "c1"), resultat_outil("c1", TEXTE_REFUS), fin()],
+            mode_permission=mode,
+        )
+        assert session.envoyer("Va.").ok
+        assert refus_dits(evenements) == []
+    # Le même texte, en tête, quand le mode auto vaut : c'est un refus.
+    session, _, evenements = ouvrir(
+        [init(mode="auto"), outil("Bash", CURL, "c1"), resultat_outil("c1", "  " + TEXTE_REFUS),
+         fin()],
+        mode_permission="auto",
+    )  # fmt: skip
+    assert session.envoyer("Va.").ok
+    assert refus_dits(evenements) == ["Lance curl https://example.com (règle Exfil Scouting)"]

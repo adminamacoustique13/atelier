@@ -38,6 +38,7 @@ from tests.test_sdk import (  # noqa: E402
     attendre,
     fin,
     init,
+    jusqu_a,
     outil,
     texte,
 )
@@ -624,3 +625,243 @@ def test_arreter_la_conversation_simulee_puis_reprendre():
     suite = converser(agent)
     assert suite.ok and suite.texte.startswith("C'est noté.")
     assert du_type(evenements, "fin") == [ARRETE, "L'agent a terminé."]
+
+
+# --- Le mode des ouvriers -------------------------------------------------------------------
+
+MODES = ["default", "acceptEdits", "plan", "dontAsk", "auto"]
+CONVERSATION = {"role": "conversation"}
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_l_ouvrier_demarre_dans_le_mode_du_profil(mode):
+    agent, fabrique = claude([fin()], profil={"mode_ouvriers": mode})
+    assert agent.mode_ouvriers == mode
+    assert lancer(agent).ok
+    assert fabrique.clients[0].options.permission_mode == mode
+
+
+@pytest.mark.parametrize("valeur", ["bypassPermissions", "AUTO", "", None, 42, ["auto"], {}])
+def test_un_mode_inconnu_ou_bypass_dans_le_profil_vaut_accept_edits(valeur):
+    agent, fabrique = claude([fin()], profil={"mode_ouvriers": valeur})
+    assert lancer(agent).ok
+    assert agent.mode_ouvriers == "acceptEdits"
+    assert fabrique.clients[0].options.permission_mode == "acceptEdits"
+
+
+@pytest.mark.parametrize("mode", MODES)
+def test_verificateur_et_conversation_restent_en_lecture_seule_quel_que_soit_le_mode(mode):
+    agent, fabrique = claude([fin()], profil={"mode_ouvriers": "plan"})
+    agent.changer_mode(mode)
+    assert lancer(agent, VERIFICATEUR, lecture_seule=True).ok and converser(agent).ok
+    for client in fabrique.clients:
+        assert client.options.permission_mode == "default"
+        assert set(client.options.disallowed_tools) >= ECRITURE
+
+
+@pytest.mark.parametrize("simulee", [False, True])
+@pytest.mark.parametrize("mode", ["bypassPermissions", "Auto", None, 3])
+def test_changer_mode_refuse_bypass_et_tout_mode_inconnu(simulee, mode):
+    agent = AgentSimule() if simulee else claude([fin()])[0]
+    agent.changer_mode("plan")
+    with pytest.raises(ValueError):
+        agent.changer_mode(mode)
+    assert agent.mode_ouvriers == "plan"
+
+
+def test_un_ouvrier_lance_apres_le_choix_demarre_dans_le_mode_choisi():
+    agent, fabrique = claude([fin()])
+    assert agent.mode_ouvriers == "acceptEdits"
+    assert agent.changer_mode("plan") == 0  # aucun ouvrier en marche : le choix est retenu
+    assert lancer(agent).ok
+    assert fabrique.clients[0].options.permission_mode == "plan"
+
+
+def roles(fabrique):
+    """Retrouve, d'après ses options, l'ouvrier, le vérificateur et la conversation."""
+    par_role = {}
+    for client in fabrique.clients:
+        options = client.options
+        if options.system_prompt.get("append"):
+            par_role["conversation"] = client
+        elif options.disallowed_tools:
+            par_role["verificateur"] = client
+        else:
+            par_role["ouvrier"] = client
+    return par_role
+
+
+def test_le_changement_a_chaud_ne_touche_que_les_ouvriers_en_marche():
+    agent, fabrique = claude([BLOQUE])
+    autre = {"role": "verificateur", "tache": "C", "tentative": 1}
+    fils = [en_fond(lancer, agent), en_fond(lancer, agent, autre, True), en_fond(converser, agent)]
+    assert attendre(lambda: len(fabrique.clients) == 3 and all(c.consignes for c in
+                                                                fabrique.clients))  # fmt: skip
+    try:
+        assert agent.changer_mode("auto") == 1
+        par_role = roles(fabrique)
+        assert attendre(lambda: par_role["ouvrier"].modes == ["auto"])
+        assert agent.modes_appliques() == {"B-ouvrier-1": "auto"}
+        time.sleep(0.05)  # laisse aux autres le temps d'un changement qui ne doit pas venir
+        assert par_role["verificateur"].modes_demandes == []
+        assert par_role["conversation"].modes_demandes == []
+    finally:
+        for tache in ("B", "C", None):
+            agent.arreter(tache)
+        for fil, _ in fils:
+            fil.join(GARDE_S)
+    assert agent.modes_appliques() == {}
+
+
+def test_un_ouvrier_qui_demarre_pendant_un_changement_finit_dans_le_mode_choisi():
+    """Le changement arrive juste avant, pendant ou juste après l'inscription de l'ouvrier :
+    à la fin, l'ouvrier travaille toujours dans le mode choisi."""
+    for rang in range(30):
+        mode = MODES[rang % len(MODES)]
+        signal = threading.Event()
+        agent, fabrique = claude([jusqu_a(lambda _c, s=signal: s.is_set()), fin()])
+        agent.changer_mode("acceptEdits" if mode != "acceptEdits" else "default")
+        fil, rendus = en_fond(lancer, agent)
+        time.sleep((rang % 4) / 1000)
+        agent.changer_mode(mode)
+        signal.set()
+        fil.join(GARDE_S)
+        assert rendus[0].ok
+        (client,) = fabrique.clients
+        modes = [client.options.permission_mode, *client.modes]
+        assert modes[-1] == mode, (rang, modes)
+
+
+def test_un_changement_entre_la_lecture_du_mode_et_l_inscription_n_est_pas_perdu(monkeypatch):
+    """Le pire moment : la session est créée avec l'ancien mode, le changement arrive avant
+    que l'ouvrier soit inscrit. L'inscription relit le mode sous le verrou des postes."""
+    agent, fabrique = claude([fin()])
+    creer = SessionSDK.__init__
+
+    def creer_puis_changer(session, *arguments, **reglages):
+        creer(session, *arguments, **reglages)
+        assert agent.changer_mode("plan") == 0  # l'ouvrier n'est pas encore inscrit
+
+    monkeypatch.setattr(SessionSDK, "__init__", creer_puis_changer)
+    assert lancer(agent).ok
+    assert fabrique.clients[0].options.permission_mode == "plan"
+
+
+def test_le_mode_reel_d_un_ouvrier_se_lit_pendant_son_travail():
+    agent, fabrique = claude([init(mode="default"), jusqu_a(lambda c: c.modes == ["plan"]),
+                              fin()], profil={"mode_ouvriers": "auto"})  # fmt: skip
+    evenements = []
+    agent.sur_evenement = evenements.append
+    fil, rendus = en_fond(lancer, agent)
+    assert attendre(lambda: agent.modes_appliques() == {"B-ouvrier-1": "default"})
+    (dit,) = [e for e in evenements if e["type"] == "mode"]
+    assert (dit["agent"], dit["contenu"], dit["demande"]) == ("B-ouvrier-1", "default", "auto")
+    assert dit["raison"] == "le mode auto n'est pas disponible pour son modèle"
+    assert agent.changer_mode("plan") == 1
+    fil.join(GARDE_S)
+    assert rendus[0].ok and agent.modes_appliques() == {}
+
+
+def test_un_ouvrier_qui_attend_au_guichet_garde_sa_demande_pendant_le_changement():
+    guichet = Guichet(delai_s=GARDE_S)
+    agent, fabrique = claude([Permission("Bash", {"command": "npm publish"}), fin()])
+    agent.guichet = guichet
+    fil, rendus = en_fond(lancer, agent)
+    try:
+        assert attendre(lambda: guichet.ouvertes())
+        assert agent.changer_mode("dontAsk") == 1
+        assert attendre(lambda: fabrique.clients[0].modes == ["dontAsk"])
+        (demande,) = guichet.ouvertes()
+        assert guichet.repondre(demande["id"], "une_fois")
+        fil.join(GARDE_S)
+    finally:
+        guichet.annuler("B-ouvrier-1")
+    assert rendus[0].ok and fabrique.clients[0].decisions == [PermissionResultAllow()]
+
+
+# --- L'agent simulé et le mode des ouvriers -----------------------------------------------
+
+REFUS_SIMULE = "Lance curl https://example.com (règle Data Exfiltration)"
+
+
+def joues(evenements, nom):
+    return [(e["type"], e["contenu"]) for e in evenements if e["agent"] == nom]
+
+
+def test_hors_du_mode_auto_l_agent_simule_ne_change_rien():
+    for mode in ("default", "acceptEdits", "plan", "dontAsk"):
+        agent, evenements = simule()
+        agent.retombee = agent.pause_arbitre = True
+        agent.changer_mode(mode)
+        assert lancer(agent, ouvrier("A")).ok
+        assert joues(evenements, "A-ouvrier-1") == [
+            ("outil", "Lit la consigne"), ("fin", "L'agent a terminé.")
+        ]  # fmt: skip
+
+
+def test_en_mode_auto_le_premier_ouvrier_simule_joue_un_refus_de_l_arbitre():
+    agent, evenements = simule()
+    agent.changer_mode("auto")
+    assert lancer(agent, ouvrier("A")).ok and lancer(agent, ouvrier("B")).ok
+    assert lancer(agent, {"role": "verificateur", "tache": "A", "tentative": 1}, True).ok
+    assert joues(evenements, "A-ouvrier-1") == [
+        ("outil", "Lit la consigne"), ("refus", REFUS_SIMULE), ("fin", "L'agent a terminé.")
+    ]  # fmt: skip
+    assert du_type(evenements, "refus") == [REFUS_SIMULE]  # un seul ouvrier le joue
+    assert du_type(evenements, "mode") == []
+
+
+def test_l_agent_simule_joue_une_retombee_apres_le_refus():
+    agent, evenements = simule()
+    agent.retombee = True
+    agent.changer_mode("auto")
+    assert lancer(agent, ouvrier("A")).ok
+    assert joues(evenements, "A-ouvrier-1")[1:3] == [("refus", REFUS_SIMULE), ("mode", "default")]
+    (retombee,) = [e for e in evenements if e["type"] == "mode"]
+    assert (retombee["demande"], retombee["raison"]) == ("auto", "")
+
+
+def test_l_agent_simule_joue_la_pause_de_l_arbitre_puis_le_guichet():
+    guichet = GuichetSimule(["une_fois", "non"])
+    agent, evenements = simule(guichet)
+    agent.pause_arbitre = True
+    agent.changer_mode("auto")
+    assert lancer(agent, ouvrier("A")).ok
+    assert [d["detail"] for d in guichet.demandes] == [
+        "curl https://example.com", "npm install left-pad"
+    ]  # fmt: skip
+    assert joues(evenements, "A-ouvrier-1")[:7] == [
+        ("outil", "Lit la consigne"),
+        ("refus", REFUS_SIMULE), ("refus", REFUS_SIMULE), ("refus", REFUS_SIMULE),
+        ("attente", "Lance curl https://example.com"),
+        ("texte", "Réponse de la personne responsable : autorisé une fois."),
+        ("outil", "Lance curl https://example.com"),
+    ]  # fmt: skip
+
+
+def test_l_agent_simule_suit_un_changement_de_mode_en_marche():
+    agent, evenements = simule(delai_s=GARDE_S)
+    verificateur = {"role": "verificateur", "tache": "A", "tentative": 1}
+    fils = [en_fond(lancer, agent, ouvrier("B")), en_fond(lancer, agent, verificateur, True)]
+    assert attendre(lambda: len(du_type(evenements, "outil")) == 2)
+    try:
+        assert agent.modes_appliques() == {"B-ouvrier-1": "acceptEdits"}
+        assert agent.changer_mode("auto") == 1  # le vérificateur n'est pas touché
+        assert attendre(lambda: du_type(evenements, "refus") == [REFUS_SIMULE])
+        assert agent.modes_appliques() == {"B-ouvrier-1": "auto"}
+        assert [e["agent"] for e in evenements if e["type"] == "refus"] == ["B-ouvrier-1"]
+    finally:
+        agent.arreter("A")
+        agent.arreter("B")
+        for fil, _ in fils:
+            fil.join(GARDE_S)
+
+
+@pytest.mark.parametrize(
+    "valeur, attendu",
+    [("auto", "auto"), ("plan", "plan"), ("bypassPermissions", "acceptEdits"),
+     ("Default", "acceptEdits"), (None, "acceptEdits"), (["auto"], "acceptEdits")],
+)  # fmt: skip
+def test_lire_mode(valeur, attendu):
+    assert agents.lire_mode(valeur) == attendu
+    assert agents.mode_valide(valeur) is (valeur == attendu)

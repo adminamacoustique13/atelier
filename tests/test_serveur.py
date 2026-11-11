@@ -1040,3 +1040,399 @@ def test_le_nombre_d_agents_gardes_est_borne_sans_evenement_fin():
     noms = [a["nom"] for a in activite.agents()]
     assert noms == [f"T{rang}-ouvrier-1" for rang in range(60, 100)]
     assert len(activite._reste) == 40 and len(activite._lignes) == 40
+
+
+# --- le mode des ouvriers -------------------------------------------------------------
+
+CHOIX_ATTENDUS = [
+    ("default", "Me demander"),
+    ("acceptEdits", "Accepter les modifications"),
+    ("plan", "Répétition"),
+    ("dontAsk", "Refuser sans demander"),
+    ("auto", "Laisser un arbitre décider"),
+]
+REFUS_LIGNE = "Refusé par l'arbitre : Lance curl https://example.com (règle Data Exfiltration)."
+RETOMBEE = (
+    "A-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
+    "« Me demander » qui est appliqué."
+)
+
+
+def textes_du_fil(atelier):
+    return [e["texte"] for e in atelier.moteur.chantier.evenements]
+
+
+def lignes_de_la_vue(serveur, nom):
+    return next((a["lignes"] for a in serveur.etat()["agents"] if a["nom"] == nom), [])
+
+
+def test_la_vue_porte_le_mode_des_ouvriers_et_ses_cinq_choix(tableau, tmp_path):
+    serveur = tableau(atelier_simule(tmp_path))
+    mode = serveur.etat()["mode_ouvriers"]
+    assert (mode["choisi"], mode["libelle"], mode["appliques"]) == (
+        "acceptEdits", "Accepter les modifications", []
+    )  # fmt: skip
+    assert [(c["mode"], c["libelle"]) for c in mode["choix"]] == CHOIX_ATTENDUS
+    assert all(set(c) == {"mode", "libelle", "explication"} for c in mode["choix"])
+    explications = {c["mode"]: c["explication"] for c in mode["choix"]}
+    assert explications["plan"] == (
+        "L'ouvrier prépare son plan et chaque modification de fichier te demande une carte, "
+        "mais les commandes permises d'avance par le projet (comme python3 ou npm) tournent "
+        "sans carte et peuvent écrire ; une dernière carte te demande s'il peut passer à "
+        "l'exécution."
+    )
+    assert "refusé sans carte" in explications["dontAsk"]
+    assert explications["auto"] == (
+        "Un modèle approuve ou refuse à ta place ce qui t'aurait demandé une carte, ainsi que "
+        "les commandes qui exécutent du code même permises d'avance (le reste passe sans lui) ; "
+        "ses refus s'affichent dans l'activité de l'agent, et après trop de refus les demandes "
+        "te reviennent en cartes."
+    )
+    assert all(e.endswith(".") and e.count(". ") == 0 for e in explications.values())
+    assert "bypassPermissions" not in json.dumps(mode)
+
+
+def test_la_route_du_mode_l_enregistre_au_profil_sans_toucher_au_reste(tableau, tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text(json.dumps({"nom": "X", "autorisations": ["Read"]}), "utf-8")
+    profil = {"nom": "X"}
+    agent = AgentSimule()
+    agent.profil = profil
+    atelier = atelier_simule(tmp_path, agent=agent, profil=profil)
+    serveur = tableau(atelier)
+    code, reponse = serveur.appeler("/api/mode", {"mode": "auto"})
+    phrase = (
+        "Mode des ouvriers : « Laisser un arbitre décider ». "
+        "Il vaudra pour les prochains ouvriers lancés."
+    )
+    assert code == 200 and reponse["changement_mode"] == {"fait": True, "phrase": phrase}
+    assert reponse["mode"] == "réel"  # la vue garde sa clé « mode »
+    assert reponse["mode_ouvriers"]["choisi"] == "auto"
+    assert reponse["mode_ouvriers"]["libelle"] == "Laisser un arbitre décider"
+    texte = chemin.read_text("utf-8")
+    assert texte.endswith("\n")
+    assert json.loads(texte) == {"nom": "X", "autorisations": ["Read"], "mode_ouvriers": "auto"}
+    assert agent.mode_ouvriers == "auto"
+    assert profil["mode_ouvriers"] == "auto" and atelier.moteur.profil["mode_ouvriers"] == "auto"
+    assert textes_du_fil(atelier).count(phrase) == 1
+
+
+@pytest.mark.parametrize(
+    "mode, phrase",
+    [
+        ("bypassPermissions", "Le mode bypassPermissions, qui laisserait les agents tout faire "
+         "sans rien demander, n'est pas proposé par l'Atelier : rien n'a changé."),
+        ("AUTO", "Ce mode n'existe pas : choisis parmi « Me demander », « Accepter les "
+         "modifications », « Répétition », « Refuser sans demander », « Laisser un arbitre "
+         "décider ». Rien n'a changé."),
+        (None, None), (42, None), (["auto"], None), ("", None),
+    ],
+)  # fmt: skip
+def test_la_route_refuse_bypass_et_tout_mode_inconnu_sans_rien_ecrire(tableau, tmp_path, mode,
+                                                                       phrase):  # fmt: skip
+    atelier = atelier_simule(tmp_path)
+    serveur = tableau(atelier)
+    avant = textes_du_fil(atelier)
+    code, reponse = serveur.appeler("/api/mode", {"mode": mode})
+    assert code == 200 and reponse["changement_mode"]["fait"] is False
+    if phrase:
+        assert reponse["changement_mode"]["phrase"] == phrase
+    assert not (tmp_path / "chantier" / "profil.json").exists()
+    assert atelier.moteur.agent.mode_ouvriers == "acceptEdits"
+    assert reponse["mode_ouvriers"]["choisi"] == "acceptEdits"
+    assert textes_du_fil(atelier) == avant
+
+
+def test_la_route_du_mode_sans_cle_rend_400(tableau, tmp_path):
+    serveur = tableau(atelier_simule(tmp_path))
+    erreur = {"erreur": "Demande introuvable ou incomplète."}
+    assert serveur.appeler("/api/mode", {}) == (400, erreur)
+
+
+@pytest.mark.parametrize("contenu", ["pas du json", "[1, 2]"])
+def test_un_profil_illisible_n_empeche_pas_le_choix_et_le_dit(tableau, tmp_path, contenu):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text(contenu, "utf-8")
+    atelier = atelier_simule(tmp_path)
+    serveur = tableau(atelier)
+    _, reponse = serveur.appeler("/api/mode", {"mode": "plan"})
+    assert reponse["changement_mode"] == {
+        "fait": True,
+        "phrase": "Mode des ouvriers : « Répétition ». Il vaudra pour les prochains ouvriers "
+        "lancés. Il n'a pas pu être enregistré et sera oublié au redémarrage : le profil du "
+        "projet (chantier/profil.json) n'est pas lisible, corrige-le.",
+    }
+    assert chemin.read_text("utf-8") == contenu
+    assert atelier.moteur.agent.mode_ouvriers == "plan"
+
+
+def test_l_ecriture_du_mode_passe_par_le_verrou_du_profil(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    chemin = atelier.depot / "chantier" / "profil.json"
+    assert ecrire_pendant_que_le_verrou_est_tenu(atelier, lambda: atelier.changer_mode("auto"),
+                                                 chemin)  # fmt: skip
+    assert json.loads(chemin.read_text("utf-8")) == {"mode_ouvriers": "auto"}
+
+
+def test_le_mode_du_profil_vaut_a_l_ouverture(tmp_path):
+    atelier = atelier_simule(tmp_path, profil={"mode_ouvriers": "dontAsk"})
+    assert atelier.moteur.agent.mode_ouvriers == "dontAsk"
+    assert atelier.vue()["mode_ouvriers"]["choisi"] == "dontAsk"
+    assert not any("mode" in t for t in textes_du_fil(atelier))
+
+
+@pytest.mark.parametrize(
+    "valeur, montre",
+    [("bypassPermissions", "« bypassPermissions »"), ("Auto", "« Auto »"), (42, "illisible"),
+     (None, "illisible")],
+)  # fmt: skip
+def test_un_mode_refuse_dans_le_profil_vaut_accept_edits_et_le_fil_le_dit_une_fois(
+    tmp_path, valeur, montre
+):
+    c = chantier([])
+    profil = {"mode_ouvriers": valeur}
+    atelier = Atelier(tmp_path, c, AgentSimule(), ControlesSimules(), profil)
+    phrase = (
+        "Le profil du projet (chantier/profil.json) demande pour les ouvriers un mode que "
+        f"l'Atelier ne connaît pas ou refuse ({montre}) : ils travaillent en mode "
+        "« Accepter les modifications »."
+    )
+    assert textes_du_fil(atelier).count(phrase) == 1
+    assert atelier.moteur.agent.mode_ouvriers == "acceptEdits"
+    assert atelier.vue()["mode_ouvriers"]["choisi"] == "acceptEdits"
+    Atelier(tmp_path, c, AgentSimule(), ControlesSimules(), profil)  # rouvert tel quel
+    assert textes_du_fil(atelier).count(phrase) == 1
+
+
+def test_le_mode_change_a_chaud_pendant_qu_un_ouvrier_simule_tourne(tableau, tmp_path):
+    """Le mode passe en auto pendant que l'ouvrier travaille : il joue un refus de l'arbitre,
+    puis retombe en « default » ; la conversation, en marche au même instant, n'est pas touchée."""
+    atelier = atelier_simule(tmp_path, [tache("A")], delai_s=30, retombee=True)
+    serveur = tableau(atelier)
+    atelier.lancer()
+    assert attendre(lambda: lignes_de_la_vue(serveur, "A-ouvrier-1") == ["Lit la consigne"])
+    atelier.moteur.agent.plan = None
+    serveur.appeler("/api/message", {"texte": "Où en est-on ?"})
+    assert attendre(lambda: lignes_de_la_vue(serveur, "orchestrateur"))
+    code, reponse = serveur.appeler("/api/mode", {"mode": "auto"})
+    assert code == 200 and reponse["changement_mode"] == {
+        "fait": True,
+        "phrase": "Mode des ouvriers : « Laisser un arbitre décider ». "
+        "Il vaut aussi, dès maintenant, pour l'ouvrier en marche.",
+    }
+    assert attendre(lambda: len(lignes_de_la_vue(serveur, "A-ouvrier-1")) == 3)
+    assert lignes_de_la_vue(serveur, "A-ouvrier-1") == [
+        "Lit la consigne", REFUS_LIGNE, "Mode réellement appliqué : Me demander."
+    ]  # fmt: skip
+    assert attendre(lambda: RETOMBEE in textes_du_fil(atelier))
+    etat = serveur.etat()
+    assert etat["mode_ouvriers"]["choisi"] == "auto"
+    assert etat["mode_ouvriers"]["appliques"] == [
+        {"agent": "A-ouvrier-1", "mode": "default", "libelle": "Me demander"}
+    ]
+    assert not any("orchestrateur" in t and "mode" in t for t in textes_du_fil(atelier))
+
+    # Revenir au mode « default » : l'ouvrier est déjà dans ce mode, rien de plus n'est dit.
+    _, reponse = serveur.appeler("/api/mode", {"mode": "default"})
+    assert reponse["mode_ouvriers"]["appliques"] == []
+    assert attendre(lambda: atelier.moteur.agent.modes_appliques() == {"A-ouvrier-1": "default"})
+    assert textes_du_fil(atelier).count(RETOMBEE) == 1
+    code, reponse = serveur.appeler("/api/arreter", {"tache": "A"})
+    assert reponse["arret"]["fait"] is True
+
+
+def test_une_seule_phrase_par_agent_et_par_changement_de_mode_reel(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    rappel = atelier.moteur.agent.sur_evenement
+    mode = {"agent": "B-ouvrier-1", "type": "mode", "contenu": "default", "demande": "auto",
+            "raison": "le mode auto n'est pas disponible pour son modèle"}  # fmt: skip
+    for _ in range(3):
+        rappel(mode)
+    rappel({**mode, "contenu": "auto", "raison": ""})
+    rappel(mode)
+    rappel(evenement("B-ouvrier-1", "fin", "L'agent a terminé."))
+    rappel(mode)  # une nouvelle session du même nom : elle a droit à sa phrase
+    phrase = (
+        "B-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
+        "« Me demander » qui est appliqué : le mode auto n'est pas disponible pour son modèle."
+    )
+    fil = textes_du_fil(atelier)
+    assert fil.count(phrase) == 3
+    assert fil.count(
+        "B-ouvrier-1 travaille de nouveau dans le mode demandé, « Laisser un arbitre décider »."
+    ) == 1
+    etat = json.loads((tmp_path / ".atelier" / "etat.json").read_text("utf-8"))
+    assert phrase in [e["texte"] for e in etat["evenements"]]  # la phrase est enregistrée
+
+
+def test_un_vrai_agent_dit_au_fil_que_le_mode_auto_est_indisponible(tmp_path):
+    """Le vrai `AgentClaude`, sur un faux client du SDK qui démarre en « default »."""
+    from tests.test_sdk import Fabrique, fin, init
+
+    fabrique = Fabrique([init(mode="default"), fin()])
+    agent = AgentClaude({"mode_ouvriers": "auto"}, delai_max_s=5, fabrique_client=fabrique)
+    atelier = atelier_simule(tmp_path, agent=agent, profil={"mode_ouvriers": "auto"})
+    atelier.annoncer_connexion({})
+    contexte = {"role": "ouvrier", "tache": "A", "tentative": 1}
+    assert agent.executer("Va.", "opus", "high", None, False, contexte).ok
+    assert agent.executer("Vérifie.", "opus", "high", None, True,
+                          {**contexte, "role": "verificateur"}).ok  # fmt: skip
+    phrase = (
+        "A-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
+        "« Me demander » qui est appliqué : le mode auto n'est pas disponible pour son modèle."
+    )
+    assert textes_du_fil(atelier).count(phrase) == 1
+    assert not any("verificateur" in t for t in textes_du_fil(atelier))
+    assert [c.options.permission_mode for c in fabrique.clients] == ["auto", "default"]
+
+
+def test_en_mode_auto_la_pause_de_l_arbitre_ramene_les_cartes(tableau, tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")], guichet=Guichet(), pause_arbitre=True)
+    serveur = tableau(atelier)
+    serveur.appeler("/api/mode", {"mode": "auto"})
+    vus = []
+    suite = atelier.moteur.agent.sur_evenement
+    atelier.moteur.agent.sur_evenement = lambda e: (vus.append(e), suite(e))
+    atelier.lancer()
+    assert attendre(lambda: serveur.etat()["autorisations"])
+    (demande,) = serveur.etat()["autorisations"]
+    assert demande["detail"] == "curl https://example.com"
+    assert demande["phrase"] == (
+        "A-ouvrier-1 veut lancer la commande « curl https://example.com ». "
+        "Cette commande ne peut être autorisée qu'au cas par cas."
+    )
+    lignes = lignes_de_la_vue(serveur, "A-ouvrier-1")
+    assert lignes.count(REFUS_LIGNE) == 3
+    _, reponse = serveur.appeler("/api/autorisation", {"id": demande["id"], "choix": "une_fois"})
+    assert reponse["autorisation"]["reglee"] is True
+    assert attendre(lambda: serveur.etat()["autorisations"])  # puis la demande d'exemple
+    (suivante,) = serveur.etat()["autorisations"]
+    serveur.appeler("/api/autorisation", {"id": suivante["id"], "choix": "non"})
+    assert attendre(lambda: not atelier.en_marche())
+    textes = [e["contenu"] for e in vus if e["type"] == "texte"]
+    assert textes[0] == "Réponse de la personne responsable : autorisé une fois."
+
+
+def test_les_lignes_de_refus_et_de_mode_sont_lisibles():
+    activite, dits = Activite(), []
+    activite.sur_mode = dits.append
+    activite.ajouter(evenement("B-ouvrier-1", "texte", "Je cherche"))
+    activite.ajouter(evenement("B-ouvrier-1", "refus", "Lance curl https://x.y (règle Z)"))
+    mode = {**evenement("B-ouvrier-1", "mode", "default"), "demande": "auto"}
+    activite.ajouter(mode)
+    activite.ajouter(mode)
+    activite.ajouter(evenement("B-ouvrier-1", "mode", "plan"))  # sans mode demandé
+    assert lignes_de(activite, "B-ouvrier-1") == [
+        "Je cherche",
+        "Refusé par l'arbitre : Lance curl https://x.y (règle Z).",
+        "Mode réellement appliqué : Me demander.",
+        "Mode réellement appliqué : Me demander.",
+        "Mode réellement appliqué : Répétition.",
+    ]
+    assert [e["contenu"] for e in dits] == ["default", "plan"]
+    activite.ajouter(evenement("B-ouvrier-1", "mode", "bizarre"))
+    assert lignes_de(activite, "B-ouvrier-1")[-1] == "Mode réellement appliqué : bizarre."
+    assert activite._modes and activite.ajouter(evenement("B-ouvrier-1", "fin", "")) is None
+    assert activite._modes == {}
+
+
+def test_le_rappel_de_mode_qui_leve_ne_casse_pas_l_activite():
+    activite = Activite()
+
+    def casse(_evenement):
+        raise RuntimeError("le fil est tombé")
+
+    activite.sur_mode = casse
+    activite.ajouter(evenement("B-ouvrier-1", "mode", "default"))
+    assert lignes_de(activite, "B-ouvrier-1") == ["Mode réellement appliqué : Me demander."]
+
+
+def test_les_phrases_du_mode_des_ouvriers():
+    from atelier.serveur import libelle_mode, phrase_mode_change, phrase_mode_reel
+
+    assert phrase_mode_change("plan", 3) == (
+        "Mode des ouvriers : « Répétition ». Il vaut aussi, dès maintenant, pour les 3 ouvriers "
+        "en marche."
+    )
+    assert phrase_mode_reel("B-ouvrier-1", "", "dontAsk") == (
+        "Mode réellement appliqué à B-ouvrier-1 : « Refuser sans demander »."
+    )
+    assert phrase_mode_reel("B-ouvrier-1", "plan", "default", "il a fini sa répétition") == (
+        "B-ouvrier-1 devait travailler en mode « Répétition », mais c'est le mode « Me demander » "
+        "qui est appliqué : il a fini sa répétition."
+    )
+    assert libelle_mode("acceptEdits") == "Accepter les modifications"
+    assert libelle_mode("x" * 100) == "x" * 40 and libelle_mode(["auto"]) == "['auto']"
+
+
+def ouvrier_claude_en_marche(tmp_path, fabrique, profil):
+    """Un vrai `AgentClaude` sur un faux client, et son ouvrier B lancé dans un fil."""
+    agent = AgentClaude(dict(profil), delai_max_s=10, fabrique_client=fabrique)
+    atelier = atelier_simule(tmp_path, agent=agent, profil=dict(profil))
+    atelier.annoncer_connexion({})
+    contexte = {"role": "ouvrier", "tache": "B", "tentative": 1}
+    fil = threading.Thread(
+        target=lambda: agent.executer("Va.", "opus", "high", None, False, contexte), daemon=True
+    )
+    fil.start()
+    return atelier, agent, fil
+
+
+def test_le_meme_ecart_de_mode_est_redit_apres_chaque_changement_demande(tmp_path):
+    """Auto refusé, puis acceptEdits, puis auto refusé de nouveau : le fil le redit."""
+    from tests.test_sdk import BLOQUE, Fabrique, init
+
+    fabrique = Fabrique([init(mode="acceptEdits"), BLOQUE], sans_auto=True)
+    atelier, agent, fil = ouvrier_claude_en_marche(tmp_path, fabrique, {})
+    ecart = (
+        "B-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
+        "« Accepter les modifications » qui est appliqué : le mode auto n'est pas disponible pour "
+        "son modèle."
+    )
+    try:
+        assert attendre(lambda: agent.modes_appliques() == {"B-ouvrier-1": "acceptEdits"})
+        atelier.changer_mode("auto")
+        assert attendre(lambda: textes_du_fil(atelier).count(ecart) == 1)
+        atelier.changer_mode("acceptEdits")
+        atelier.changer_mode("auto")
+        assert attendre(lambda: textes_du_fil(atelier).count(ecart) == 2)
+        assert textes_du_fil(atelier)[-1] == ecart
+        assert fabrique.clients[0].modes_demandes == ["auto", "auto"]
+    finally:
+        agent.arreter("B")
+        fil.join(5)
+
+
+def test_une_retombee_qui_revient_apres_un_nouveau_choix_est_redite(tmp_path):
+    """Retombée, retour, retombée, puis la personne choisit de nouveau auto et l'ouvrier
+    retombe encore : chaque retombée est dite."""
+    from tests.test_sdk import Fabrique, fin, init, jusqu_a, statut
+
+    pas = {"n": 0}
+
+    def etape(n):
+        return jusqu_a(lambda _client: pas["n"] >= n)
+
+    fabrique = Fabrique([init(mode="auto"), etape(1), statut("default"), etape(2), statut("auto"),
+                         etape(3), statut("default"), etape(4), statut("default"), etape(5),
+                         fin()])  # fmt: skip
+    atelier, agent, fil = ouvrier_claude_en_marche(tmp_path, fabrique, {"mode_ouvriers": "auto"})
+    retombee = (
+        "B-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
+        "« Me demander » qui est appliqué."
+    )
+    try:
+        assert attendre(lambda: agent.modes_appliques() == {"B-ouvrier-1": "auto"})
+        for n, attendu in ((1, 1), (2, 1), (3, 2)):
+            pas["n"] = n
+            assert attendre(lambda a=attendu: textes_du_fil(atelier).count(retombee) == a)
+        atelier.changer_mode("auto")  # l'ouvrier repasse en auto
+        assert attendre(lambda: agent.modes_appliques() == {"B-ouvrier-1": "auto"})
+        pas["n"] = 4
+        assert attendre(lambda: textes_du_fil(atelier).count(retombee) == 3)
+        assert textes_du_fil(atelier)[-1] == retombee
+    finally:
+        pas["n"] = 5
+        fil.join(5)

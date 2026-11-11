@@ -10,11 +10,12 @@ import os
 import threading
 import uuid
 from collections import deque
+from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from atelier import dosage
-from atelier.agents import AgentSimule
+from atelier.agents import MODE_PAR_DEFAUT, MODES_OUVRIERS, AgentSimule, lire_mode, mode_valide
 from atelier.consignes import (
     BALISE_OUTILS,
     BALISE_PLAN,
@@ -92,6 +93,94 @@ CONFIRMATIONS = (
 # (une de trop au pire), et le fil ne reste jamais sur une ancienne phrase devenue fausse.
 ANCIENNES_ANNONCES: tuple[str, ...] = ()
 ANNONCES = DEPARTS + CONFIRMATIONS + ANCIENNES_ANNONCES  # reconnues à leur texte exact
+
+
+# Le mode des ouvriers : le libellé du menu et ce que la personne responsable verra.
+MODES_FR = {
+    "default": (
+        "Me demander",
+        "Les ouvriers modifient les fichiers de leur copie, mais toute autre action qui n'est "
+        "pas permise d'avance te demande une carte.",
+    ),
+    "acceptEdits": (
+        "Accepter les modifications",
+        "Les ouvriers modifient les fichiers et rangent les dossiers de leur copie sans "
+        "demander, et le reste de ce qui n'est pas permis d'avance te demande une carte.",
+    ),
+    "plan": (
+        "Répétition",
+        "L'ouvrier prépare son plan et chaque modification de fichier te demande une carte, "
+        "mais les commandes permises d'avance par le projet (comme python3 ou npm) tournent "
+        "sans carte et peuvent écrire ; une dernière carte te demande s'il peut passer à "
+        "l'exécution.",
+    ),
+    "dontAsk": (
+        "Refuser sans demander",
+        "Tout ce qui n'est pas permis d'avance est refusé sans carte, et l'ouvrier fait avec "
+        "ce qui lui reste.",
+    ),
+    "auto": (
+        "Laisser un arbitre décider",
+        "Un modèle approuve ou refuse à ta place ce qui t'aurait demandé une carte, ainsi que "
+        "les commandes qui exécutent du code même permises d'avance (le reste passe sans lui) ; "
+        "ses refus s'affichent dans l'activité de l'agent, et après trop de refus les demandes "
+        "te reviennent en cartes.",
+    ),
+}
+CHOIX_MODES = [
+    {"mode": mode, "libelle": MODES_FR[mode][0], "explication": MODES_FR[mode][1]}
+    for mode in MODES_OUVRIERS
+]
+
+
+def libelle_mode(mode) -> str:
+    """Le libellé français d'un mode ; un mode inconnu est rendu tel quel, coupé à 40 caractères."""
+    connu = isinstance(mode, str) and mode in MODES_FR
+    return MODES_FR[mode][0] if connu else " ".join(str(mode).split())[:40]
+
+
+def phrase_mode_reel(agent: str, demande: str, reel: str, raison: str = "") -> str:
+    """La phrase du fil quand le mode réellement appliqué à un agent n'est pas le mode demandé."""
+    if demande and reel == demande:
+        return f"{agent} travaille de nouveau dans le mode demandé, « {libelle_mode(reel)} »."
+    if not demande:
+        return f"Mode réellement appliqué à {agent} : « {libelle_mode(reel)} »."
+    phrase = (
+        f"{agent} devait travailler en mode « {libelle_mode(demande)} », mais c'est le mode "
+        f"« {libelle_mode(reel)} » qui est appliqué"
+    )
+    return f"{phrase} : {raison}." if raison else f"{phrase}."
+
+
+def phrase_mode_refuse(mode) -> str:
+    """Pourquoi la route refuse un mode : il est inconnu, ou c'est le contournement total."""
+    if mode == "bypassPermissions":
+        return (
+            "Le mode bypassPermissions, qui laisserait les agents tout faire sans rien demander, "
+            "n'est pas proposé par l'Atelier : rien n'a changé."
+        )
+    noms = ", ".join(f"« {libelle} »" for libelle, _ in MODES_FR.values())
+    return f"Ce mode n'existe pas : choisis parmi {noms}. Rien n'a changé."
+
+
+def phrase_mode_illisible(valeur) -> str:
+    """La phrase du fil quand le profil demande un mode inconnu, mal écrit ou refusé."""
+    montre = f"« {' '.join(valeur.split())[:40]} »" if isinstance(valeur, str) else "illisible"
+    return (
+        f"Le profil du projet (chantier/profil.json) demande pour les ouvriers un mode que "
+        f"l'Atelier ne connaît pas ou refuse ({montre}) : ils travaillent en mode "
+        f"« {libelle_mode(MODE_PAR_DEFAUT)} »."
+    )
+
+
+def phrase_mode_change(mode: str, touches: int) -> str:
+    """La phrase du fil après un changement du mode des ouvriers."""
+    debut = f"Mode des ouvriers : « {libelle_mode(mode)} »."
+    if touches == 0:
+        return f"{debut} Il vaudra pour les prochains ouvriers lancés."
+    if touches == 1:
+        return f"{debut} Il vaut aussi, dès maintenant, pour l'ouvrier en marche."
+    return f"{debut} Il vaut aussi, dès maintenant, pour les {touches} ouvriers en marche."
 
 
 def cle_api_presente(environnement=None) -> bool:
@@ -173,6 +262,12 @@ def vue(
     return donnees
 
 
+# Comment une ligne d'activité dit l'événement ({0} : son contenu ; {1} : le libellé d'un mode).
+LIGNES_PAR_GENRE = {
+    "attente": "En attente de ton autorisation : {0}",
+    "refus": "Refusé par l'arbitre : {0}.",
+    "mode": "Mode réellement appliqué : {1}.",
+}
 LIGNES_MAX = 30  # lignes d'activité gardées par agent
 LARGEUR_MAX = 300  # caractères par ligne d'activité
 MORCEAU_MAX = LIGNES_MAX * LARGEUR_MAX  # de quoi remplir toutes les lignes : le reste est perdu
@@ -187,12 +282,17 @@ class Activite:
     leur session : il ne fait que ranger l'événement, sous un verrou, sans rien écrire ni
     attendre. Hors démonstration, ce rappel est `Atelier._sur_evenement`, qui écrit en plus dans
     le fil, rarement, une confirmation de la source de connexion.
+
+    Seule exception, rare : un événement « mode » qui dit un mode réel nouveau pour cet agent
+    est passé à `sur_mode` (l'atelier l'écrit au fil), hors du verrou, une fois par changement.
     """
 
     def __init__(self):
         self._verrou = threading.Lock()
         self._lignes: dict[str, deque[str]] = {}
         self._reste: dict[str, str] = {}  # le texte reçu qui n'est pas encore une ligne entière
+        self._modes: dict[str, tuple] = {}  # le dernier mode réel dit, par agent en marche
+        self.sur_mode = None
 
     def _ranger(self, nom: str, texte: str) -> None:
         lignes = self._lignes[nom]
@@ -208,27 +308,44 @@ class Activite:
         except (KeyError, TypeError):
             return
         with self._verrou:
-            if genre == "fin":
-                self._lignes.pop(nom, None)
-                self._reste.pop(nom, None)
-                return
-            self._lignes.setdefault(nom, deque(maxlen=LIGNES_MAX))
-            while len(self._lignes) > AGENTS_MAX:  # sans « fin », on oublie les plus anciens
-                ancien = next(iter(self._lignes))
-                del self._lignes[ancien]
-                self._reste.pop(ancien, None)
-            if genre == "texte":
-                recu = self._reste.get(nom, "") + contenu.replace("\r", "")
-                *entieres, reste = recu.split("\n")
-                self._ranger(nom, "\n".join(entieres))
-                coupe = len(reste) - len(reste) % LARGEUR_MAX  # le reste reste borné lui aussi
-                self._ranger(nom, reste[:coupe])
-                self._reste[nom] = reste[coupe:]
-                return
-            self._ranger(nom, self._reste.pop(nom, ""))
-            if genre == "attente":
-                contenu = f"En attente de ton autorisation : {contenu}"
-            self._ranger(nom, contenu)
+            demande = evenement.get("demande") if isinstance(evenement, dict) else None
+            nouveau = self._ranger_evenement(nom, genre, contenu, demande)
+        if nouveau and self.sur_mode is not None:
+            with suppress(Exception):
+                self.sur_mode(evenement)
+
+    def _ranger_evenement(self, nom: str, genre, contenu: str, demande) -> bool:
+        """Sous le verrou : range l'événement ; rend True pour un mode réel nouveau."""
+        if genre == "fin":
+            self._lignes.pop(nom, None)
+            self._reste.pop(nom, None)
+            self._modes.pop(nom, None)
+            return False
+        self._lignes.setdefault(nom, deque(maxlen=LIGNES_MAX))
+        while len(self._lignes) > AGENTS_MAX:  # sans « fin », on oublie les plus anciens
+            ancien = next(iter(self._lignes))
+            del self._lignes[ancien]
+            self._reste.pop(ancien, None)
+            self._modes.pop(ancien, None)
+        if genre == "texte":
+            recu = self._reste.get(nom, "") + contenu.replace("\r", "")
+            *entieres, reste = recu.split("\n")
+            self._ranger(nom, "\n".join(entieres))
+            coupe = len(reste) - len(reste) % LARGEUR_MAX  # le reste reste borné lui aussi
+            self._ranger(nom, reste[:coupe])
+            self._reste[nom] = reste[coupe:]
+            return False
+        self._ranger(nom, self._reste.pop(nom, ""))
+        self._ranger(nom, LIGNES_PAR_GENRE.get(genre, "{}").format(contenu, libelle_mode(contenu)))
+        if genre != "mode":
+            return False
+        dit, self._modes[nom] = self._modes.get(nom), (contenu, str(demande or ""))
+        return dit != self._modes[nom]
+
+    def oublier_modes(self) -> None:
+        """Après un changement de mode demandé, tout écart de mode réel sera dit de nouveau."""
+        with self._verrou:
+            self._modes.clear()
 
     def agents(self) -> list[dict]:
         """Rend, pour chaque agent en marche, son nom, sa tâche, son rôle et ses lignes."""
@@ -273,6 +390,13 @@ class Atelier:
         if guichet is not None:
             agent.guichet = guichet
         agent.sur_evenement = self.activite.ajouter
+        self.activite.sur_mode = self._noter_mode_reel
+        # Le mode des ouvriers vient du profil ; tout ce qui n'est pas l'un des cinq modes vaut
+        # « acceptEdits », et l'agent le reçoit avant tout lancement.
+        lu = profil.get("mode_ouvriers") if isinstance(profil, dict) else None
+        self.mode_ouvriers = lire_mode(lu)
+        if hasattr(agent, "changer_mode"):
+            agent.changer_mode(self.mode_ouvriers)
         self._cle_presente = False
         # La dernière annonce de connexion du fil, telle que le rappel des agents la connaît ;
         # vide si elle est inconnue (le fil sera relu). Elle n'est posée que sous `moteur.verrou`.
@@ -289,6 +413,10 @@ class Atelier:
         if not chantier.taches and not chantier.evenements:
             accueil = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
             chantier.noter(accueil, auteur="orchestrateur")
+        if isinstance(profil, dict) and "mode_ouvriers" in profil and not mode_valide(lu):
+            phrase = phrase_mode_illisible(lu)
+            if not chantier.evenements or chantier.evenements[-1]["texte"] != phrase:
+                chantier.noter(phrase, auteur="orchestrateur")  # une fois par ouverture
         self._sauver()
 
     def _noter_annonce(self, phrase: str, comparee_a: tuple) -> None:
@@ -398,10 +526,28 @@ class Atelier:
             )
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
+        donnees["mode_ouvriers"] = self._vue_mode()
         controles = self.moteur.controles
         if hasattr(controles, "distant"):
             donnees["distant"] = {"adresse": controles.distant(), "probleme": controles.envoi}
         return donnees
+
+    def _vue_mode(self) -> dict:
+        """Le mode choisi, les cinq choix, et les ouvriers en marche dont le mode réel diffère."""
+        choisi = self.mode_ouvriers
+        lire = getattr(self.moteur.agent, "modes_appliques", None)
+        reels = lire() if lire is not None else {}
+        appliques = [
+            {"agent": nom, "mode": mode, "libelle": libelle_mode(mode)}
+            for nom, mode in reels.items()
+            if mode != choisi
+        ]
+        return {
+            "choisi": choisi,
+            "libelle": libelle_mode(choisi),
+            "choix": [dict(choix) for choix in CHOIX_MODES],
+            "appliques": appliques,
+        }
 
     def relier(self, adresse: str) -> None:
         """Relie le projet à un dépôt en ligne (GitHub ou autre)."""
@@ -574,6 +720,59 @@ class Atelier:
                 texte = json.dumps(fichier, ensure_ascii=False, indent=2) + "\n"
                 chemin.write_text(texte, "utf-8")
             self._propager({"autorisations": regles})
+
+    # --- le mode des ouvriers -----------------------------------------------------
+
+    def changer_mode(self, mode) -> dict:
+        """Choisit le mode des ouvriers : l'écrit au profil et l'applique à chaud aux ouvriers.
+
+        Un mode inconnu, mal typé ou « bypassPermissions » est refusé sans rien écrire. Le
+        vérificateur et l'orchestrateur ne sont jamais touchés : ils restent en lecture seule.
+        """
+        if not mode_valide(mode):
+            return {"fait": False, "phrase": phrase_mode_refuse(mode)}
+        with self._verrou_profil:  # l'écriture et le changement à chaud, dans le même ordre
+            probleme = self._ecrire_au_profil("mode_ouvriers", mode)
+            self._propager({"mode_ouvriers": mode})
+            self.mode_ouvriers = mode
+            self.activite.oublier_modes()  # « déjà dit » ne vaut que depuis ce changement
+            changer = getattr(self.moteur.agent, "changer_mode", None)
+            with self.moteur.verrou:  # la phrase du changement passe avant ce qu'en dira l'ouvrier
+                touches = changer(mode) if changer is not None else 0
+                phrase = phrase_mode_change(mode, touches)
+                self.moteur.chantier.noter(phrase, auteur="orchestrateur")
+        self._sauver()
+        if probleme:
+            phrase += f" Il n'a pas pu être enregistré et sera oublié au redémarrage : {probleme}"
+        return {"fait": True, "phrase": phrase}
+
+    def _ecrire_au_profil(self, cle: str, valeur) -> str:
+        """Sous `_verrou_profil` : écrit une clé de `chantier/profil.json` sans toucher au reste.
+
+        Comme pour une règle « toujours » : un fichier absent est créé ; un fichier illisible,
+        ou qui n'est pas un objet, n'est pas écrasé. Rend "" ou la raison de l'échec.
+        """
+        chemin = self.depot / "chantier" / "profil.json"
+        try:
+            fichier = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
+            if not isinstance(fichier, dict):
+                raise ValueError("le profil du projet n'est pas lisible")
+            fichier[cle] = valeur
+            chemin.parent.mkdir(parents=True, exist_ok=True)
+            chemin.write_text(json.dumps(fichier, ensure_ascii=False, indent=2) + "\n", "utf-8")
+        except ValueError:
+            return "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+        except OSError:
+            return "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+        return ""
+
+    def _noter_mode_reel(self, evenement: dict) -> None:
+        """Écrit au fil, une fois par agent et par changement, le mode réellement appliqué."""
+        demande, raison = evenement.get("demande") or "", evenement.get("raison") or ""
+        phrase = phrase_mode_reel(str(evenement["agent"]), str(demande), str(evenement["contenu"]),
+                                  str(raison))  # fmt: skip
+        self._dire(phrase)
+        self._sauver()
 
     # --- l'arrêt -----------------------------------------------------------------
 
@@ -779,6 +978,7 @@ ROUTES = {
         "autorisation": r.atelier.autoriser(c["id"], c["choix"], c.get("message", ""))
     },
     "/api/arreter": lambda r, c: {"arret": r.atelier.arreter(c.get("tache"))},
+    "/api/mode": lambda r, c: {"changement_mode": r.atelier.changer_mode(c["mode"])},
 }
 
 

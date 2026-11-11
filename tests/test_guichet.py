@@ -493,3 +493,29 @@ def test_guichet_simule_n_accorde_jamais_une_regle_que_le_vrai_n_aurait_pas_prop
 def test_guichet_simule_refuse_un_scenario_inconnu():
     with pytest.raises(ValueError):
         GuichetSimule(["oui"])
+
+
+# La fin d'une répétition (mode plan) : l'ouvrier demande à passer à l'exécution
+
+
+def test_la_fin_de_repetition_se_dit_en_clair_sans_regle_toujours():
+    plan = "1. Écrire calcul.py.\n2. Lancer les tests."
+    guichet = Guichet(delai_s=GARDE_S)
+    fil, res = lancer(guichet, "B-ouvrier-1", "ExitPlanMode", {"plan": plan})
+    (fiche,) = attendre_ouvertes(guichet, 1)
+    assert fiche["phrase"] == (
+        "B-ouvrier-1 a fini sa répétition et demande à passer à l'exécution de son plan."
+    )
+    assert (fiche["outil"], fiche["regle"], fiche["detail"]) == ("ExitPlanMode", "", plan)
+    assert not guichet.repondre(fiche["id"], "toujours")  # jamais pour de bon
+    assert guichet.repondre(fiche["id"], "une_fois")
+    finir(fil)
+    assert res["reponse"] == Reponse("une_fois", "", "")
+
+
+def test_la_fin_de_repetition_sans_plan_lisible():
+    assert regle_pour("ExitPlanMode", {"plan": "x"}) == ""
+    assert detail_pour("ExitPlanMode", {}) == "{}"
+    assert phrase_pour("A-ouvrier-2", "ExitPlanMode", None) == (
+        "A-ouvrier-2 a fini sa répétition et demande à passer à l'exécution de son plan."
+    )

@@ -70,7 +70,9 @@ GESTES = {
     "Skill": ("utiliser le skill", "skill"),
 }
 CLES_DETAIL = {"Bash": "command", "WebFetch": "url", "Write": "file_path",
-               "Edit": "file_path", "Read": "file_path"}
+               "Edit": "file_path", "Read": "file_path", "ExitPlanMode": "plan"}
+# L'outil par lequel un ouvrier en répétition (mode plan) demande à passer à l'exécution.
+FIN_DE_REPETITION = "ExitPlanMode"
 
 
 @dataclass
@@ -142,8 +144,8 @@ def _domaine(url: str) -> str:
 
 def regle_pour(outil, entree) -> str:
     """La règle Claude Code la plus étroite qui couvre la demande, ou "" si aucune n'est sûre."""
-    if not isinstance(outil, str):
-        return ""
+    if not isinstance(outil, str) or outil == FIN_DE_REPETITION:
+        return ""  # passer à l'exécution se décide à chaque fois, jamais pour de bon
     if outil == "Bash":
         return _regle_bash(_texte(entree, "command"))
     if outil == "WebFetch":
@@ -183,6 +185,8 @@ def _couper(texte: str) -> str:
 def phrase_pour(agent, outil, entree, regle: str = "") -> str:
     """Dit en une phrase française ce que l'agent veut faire."""
     outil = outil if isinstance(outil, str) else str(outil)
+    if outil == FIN_DE_REPETITION:
+        return f"{agent} a fini sa répétition et demande à passer à l'exécution de son plan."
     if outil == "WebFetch" and _texte(entree, "url"):
         domaine = _domaine(_texte(entree, "url"))
         if domaine:
