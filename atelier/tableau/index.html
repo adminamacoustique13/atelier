@@ -327,6 +327,27 @@ button.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-
 .poste-actif { cursor: pointer; }
 .fiche .essais .neutre { color: var(--faible); }
 
+/* Mode des ouvriers : cinq choix compacts, l'explication du choix en vigueur dessous (ou celle du choix survolé ou pris au clavier). */
+.carte[hidden] { display: none; }
+.modes-cadre { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+#mode-ouvriers { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.modes-boutons { display: flex; flex-wrap: wrap; gap: 6px; }
+button.mode-btn { height: 26px; padding: 0 12px; font-size: 12px; font-weight: 400; background: transparent; color: var(--discret); }
+button.mode-btn[aria-pressed="true"] { background: var(--plein); color: var(--sur-plein); border-color: transparent; font-weight: 600; }
+button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animation: battre 1.2s ease-in-out infinite; }
+.expl { display: none; color: var(--discret); max-width: 78ch; overflow-wrap: anywhere; }
+.expl b { color: var(--texte); font-weight: 500; }
+.expl.vigueur { display: block; }
+.modes-cadre:has(.mode-btn:is(:hover, :focus-visible)) .expl { display: none; }
+.modes-cadre:has(.b1:is(:hover, :focus-visible)) .e1, .modes-cadre:has(.b2:is(:hover, :focus-visible)) .e2,
+.modes-cadre:has(.b3:is(:hover, :focus-visible)) .e3, .modes-cadre:has(.b4:is(:hover, :focus-visible)) .e4,
+.modes-cadre:has(.b5:is(:hover, :focus-visible)) .e5 { display: block; }
+#mode-ouvriers-etat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+#mode-ouvriers-etat:empty { display: none; }
+#mode-ouvriers-etat p { overflow-wrap: anywhere; }
+.mode-reel, .mode-refus { color: var(--refus); }
+@media (prefers-reduced-motion: reduce) { button.mode-btn.envoi { animation: none; } }
+
 @media (max-width: 900px) {
   .journal { padding-left: 0; }
   button.agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
@@ -398,6 +419,7 @@ button.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-
         <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div></article>
         <article class="carte"><h2>Ce qui t'attend</h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
       </div>
+      <article class="carte" id="carte-mode" hidden><h2>Mode des ouvriers</h2><div class="modes-cadre"><div id="mode-ouvriers"></div><div id="mode-ouvriers-etat" aria-live="polite"></div></div></article>
       <article class="carte"><h2>La salle</h2><div class="defile" id="salle"></div><div class="agents" id="agents"></div></article>
       <div class="grille">
         <article class="carte"><h2>Dosage par type de tâche</h2><div class="tuiles" id="tuiles"></div>
@@ -797,6 +819,63 @@ function salle(vue) {
   return `<svg class="salle" viewBox="0 0 ${largeur} ${hauteur}" role="img" aria-label="La salle : ${actifs} agents au travail">${dessin}${toi}</svg>`;
 }
 
+/* ---------- Mode des ouvriers : la page montre le mode que la vue annonce, jamais celui qu'elle vient d'envoyer ---------- */
+let modeEnvoi = "", modePhrase = null, minuteMode = null;
+function modeDe(vue) {
+  const m = vue && vue.mode_ouvriers;
+  if (!m || typeof m !== "object" || !Array.isArray(m.choix)) return null;
+  const choix = m.choix.filter((c) => c && typeof c === "object" && typeof c.mode === "string" && c.mode);
+  if (!choix.length) return null;
+  return {
+    choisi: typeof m.choisi === "string" ? m.choisi : "", choix,
+    appliques: Array.isArray(m.appliques) ? m.appliques.filter((a) => a && typeof a === "object") : [],
+  };
+}
+function modeHtml(m) {
+  const boutons = m.choix.map((c, i) => `<button type="button" class="mode-btn b${i + 1}${modeEnvoi === c.mode ? " envoi" : ""}" data-action="mode" data-mode="${propre(c.mode)}"
+    aria-pressed="${c.mode === m.choisi}" aria-describedby="expl-mode-${i + 1}"${modeEnvoi === c.mode ? ' aria-busy="true"' : ""}>${propre(c.libelle || c.mode)}</button>`).join("");
+  const explications = m.choix.map((c, i) => `<p class="expl e${i + 1}${c.mode === m.choisi ? " vigueur" : ""}" id="expl-mode-${i + 1}"><b>${propre(c.libelle || c.mode)}</b>${c.explication ? ` : ${propre(c.explication)}` : ""}</p>`).join("");
+  return `<div class="modes-boutons" role="group" aria-label="Mode des ouvriers">${boutons}</div>${explications}`;
+}
+function modeEtatHtml(m) {
+  const lignes = [];
+  if (modeEnvoi) {
+    const c = m.choix.find((x) => x.mode === modeEnvoi);
+    lignes.push(`<p class="petit">Envoi du mode « ${propre(c ? c.libelle || c.mode : modeEnvoi)} » en cours.</p>`);
+  } else if (modePhrase) lignes.push(`<p class="${modePhrase.fait ? "calme" : "mode-refus"}">${propre(modePhrase.texte)}</p>`);
+  m.appliques.forEach((a) => lignes.push(`<p class="mode-reel">${propre(a.agent)} travaille en mode « ${propre(a.libelle || a.mode)} », pas dans le mode choisi.</p>`));
+  return lignes.join("");
+}
+function afficherMode(vue) {
+  const m = modeDe(vue);
+  document.getElementById("carte-mode").hidden = !m;
+  const actif = document.activeElement, garde = actif && actif.matches && actif.matches("#mode-ouvriers button") ? actif.dataset.mode : null;
+  const auClavier = Boolean(garde) && actif.matches(":focus-visible");
+  poser("mode-ouvriers", m ? modeHtml(m) : "");
+  if (garde) { // le contenu a été redessiné : le focus clavier reste sur le même bouton
+    const bouton = [...document.querySelectorAll("#mode-ouvriers button")].find((b) => b.dataset.mode === garde);
+    if (bouton && document.activeElement !== bouton) bouton.focus({ focusVisible: auClavier });
+  }
+  poser("mode-ouvriers-etat", m ? modeEtatHtml(m) : "");
+}
+async function choisirMode(mode) {
+  const m = modeDe(derniere);
+  if (modeEnvoi || !m || m.choisi === mode) return; // un seul envoi à la fois ; le choix en vigueur ne se renvoie pas
+  clearTimeout(minuteMode);
+  if (rejoue) { modePhrase = { texte: "Démonstration rejouée : il n'y a pas de serveur derrière, le mode n'est pas envoyé.", fait: false }; return rafraichir(); }
+  modeEnvoi = mode; modePhrase = null;
+  rafraichir();
+  let donnees = null;
+  try { donnees = await envoyer("/api/mode", { mode }); } catch (erreur) { donnees = null; }
+  modeEnvoi = "";
+  const retour = donnees && donnees.changement_mode;
+  if (retour && typeof retour.phrase === "string") modePhrase = { texte: retour.phrase, fait: retour.fait === true };
+  else if (donnees) modePhrase = { texte: "Le serveur n'a pas confirmé le changement : le mode mis en évidence est celui qui est en vigueur.", fait: false };
+  else modePhrase = { texte: "Le choix n'est pas parti : le mode en vigueur n'a pas changé. Réessaie dans un instant.", fait: false };
+  minuteMode = setTimeout(() => { modePhrase = null; rafraichir(); }, 30000);
+  rafraichir();
+}
+
 function afficherChantier(vue) {
   const c = vue.contrat;
   poser("anneau", vue.taches.length ? anneau(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length) : "");
@@ -805,6 +884,7 @@ function afficherChantier(vue) {
   document.getElementById("point").textContent = vue.point_d_etape;
   document.getElementById("objectif").textContent = c.objectif;
   poser("attente", attenteHtml(vue));
+  afficherMode(vue);
   poser("tuiles", vue.statistiques.map((s) => {
     const total = Math.max(1, s.premier_coup + s.refus);
     return `<div class="rang"><span class="nom">${propre(s.type)}</span>
@@ -924,6 +1004,7 @@ function afficherAccueil(vue) {
   choix.dataset.empreinte = "";
   choix.disabled = true;
   document.getElementById("infos").hidden = true;
+  document.getElementById("carte-mode").hidden = true;
   document.getElementById("lieu-accueil").textContent = `Les projets seront rangés dans ${vue.racine}.`;
 }
 
@@ -1071,6 +1152,7 @@ function agir(cible) {
   if (action === "refus-envoyer") repondre(cible.dataset.id, "non", etatCarte(cible.dataset.id).texte.trim());
   if (action === "detail") { const id = cible.dataset.id; if (details.has(id)) details.delete(id); else details.add(id); rafraichir(); }
   if (action === "derouler") { const nom = cible.dataset.nom; if (deroules.has(nom)) deroules.delete(nom); else deroules.add(nom); rafraichir(); }
+  if (action === "mode") choisirMode(cible.dataset.mode);
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();
