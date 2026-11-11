@@ -4,7 +4,7 @@
 
 ## Suivi
 
-Compteur : 39 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur : 40 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -17,6 +17,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
 | D2 | vérifié | Sonnet, effort moyen | Opus, effort moyen, puis vérification mécanique | 2 | Essai dans le navigateur : 89 vérifications passées deux fois de suite ; captures relues par l'orchestrateur |
+| D2.1 | vérifié | Sonnet, effort faible | mécanique seule | 1 | Une ligne de style ; l'essai du tableau de bord passe de 89 à 95 vérifications ; capture relue par l'orchestrateur |
 | D3a | en cours | Opus, effort élevé | Fable, complète | 1 | |
 | D3b | à lancer, après D3a | Sonnet, effort moyen | bornée | 0 | |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
@@ -80,6 +81,7 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Première vérification : recalé pour trois défauts. Validés : les cartes aux deux endroits, le refus avec son texte, la sécurité de l'affichage, le style, la page des instantanés. Défauts : la phrase qui explique la règle « toujours » ne disait rien hors des commandes Bash ; un double-clic sur « Arrêter » arrêtait sans confirmation ; l'activité déroulée montrait les lignes les plus anciennes et revenait en haut à chaque ligne. Trou de la consigne : son exemple de règle ne couvrait que Bash, et la preuve n'exigeait ni de cliquer « Toujours » ni d'éprouver le double-clic.
 - Seconde chance (même ouvrier, même niveau) : les trois défauts sont corrigés, l'essai passe de 67 à 89 vérifications et couvre maintenant « Toujours », l'identifiant envoyé, le double-clic et le journal long.
 - Seconde vérification, mécanique : l'essai relancé deux fois par l'orchestrateur, et les captures `D2-regles.png`, `D2-carte-conversation.png` et `D2-arret-confirmation.png` relues. Pas de vérificateur : décision de la personne responsable du 2026-11-11 de proportionner la vérification au risque. Tâche vérifiée.
+- D2.1, ajoutée le 2026-11-11 sur un signalement de la personne responsable (capture de son écran) : dans la carte « Orchestrateur », l'anneau de progression chevauchait le texte quand l'objectif était long. Défaut antérieur au chantier : la règle `.tete-orch > div { min-width: 0 }` laissait rétrécir l'enveloppe de l'anneau. Corrigé par une ligne de style ; vérification mécanique seule.
 - À transmettre à D3 : pendant la proposition d'un plan, la ligne d'activité de l'orchestrateur montre le texte brut du plan ; c'est au serveur de couper cette ligne.
 
 ### Historique de la tâche E.1
