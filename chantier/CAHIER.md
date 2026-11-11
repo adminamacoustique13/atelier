@@ -6,6 +6,8 @@
 
 Compteur : 31 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11, après quatre relèvements le même jour (18, 24, 36, 44) ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur. Il reste 5 lancements prévus au minimum (la vérification de E, puis D3 et G à deux agents chacune, les vérifications de D2 et de I étant en cours), plus la simplification de clôture.
 
+Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
+
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
