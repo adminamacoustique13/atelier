@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C, H et D1 sont vérifiées ; D2 et I sont en cours, E est en vérification.
+État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). Restent E.1, D3 et G.
 
 ## Suivi
 
-Compteur : 31 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11, après quatre relèvements le même jour (18, 24, 36, 44) ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur. Il reste 5 lancements prévus au minimum (la vérification de E, puis D3 et G à deux agents chacune, les vérifications de D2 et de I étant en cours), plus la simplification de clôture.
+Compteur : 34 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -16,11 +16,12 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
 | C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
-| D2 | en vérification | Sonnet, effort moyen | Opus, effort moyen | 1 | Essai dans le navigateur : 67 vérifications passées, quatorze captures |
+| D2 | vérifié | Sonnet, effort moyen | Opus, effort moyen, puis vérification mécanique | 2 | Essai dans le navigateur : 89 vérifications passées deux fois de suite ; captures relues par l'orchestrateur |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
-| E | en cours (quatrième tentative, accordée par la personne responsable, un cran au-dessus) | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | Script, ménage, LISEZMOI, phrases du fil et verrou de version validés ; un défaut dans le dédoublonnage des annonces |
+| E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
+| E.1 | à lancer | Opus, effort moyen | complète mais étroite (facturation) | 0 | |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
-| I | en vérification | Sonnet, effort élevé | Opus, effort élevé | 1 | Correction de quatre lignes ; le test nouveau échoue 20 fois sur 20 sur le code d'origine ; 200 passages sous charge sans échec |
+| I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
 
@@ -63,8 +64,21 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Troisième vérification : recalé pour un seul défaut. Les deux défauts de la seconde vérification et les trois compléments sont levés ; un redémarrage sans changement n'ajoute plus rien au fil. Mais la nouvelle règle du dédoublonnage (`atelier/serveur.py`, `_noter_annonce`, lignes 289 à 297) remonte le fil jusqu'au dernier départ sans s'arrêter sur une confirmation différente : avec des sources successives « clé API », « abonnement », « clé API » sur trois démarrages, la troisième n'est pas écrite, et le fil se termine sur « compté sur ton abonnement » alors que la clé est facturée. Correction indiquée par le vérificateur : arrêter la boucle au premier texte de la famille trouvé, et écrire s'il diffère.
 - Trois tentatives, le maximum du contrat : la tâche revient à la personne responsable. Dossier : cette rubrique, la fiche de relais E, et les trois verdicts résumés ci-dessus.
 - Quatrième tentative, accordée par la personne responsable le 2026-11-11, un cran au-dessus : Opus, effort élevé, vérifié par Fable. Montée en gamme notée (1 sur 3). Cette fois la règle des annonces est écrite en toutes lettres dans la consigne, avec les invariants à tenir, et la preuve demandée est un test exhaustif de tous les enchaînements courts : les trois échecs venaient d'une règle que l'orchestrateur n'avait jamais énoncée complètement.
-- À transmettre à F : la liste « À essayer en vrai » de la fiche de relais E.
+- Vérification de la quatrième tentative : validé sur les sept critères. La règle telle qu'énoncée est prouvée pour toute longueur d'enchaînement. Le vérificateur montre en revanche une limite de la règle elle-même : une source de connexion qui change pendant une même ouverture n'est redite qu'à l'ouverture suivante, parce qu'une seule confirmation est écrite par ouverture. Elle devient la tâche E.1.
+- Les échecs intermittents de deux ou huit tests, vus plusieurs fois pendant le chantier, sont expliqués : les tests qui créent un vrai dépôt git héritent de la configuration git de la machine, qui signe ici chaque commit par un service extérieur, parfois injoignable. Ce n'est pas un défaut du produit.
+- Transmis à F : la liste « À essayer en vrai » de la fiche de relais E, reprise dans `chantier/ESSAI-MAC.md`.
 - Reste mineur, à reprendre à la clôture : `outils/desinstaller-mac.sh` ne retire pas le dossier `.venv` (le LISEZMOI le dit).
+
+### Historique de la tâche I
+- Vérification : validé du premier coup. Le verrou est pris aux deux endroits, aucun chemin ne le redemande, toute commande git lancée sous le verrou est bornée par un délai. Les commandes git restées hors du verrou ne touchent pas aux arbres des autres tâches.
+- Réserve du vérificateur, sans effet sur le verdict : le test nouveau prouve que les commandes `worktree` sont mises en file, plutôt qu'il ne reproduit la panne elle-même ; la preuve que la panne a disparu vient du test d'origine sous charge.
+- Reste mineur, à reprendre à la clôture : trois lignes mortes dans `_config` de `atelier/controles.py` (lignes 89 à 92), sans effet.
+
+### Historique de la tâche D2
+- Première vérification : recalé pour trois défauts. Validés : les cartes aux deux endroits, le refus avec son texte, la sécurité de l'affichage, le style, la page des instantanés. Défauts : la phrase qui explique la règle « toujours » ne disait rien hors des commandes Bash ; un double-clic sur « Arrêter » arrêtait sans confirmation ; l'activité déroulée montrait les lignes les plus anciennes et revenait en haut à chaque ligne. Trou de la consigne : son exemple de règle ne couvrait que Bash, et la preuve n'exigeait ni de cliquer « Toujours » ni d'éprouver le double-clic.
+- Seconde chance (même ouvrier, même niveau) : les trois défauts sont corrigés, l'essai passe de 67 à 89 vérifications et couvre maintenant « Toujours », l'identifiant envoyé, le double-clic et le journal long.
+- Seconde vérification, mécanique : l'essai relancé deux fois par l'orchestrateur, et les captures `D2-regles.png`, `D2-carte-conversation.png` et `D2-arret-confirmation.png` relues. Pas de vérificateur : décision de la personne responsable du 2026-11-11 de proportionner la vérification au risque. Tâche vérifiée.
+- À transmettre à D3 : pendant la proposition d'un plan, la ligne d'activité de l'orchestrateur montre le texte brut du plan ; c'est au serveur de couper cette ligne.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
@@ -286,6 +300,19 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Restes relevés par le vérificateur, confiés à la tâche E** : `LISEZMOI.md` ligne 5 (« Aucune dépendance », devenu faux), ligne 109 (« la lecture du flux de Claude Code », et un nombre de tests périmé), ligne 111 (« Claude Code accepte la ligne de commande »), ligne 120 (« Claude Code en ligne de commande, et le simulateur ») ; `outils/installer-mac.sh` lignes 45 à 47 (exige la commande `claude`) ; `atelier/__main__.py` (attrape encore `subprocess.SubprocessError`).
 - **Restes mineurs, à reprendre à la clôture** : le mot « CLI » dans quatre commentaires du pont et des agents ; le relevé de `atelier/serveur.py`, `atelier/moteur.py` et `atelier/__main__.py` est à refaire après D1.
 - **Accord de la personne responsable, le 2026-11-11** : le retrait des deux tests d'origine (zone rouge levée pour eux seuls) et l'enveloppe portée à 36.
+
+### E.1. La source de connexion qui change en cours de route — ajoutée le 2026-11-11 par l'orchestrateur
+- **Pourquoi** : le fil ne doit jamais rester sur une phrase de facturation fausse. Aujourd'hui, si la personne change sa connexion pendant qu'Atelier tourne (par exemple avec `/login`, comme le fil le lui conseille), le fil continue de dire l'ancienne source jusqu'à la relance d'Atelier.
+- **Critères** :
+  1. Quand un agent apprend une source différente de la dernière confirmation écrite depuis l'ouverture, le fil écrit la nouvelle confirmation.
+  2. Deux sessions simultanées qui annoncent des sources différentes ne font pas alterner le fil sans fin : chaque changement est écrit une fois.
+  3. Si l'écriture d'une confirmation échoue, elle est retentée à l'événement suivant au lieu d'être perdue pour toute l'ouverture.
+  4. Les tests qui créent un vrai dépôt git ne dépendent plus de la configuration git de la machine (un fichier `tests/conftest.py`, sans toucher aux tests d'origine).
+- **Périmètre** : `atelier/serveur.py` (les annonces de connexion seulement), `tests/test_demarrage.py`, `tests/conftest.py` (nouveau)
+- **Contrats** : ne change ni le texte des phrases ni les règles R1 et R2 pour une source qui ne change pas.
+- **Dépendances** : E. Passe avant D3, qui touche aussi `atelier/serveur.py`.
+- **Preuve** : le test exhaustif étendu à plusieurs sources par ouverture, avec un message intercalé entre deux annonces.
+- **Départ** : Opus, effort moyen. Vérification complète mais étroite : c'est de la facturation.
 
 ### I. La course dans les contrôles git — ajoutée le 2026-11-11 avec l'accord de la personne responsable, hors de l'objectif initial
 - **Pourquoi** : en cherchant un test instable, le vérificateur de C a trouvé un vrai défaut, antérieur au chantier. Quand une tâche est refusée pendant qu'une autre démarre ou s'enregistre, deux commandes git se marchent dessus et le fil du moteur peut tomber. Avec trois tâches en parallèle, cela finit par arriver.
