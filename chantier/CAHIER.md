@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Restent D3a, D3b et G.
+État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. D3a et Ga sont en cours, en parallèle ; restent D3b et Gb.
 
 ## Suivi
 
-Compteur : 36 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur : 38 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -17,11 +17,12 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
 | D2 | vérifié | Sonnet, effort moyen | Opus, effort moyen, puis vérification mécanique | 2 | Essai dans le navigateur : 89 vérifications passées deux fois de suite ; captures relues par l'orchestrateur |
-| D3a | à lancer, après E.1 | Opus, effort élevé | Fable, complète | 0 | |
+| D3a | en cours | Opus, effort élevé | Fable, complète | 1 | |
 | D3b | à lancer, après D3a | Sonnet, effort moyen | bornée | 0 | |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
 | E.1 | vérifié | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | Validé du premier coup : 457 tests verts ; 29 870 enchaînements du vérificateur sans écart, et 111 110 pour R1 et R2 |
-| G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| Ga | en cours | Sonnet, effort moyen | bornée | 1 | |
+| Gb | à lancer, après D3b et Ga | Sonnet, effort moyen | bornée | 0 | |
 | I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
@@ -286,7 +287,11 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Dépendances** : D3 et E (pour l'ordre des fichiers seulement)
 - **Preuve** : un test avec un dépôt local qui sert de faux GitHub.
 - **Départ** : Sonnet, effort moyen.
-- **À préciser au lancement** : ce que fait le clic quand le dossier d'Atelier n'est pas sur `main` ou contient des modifications locales ; ce que dit le fil quand Atelier n'a pas été lancé par l'agent de lancement (il ne reviendrait pas tout seul) ; si le redémarrage installe bien une dépendance nouvelle.
+- **Découpage décidé le 2026-11-11 par l'orchestrateur**, pour faire avancer la tâche pendant que D3a occupe le serveur :
+  - **Ga, le fond** : un module `atelier/mise_a_jour.py` qui sait vérifier (au plus une fois par heure) et mettre à jour (`git pull --ff-only`), avec son double simulé, sans rien savoir du serveur. Lancée en parallèle de D3a, sans fichier en commun.
+  - **Gb, le branchement** : la route et le champ de la vue, le bouton dans la page, le branchement au démarrage et l'arrêt d'Atelier après une mise à jour réussie, le paragraphe du LISEZMOI. Après D3b.
+- **Précisions fixées au lancement de Ga** : la mise à jour est refusée si le dossier d'Atelier n'est pas sur `main` ou s'il contient des modifications locales, avec une phrase qui dit lequel ; une vérification qui échoue ne fait pas croire qu'Atelier est à jour.
+- **À préciser au lancement de Gb** : ce que fait le clic quand le dossier d'Atelier n'est pas sur `main` ou contient des modifications locales ; ce que dit le fil quand Atelier n'a pas été lancé par l'agent de lancement (il ne reviendrait pas tout seul) ; si le redémarrage installe bien une dépendance nouvelle.
 
 ### H. Le ménage de l'ancien câblage — demandée le 2026-11-11 par la personne responsable
 - **Pourquoi** : une fois `claude -p` remplacé, il ne doit rester dans le dépôt aucun lien avec l'ancien câblage, ni code mort, ni phrase qui décrit Atelier comme lançant Claude Code en ligne de commande.
