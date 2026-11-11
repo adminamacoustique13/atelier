@@ -9,16 +9,18 @@ La branche contient tout le chantier : le pont vers le SDK, les cartes d'autoris
 1. Vérifie que tu es connecté à ton abonnement : ouvre le Terminal, lance `claude`, tape `/status`, puis quitte.
 2. Choisis un dépôt sans importance, ou prévois d'en créer un neuf depuis le tableau de bord.
 
-## 1. Mettre la branche du chantier sur ton Mac
+## 1. Mettre la nouvelle version sur ton Mac
 
-Ta branche `main` n'est pas touchée. Dans le Terminal, depuis le dossier où Atelier est installé (par défaut `~/Atelier-appli`) :
+Le chantier est fusionné dans `main` depuis le 2026-11-11. Dans le Terminal, depuis le dossier où Atelier est installé (par défaut `~/Atelier-appli`) :
 
 ```
 cd ~/Atelier-appli
-git fetch origin chantier/agent-sdk
-git checkout chantier/agent-sdk
+git checkout main
+git pull --ff-only
 ./outils/installer-mac.sh
 ```
+
+Relance bien le script d'installation, et pas seulement `git pull` : c'est lui qui installe la bibliothèque et vérifie qu'elle se charge.
 
 À regarder pendant l'installation :
 
@@ -28,13 +30,15 @@ git checkout chantier/agent-sdk
 
 S'il s'arrête, note la phrase exacte qu'il affiche.
 
-Pour revenir à la version d'avant, à tout moment :
+Pour revenir à la version d'avant le chantier, à tout moment :
 
 ```
 cd ~/Atelier-appli
-git checkout main
+git checkout 2858544
 ./outils/installer-mac.sh
 ```
+
+Et pour revenir ensuite à la version courante : `git checkout main`, puis relance le script.
 
 ## 2. Ce qui est facturé
 

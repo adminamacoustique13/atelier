@@ -1,6 +1,6 @@
 # Cahier du chantier « Agent SDK »
 
-État général : toutes les tâches automatisées sont vérifiées, enregistrées et poussées sur la branche `chantier/agent-sdk`. Il reste la tâche F, le premier essai réel, qui revient à la personne responsable (voir `chantier/ESSAI-MAC.md`), puis sa décision de fusionner dans `main`. Le contrat a été amendé plusieurs fois le 2026-11-11 (voir `chantier/CONTRAT.md`).
+État général : chantier clos. Toutes les tâches automatisées sont vérifiées, et la branche `chantier/agent-sdk` a été fusionnée dans `main` le 2026-11-11, sur décision de la personne responsable. Il reste la tâche F, le premier essai réel sur son Mac, qui n'a pas encore eu lieu (voir `chantier/ESSAI-MAC.md`).
 
 ## Suivi
 
