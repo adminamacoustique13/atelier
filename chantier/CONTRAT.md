@@ -6,6 +6,8 @@ Amendé le 2026-11-11 par la personne responsable : le mode `auto` de Claude Cod
 
 Amendé le 2026-11-11 par la personne responsable : l'enveloppe passe de 18 à 24 agents lancés.
 
+Amendé le 2026-11-11 par la personne responsable : une tâche G, hors de l'objectif initial, entre dans le chantier (un bouton « Mettre à jour » dans le tableau de bord, voir le cahier).
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 

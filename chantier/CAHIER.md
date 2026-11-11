@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé le même jour (tâche D3). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C est lancée.
+État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C est lancée.
 
 ## Suivi
 
-Enveloppe : 11 agents lancés sur 24 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24 le 2026-11-11. Il reste 9 lancements prévus au minimum (vérification de C, puis D1, D2, D3 et E à deux agents chacune) : la marge est de 4.
+Enveloppe : 11 agents lancés sur 24 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24 le 2026-11-11. Avec la tâche G ajoutée le même jour, il reste 11 lancements prévus au minimum (vérification de C, puis D1, D2, D3, E et G à deux agents chacune) : la marge est de 2.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
@@ -15,6 +15,7 @@ Enveloppe : 11 agents lancés sur 24 (chaque reprise d'un agent compte pour un l
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
@@ -200,6 +201,23 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Preuve** : `bash -n` et `shellcheck` sur le script, et un test du message de démarrage avec les deux sources simulées.
 - **Départ** : Sonnet, effort moyen.
 
+### G. Le bouton « Mettre à jour » — ajoutée le 2026-11-11 par la personne responsable, hors de l'objectif initial
+- **Pourquoi** : mettre Atelier à jour d'un clic depuis le tableau de bord, sans passer par le terminal.
+- **Critères** :
+  1. Atelier vérifie, au plus une fois par heure, si la branche `main` a avancé sur le dépôt en ligne de son propre dossier.
+  2. Quand `main` a avancé, le tableau de bord montre un bouton « Mettre à jour ».
+  3. Un clic pendant qu'un agent travaille ne change rien, et le fil dit pourquoi.
+  4. Un clic quand aucun agent ne travaille lance `git pull --ff-only` dans le dossier d'Atelier.
+  5. Après un pull réussi, Atelier s'arrête, et l'agent de lancement (KeepAlive) le relance.
+  6. Si le pull échoue, rien ne change et le fil explique pourquoi.
+  7. En mode démonstration, la vérification et la mise à jour ont leur double simulé : rien n'est appelé.
+- **Périmètre** : `atelier/mise_a_jour.py` (nouveau), `tests/test_mise_a_jour.py` (nouveau), `atelier/serveur.py` (une route et un champ de la vue), `atelier/tableau/index.html` (le bouton), `atelier/__main__.py` (le branchement au démarrage), `LISEZMOI.md` (un paragraphe). À resserrer au lancement.
+- **Contrats** : n'attend rien des autres tâches ; passe après elles parce qu'elle touche aux mêmes fichiers que D1, D2, D3 et E.
+- **Dépendances** : D3 et E (pour l'ordre des fichiers seulement)
+- **Preuve** : un test avec un dépôt local qui sert de faux GitHub.
+- **Départ** : Sonnet, effort moyen.
+- **À préciser au lancement** : ce que fait le clic quand le dossier d'Atelier n'est pas sur `main` ou contient des modifications locales ; ce que dit le fil quand Atelier n'a pas été lancé par l'agent de lancement (il ne reviendrait pas tout seul) ; si le redémarrage installe bien une dépendance nouvelle.
+
 ### F. Premier essai réel sur ton Mac — revient à la personne responsable
 - **Pourquoi** : aucune machine du chantier n'est connectée à ton compte Claude. La seule preuve qu'Atelier marche vraiment, c'est un essai chez toi.
 - **Ce que tu feras** (environ 15 minutes, sur un dépôt sans importance) :
@@ -208,4 +226,4 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   3. demander une petite tâche qui a besoin d'une commande non permise ;
   4. accepter la carte « une fois », puis refuser la suivante avec une indication ;
   5. arrêter un agent en cours.
-- **Dépendances** : toutes les tâches précédentes.
+- **Dépendances** : toutes les tâches précédentes, G comprise.
