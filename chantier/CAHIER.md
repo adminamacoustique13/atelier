@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. D3a et Ga sont en cours, en parallèle ; restent D3b et Gb.
+État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Ga est vérifiée ; D3a est en cours ; restent D3b et Gb.
 
 ## Suivi
 
-Compteur : 38 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur : 39 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -21,7 +21,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D3b | à lancer, après D3a | Sonnet, effort moyen | bornée | 0 | |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
 | E.1 | vérifié | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | Validé du premier coup : 457 tests verts ; 29 870 enchaînements du vérificateur sans écart, et 111 110 pour R1 et R2 |
-| Ga | en cours | Sonnet, effort moyen | bornée | 1 | |
+| Ga | vérifié | Sonnet, effort moyen | Opus, bornée | 1 | Validé du premier coup : 27 tests verts ; douze cas de dossier abîmé ou de phrase trompeuse essayés par le vérificateur, aucun défaut bloquant |
 | Gb | à lancer, après D3b et Ga | Sonnet, effort moyen | bornée | 0 | |
 | I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
@@ -86,6 +86,12 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Vérification étroite : validé du premier coup. Le défaut de règle est levé dans les deux sens, une source inchangée ne coûte rien, une écriture qui échoue est retentée, aucun interblocage n'est possible.
 - Limite acceptée : la source est lue sur un attribut de l'agent commun à toutes ses sessions (`atelier/agents.py`). Deux sessions simultanées lancées de part et d'autre d'un changement de connexion peuvent se croiser ; le fil est alors corrigé par la session suivante. À reprendre si `agents.py` est rouvert : passer la source dans l'événement.
 - À dire à la personne responsable : Atelier enregistre le travail par git avec sa configuration à elle. Une signature des commits qui demande une saisie échouerait sans doute sous l'agent de lancement, qui n'a pas de terminal. Ajouté à `chantier/ESSAI-MAC.md`.
+
+### Historique de la tâche Ga
+- Vérification bornée : validé du premier coup, en une dizaine de minutes. Le dossier d'Atelier reste intact dans tous les cas d'échec, `fait` n'est vrai que si le commit courant a changé, aucun identifiant ne fuit, aucune commande git ne peut rester bloquée.
+- À transmettre à Gb : ne lancer qu'une mise à jour à la fois ; s'arrêter seulement si `fait` est vrai ; journaliser `detail` sans jamais l'afficher ; appeler `verifier` hors du fil qui répond aux requêtes (une interrogation peut durer 60 secondes) ; en démonstration, ne pas arrêter le serveur sur le `fait` du double simulé.
+- Deux retouches du module confiées à Gb : tirer explicitement `origin main` (aujourd'hui le pull suit l'amont de `main`, alors que la vérification regarde `origin/main`) ; ne pas prendre « Cannot fast-forward to multiple branches » pour une histoire divergente.
+- Restes mineurs, à reprendre à la clôture : pas de phrase dédiée pour un fichier non suivi en conflit ni pour une branche sans amont ; `GIT_SSH_COMMAND` écrase un réglage ssh propre à la personne.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
