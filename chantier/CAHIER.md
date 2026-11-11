@@ -4,11 +4,11 @@
 
 ## Suivi
 
-Enveloppe : 7 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 11 lancements prévus au minimum (vérification de la troisième passe de B, puis C, D1, D2, D3 et E à deux agents chacune) : la marge est à zéro.
+Enveloppe : 8 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 12 lancements prévus au minimum (vérifications de A et de B, puis C, D1, D2, D3 et E à deux agents chacune), soit 20 : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11 : porter l'enveloppe à 24. En attendant, rien n'est lancé au-delà de 18.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| A | en vérification | Opus, effort élevé | Fable, effort élevé | 1 | 33 tests du pont verts, contrôle de forme vert, périmètre respecté |
+| A | en cours (seconde chance) | Opus, effort élevé | Fable, effort élevé | 2 | Chemin nominal et fidélité au SDK validés à la première vérification |
 | B | en cours (troisième passe) | Opus, effort élevé | Fable, effort élevé | 3 | Concurrence validée dès la première vérification |
 | C | à lancer | Opus, effort élevé | Fable, effort élevé | 0 | |
 | D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
@@ -18,6 +18,12 @@ Enveloppe : 7 agents lancés sur 18 (chaque reprise d'un agent compte pour un la
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
+
+### Historique de la tâche A
+- Première vérification : recalé. Chemin nominal bon et fidèle au SDK (essayé avec le vrai `ClaudeSDKClient` sur un faux exécutable `claude`). Trois défauts : `fermer()` pendant un envoi peut bloquer l'appel une heure ; la déconnexion annulée au bout de cinq secondes peut laisser le processus Claude Code vivant ; un « toujours » avec une règle vide autorisait l'outil entier. Trou de la consigne relevé : un faux client aux `interrupt` et `disconnect` instantanés ne peut pas montrer ce qui dépend des durées réelles ; il fallait exiger un essai avec le vrai client sur un faux exécutable.
+- Seconde chance (même ouvrier, même niveau), avec cet essai ajouté à la preuve.
+- À transmettre à C : la liste « À savoir pour la tâche C » de la fiche de relais A.
+- À transmettre à F : essayer « toujours » sur un outil entier, et un envoi qui suit un résultat en erreur.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
