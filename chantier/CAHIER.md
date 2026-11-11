@@ -4,13 +4,15 @@
 
 ## Suivi
 
-Enveloppe : 11 agents lancés sur 24 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24 le 2026-11-11. Avec la tâche G ajoutée le même jour, il reste 11 lancements prévus au minimum (vérification de C, puis D1, D2, D3, E et G à deux agents chacune) : la marge est de 2.
+Enveloppe : 14 agents lancés sur 24 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24 le 2026-11-11. Il reste 10 lancements prévus au minimum (D1, D2, D3, E et G à deux agents chacune) : la marge est à zéro. À la prochaine seconde chance, la question de l'enveloppe revient à la personne responsable.
+
+Ordre de la suite, revu le 2026-11-11 : C, puis D1, puis D2 et E en parallèle, puis D3, puis G.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
 | A | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 71 tests du pont verts, dont deux avec le vrai client du SDK sur un faux exécutable ; deux vérifications, 800 courses sans blocage |
 | B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
-| C | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
+| C | en vérification (seconde chance) | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts quinze fois de suite, contrôle de forme vert, périmètre respecté |
 | D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
@@ -29,6 +31,13 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Transmis à C : la liste « À savoir pour la tâche C » de la fiche de relais A.
 - À transmettre à D1 : le rappel `sur_evenement` du serveur ne fait que déposer dans une file bornée, rien de lent.
 - À transmettre à F : essayer « toujours » sur un outil entier ; un envoi qui suit un résultat en erreur (il peut échouer une fois avant de se reconnecter) ; l'arrêt d'un agent qui a des tâches de fond, pour vérifier que Claude Code meurt bien.
+
+### Historique de la tâche C
+- Première vérification : recalé de peu. Les sept critères sont remplis et prouvés (75 casses du code essayées, 64 détectées) ; ancienne ligne de commande et nouvelles options comparées point par point, mêmes décisions du moteur. Défaut : après un arrêt, l'appel rendait la main avant que la session soit fermée, et un fichier écrit par l'agent arrêté pouvait tomber dans la tentative suivante. Trou de la consigne : elle ne disait pas quand un appel arrêté doit rendre la main.
+- Seconde chance (même ouvrier, même niveau) : la règle est écrite (au retour de l'appel, la session est fermée et le client déconnecté) ; le filtre de `autorisations` ne garde que les règles simples. L'ouvrier signale un échec isolé de deux tests, non reproduit en 140 passages : le vérificateur cherche un test instable.
+- À transmettre à D1 : la liste « À savoir pour la tâche D1 » de la fiche de relais C.
+- À transmettre à F : la liste « À essayer en vrai » de la fiche de relais C.
+- Limite connue, à dire dans le bilan : « sans outil d'écriture » veut dire sans les outils Edit, Write, MultiEdit et NotebookEdit. Le vérificateur garde, comme avant le chantier, les commandes permises du projet, dont certaines écrivent sur le disque.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
@@ -142,7 +151,7 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   4. `POST /api/arreter` avec une tâche arrête son agent. La tâche revient à la personne responsable avec le motif « arrêtée par toi », sans seconde chance ni montée en gamme. La décision « Relancer au même niveau » reste proposée.
   5. `POST /api/arreter` sans tâche arrête la réponse en cours de l'orchestrateur, et la conversation reste utilisable ensuite.
   6. En mode démonstration, une demande d'autorisation simulée apparaît et se règle de bout en bout.
-- **Périmètre** : `atelier/serveur.py`, `atelier/moteur.py` (l'arrêt seulement), `tests/test_serveur.py` (nouveau)
+- **Périmètre** : `atelier/serveur.py`, `atelier/moteur.py` (l'arrêt seulement), `tests/test_serveur.py` (nouveau) ; étendu le 2026-11-11 à `atelier/__main__.py`, pour la seule commande `instantanes`, qui doit répondre à la demande simulée au lieu de l'attendre
 - **Contrats** : attend C ; fournit à D2 les champs de la vue et les deux routes.
 - **Dépendances** : C
 - **Preuve** : des tests du serveur en mode simulé, qui appellent les routes et lisent la vue.
@@ -207,7 +216,7 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   4. Le LISEZMOI explique la nouvelle dépendance, les cartes d'autorisation, la clé `autorisations` et le bouton « Arrêter ».
 - **Périmètre** : `outils/installer-mac.sh`, `atelier/__main__.py`, `LISEZMOI.md`
 - **Contrats** : attend A (lecture de la source de connexion).
-- **Dépendances** : A, et C depuis le 2026-11-11 : la source de connexion n'est connue qu'après l'ouverture d'une session, il faudra peut-être une fonction de sondage dans `atelier/sdk.py`, que C modifie. E sera lancée en parallèle de D1, sans fichier en commun.
+- **Dépendances** : A, et C depuis le 2026-11-11 : la source de connexion n'est connue qu'après l'ouverture d'une session, il faudra peut-être une fonction de sondage dans `atelier/sdk.py`, que C modifie. E sera lancée après D1, qui touche aussi `atelier/__main__.py`, et en parallèle de D2, sans fichier en commun.
 - **Preuve** : `bash -n` et `shellcheck` sur le script, et un test du message de démarrage avec les deux sources simulées.
 - **Départ** : Sonnet, effort moyen.
 
