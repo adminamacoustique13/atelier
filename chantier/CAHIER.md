@@ -4,7 +4,7 @@
 
 ## Suivi
 
-Enveloppe : 27 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 7 lancements prévus au minimum (les vérifications de E, de D2 et de I, puis D3 et G à deux agents chacune), plus la simplification de clôture : la marge est à zéro.
+Enveloppe : 29 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 6 lancements prévus au minimum (les vérifications de I, puis D3 et G à deux agents chacune, la vérification de D2 étant en cours), plus une quatrième passe de E si elle est accordée (2) et la simplification de clôture : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
@@ -14,9 +14,9 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
 | C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
-| D2 | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
+| D2 | en vérification | Sonnet, effort moyen | Opus, effort moyen | 1 | Essai dans le navigateur : 67 vérifications passées, quatorze captures |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
-| E | en cours (troisième passe) | Sonnet, effort moyen | Opus, effort moyen | 3 | Script, ménage et LISEZMOI validés dès la première vérification |
+| E | revenu à la personne responsable (trois tentatives épuisées, un défaut restant) | Sonnet, effort moyen | Opus, effort moyen | 3 | Script, ménage, LISEZMOI, phrases du fil et verrou de version validés ; un défaut dans le dédoublonnage des annonces |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | I | en cours | Sonnet, effort élevé | Opus, effort élevé | 1 | |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
@@ -58,6 +58,8 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Seconde chance (même ouvrier, même niveau) : les quatre défauts sont levés ; `uv.lock` entre dans le dépôt et fixe `claude-agent-sdk` 0.2.172 ; l'annonce n'est écrite que si elle change.
 - Seconde vérification : recalé pour deux défauts simples. Le dédoublonnage, ajouté à la demande de l'orchestrateur, pouvait écarter une confirmation promise par la phrase de départ ; un test de la démonstration ne cherchait pas la bonne phrase.
 - Troisième passe, courte et bornée, au même niveau : le premier défaut vient d'une demande ajoutée par l'orchestrateur à la seconde passe, pas d'une incapacité de l'ouvrier. Pas de montée en gamme.
+- Troisième vérification : recalé pour un seul défaut. Les deux défauts de la seconde vérification et les trois compléments sont levés ; un redémarrage sans changement n'ajoute plus rien au fil. Mais la nouvelle règle du dédoublonnage (`atelier/serveur.py`, `_noter_annonce`, lignes 289 à 297) remonte le fil jusqu'au dernier départ sans s'arrêter sur une confirmation différente : avec des sources successives « clé API », « abonnement », « clé API » sur trois démarrages, la troisième n'est pas écrite, et le fil se termine sur « compté sur ton abonnement » alors que la clé est facturée. Correction indiquée par le vérificateur : arrêter la boucle au premier texte de la famille trouvé, et écrire s'il diffère.
+- Trois tentatives, le maximum du contrat : la tâche revient à la personne responsable. Dossier : cette rubrique, la fiche de relais E, et les trois verdicts résumés ci-dessus.
 - À transmettre à F : la liste « À essayer en vrai » de la fiche de relais E.
 - Reste mineur, à reprendre à la clôture : `outils/desinstaller-mac.sh` ne retire pas le dossier `.venv` (le LISEZMOI le dit).
 
