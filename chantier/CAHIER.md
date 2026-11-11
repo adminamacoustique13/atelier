@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C, H et D1 sont vérifiées, D2 et E sont lancées en parallèle.
+État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C, H et D1 sont vérifiées ; D2 et I sont en cours, E est en vérification.
 
 ## Suivi
 
-Enveloppe : 22 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 6 lancements prévus au minimum (les vérifications de D2 et de E, puis D3 et G à deux agents chacune), plus la simplification de clôture.
+Enveloppe : 24 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 7 lancements prévus au minimum (les vérifications de D2 et de I, puis D3 et G à deux agents chacune, la vérification de E étant en cours), plus la simplification de clôture.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
@@ -16,8 +16,9 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
 | D2 | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
-| E | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
+| E | en vérification | Sonnet, effort moyen | Opus, effort moyen | 1 | 430 tests verts, `bash -n` et `shellcheck` sans avertissement, périmètre respecté |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| I | en cours | Sonnet, effort élevé | Opus, effort élevé | 1 | |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
 
@@ -272,6 +273,19 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Restes relevés par le vérificateur, confiés à la tâche E** : `LISEZMOI.md` ligne 5 (« Aucune dépendance », devenu faux), ligne 109 (« la lecture du flux de Claude Code », et un nombre de tests périmé), ligne 111 (« Claude Code accepte la ligne de commande »), ligne 120 (« Claude Code en ligne de commande, et le simulateur ») ; `outils/installer-mac.sh` lignes 45 à 47 (exige la commande `claude`) ; `atelier/__main__.py` (attrape encore `subprocess.SubprocessError`).
 - **Restes mineurs, à reprendre à la clôture** : le mot « CLI » dans quatre commentaires du pont et des agents ; le relevé de `atelier/serveur.py`, `atelier/moteur.py` et `atelier/__main__.py` est à refaire après D1.
 - **Accord de la personne responsable, le 2026-11-11** : le retrait des deux tests d'origine (zone rouge levée pour eux seuls) et l'enveloppe portée à 36.
+
+### I. La course dans les contrôles git — ajoutée le 2026-11-11 avec l'accord de la personne responsable, hors de l'objectif initial
+- **Pourquoi** : en cherchant un test instable, le vérificateur de C a trouvé un vrai défaut, antérieur au chantier. Quand une tâche est refusée pendant qu'une autre démarre ou s'enregistre, deux commandes git se marchent dessus et le fil du moteur peut tomber. Avec trois tâches en parallèle, cela finit par arriver.
+- **Critères** :
+  1. Les deux appels `git worktree remove` de `ControlesGit` (dans `annuler`, et le retrait fait par `preparer`) passent par le verrou de fusion.
+  2. Un test nouveau reproduit la course : il échoue sur le code actuel et passe après la correction.
+  3. Le test d'origine `test_avec_un_vrai_depot_git_le_travail_verifie_est_fusionne_et_le_reste_jete` ne tombe plus sous charge.
+  4. Aucun interblocage : aucun chemin ne demande le verrou de fusion alors qu'il le tient déjà.
+- **Périmètre** : `atelier/controles.py` (cette correction seulement), `tests/test_controles.py` (nouveau)
+- **Contrats** : ne change aucun comportement.
+- **Dépendances** : aucune. Lancée en parallèle de D2, sans fichier en commun.
+- **Preuve** : le test nouveau, et 200 passages du test d'origine sous charge sans échec (7 échecs sur 400 avant la correction).
+- **Départ** : Sonnet, effort élevé. La correction tient en deux lignes, mais c'est de la concurrence dans un garde-fou.
 
 ### F. Premier essai réel sur ton Mac — revient à la personne responsable
 - **Pourquoi** : aucune machine du chantier n'est connectée à ton compte Claude. La seule preuve qu'Atelier marche vraiment, c'est un essai chez toi.

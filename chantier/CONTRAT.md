@@ -10,6 +10,8 @@ Amendé le 2026-11-11 par la personne responsable : une tâche G, hors de l'obje
 
 Amendé le 2026-11-11 par la personne responsable : une tâche H retire du dépôt tout lien avec l'ancien câblage (`claude -p`). Pour elle seule, la zone rouge « modifier les 35 tests existants » est levée sur deux tests de `tests/test_moteur.py`, qui ne testaient que les anciens lecteurs : `test_lecture_de_la_sortie_de_claude_code` et `test_le_flux_de_claude_code_est_relaye_au_fil_de_l_eau`. Les 33 autres restent intouchables. L'enveloppe passe de 24 à 36 agents lancés.
 
+Amendé le 2026-11-11 par la personne responsable : une tâche I corrige une course dans `atelier/controles.py`, antérieure au chantier et hors de son objectif initial (deux commandes `git worktree remove` lancées hors du verrou de fusion). Pour elle seule, la zone rouge « modifier les garde-fous » est levée sur ce fichier, pour cette correction et rien d'autre.
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 
@@ -43,6 +45,6 @@ Je peux monter seul jusqu'au modèle frontière (Fable) en effort élevé. L'eff
 - Pousser sur la branche principale. Le chantier vit sur la branche `chantier/agent-sdk`, et c'est toi qui décides de la fusion.
 - Toucher aux secrets, aux clés API ou aux identifiants de connexion.
 - Ajouter au produit une bibliothèque autre que `claude-agent-sdk`, si sa licence n'est pas permissive ou si elle envoie des données à l'extérieur.
-- Modifier les 35 tests existants ou les garde-fous (contrôle de périmètre, plafond, enveloppe, vérificateur). Exception du 2026-11-11 : les deux tests des anciens lecteurs, que la tâche H retire.
+- Modifier les 35 tests existants ou les garde-fous (contrôle de périmètre, plafond, enveloppe, vérificateur). Exception du 2026-11-11 : les deux tests des anciens lecteurs, que la tâche H retire. Autre exception du 2026-11-11 : la correction de la course de `atelier/controles.py`, par la tâche I.
 - Retirer le mode démonstration ou l'agent simulé.
 - Faire écouter le serveur ailleurs que sur 127.0.0.1.
