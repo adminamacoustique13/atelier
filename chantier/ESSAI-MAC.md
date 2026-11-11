@@ -2,7 +2,7 @@
 
 Aucune machine du chantier n'était connectée à un compte Claude. Cet essai est donc la première fois que les agents d'Atelier tournent pour de vrai par l'Agent SDK. Compte une vingtaine de minutes, sur un dépôt sans importance.
 
-Ce que la branche contient à ce stade : le pont vers le SDK, les cartes d'autorisation, l'activité en direct, les boutons « Arrêter », la nouvelle installation et l'annonce de ce qui est facturé. Ce qu'elle ne contient pas encore : le menu « Mode des ouvriers » et le bouton « Mettre à jour ».
+La branche contient tout le chantier : le pont vers le SDK, les cartes d'autorisation, l'activité en direct, les boutons « Arrêter », la nouvelle installation, l'annonce de ce qui est facturé, le menu « Mode des ouvriers » et le bouton « Mettre à jour ».
 
 ## Avant de commencer
 
@@ -79,6 +79,25 @@ Pendant qu'un agent travaille :
 - **« Toujours pour ce projet »** sur une commande simple : la règle doit apparaître dans le fil (« Autorisation retenue pour ce projet : ... »), puis dans le fichier `chantier/profil.json` du dépôt d'essai, et la même commande ne doit plus redemander.
 - **Un redémarrage** : ferme ta session du Mac et rouvre-la. Atelier doit revenir tout seul, et le fil ne doit pas répéter les phrases de connexion.
 
+## 7. Le mode des ouvriers (dix minutes de plus)
+
+Dans l'onglet Chantier, la carte « Mode des ouvriers » montre cinq choix. Le mode en vigueur est en blanc ; passe la souris sur un autre pour lire son explication.
+
+- **Laisser un arbitre décider.** Choisis-le, puis lance une petite tâche. Regarde si le fil dit que ce mode n'est pas appliqué (il n'existe pas pour tous les modèles). S'il est appliqué, regarde si un refus de l'arbitre apparaît dans l'activité de l'agent, avec le nom de la règle entre parenthèses.
+- **Répétition.** Choisis-le et lance une tâche : une modification de fichier doit te présenter une carte, puis une dernière carte doit te demander si l'ouvrier peut passer à l'exécution.
+- **Un changement en cours de route.** Pendant qu'un ouvrier travaille, change de mode : le fil doit le dire en une phrase, et l'ouvrier doit continuer.
+- Reviens ensuite à « Accepter les modifications », le mode d'avant ce menu.
+
+Ce qui ne doit jamais arriver : un vérificateur ou l'orchestrateur qui modifie un fichier, quel que soit le mode.
+
+## 8. Le bouton « Mettre à jour »
+
+Il n'apparaît dans l'en-tête que si `main` a avancé en ligne par rapport à ton dossier, et au plus une heure après. Tu ne le verras donc qu'après la fusion de la branche du chantier dans `main`, sur un Mac resté sur une version plus ancienne. Le jour où il apparaît :
+
+- clique-le, puis « Confirmer la mise à jour » ;
+- la page doit dire qu'Atelier redémarre, puis reprendre toute seule en une dizaine de secondes ;
+- s'il refuse, la phrase doit dire pourquoi (un agent travaille, le dossier a été modifié à la main, le dossier n'est pas sur `main`).
+
 ## Ce que j'aimerais que tu me rapportes
 
 - Les phrases de connexion telles que le fil les a écrites.
@@ -86,6 +105,19 @@ Pendant qu'un agent travaille :
 - Le temps que met une tâche à revenir après un arrêt, et s'il est resté un programme Claude.
 - Toute phrase qui t'a paru fausse, obscure ou en trop.
 - Tout ce qui t'a surpris, même si tu ne sais pas si c'est un défaut.
+
+## Ce que seul ton Mac peut confirmer
+
+Rien de ce qui suit n'a pu être essayé pendant le chantier. Tu n'as pas à tout vérifier : c'est la liste de ce qui reste une hypothèse, pour que tu saches où regarder si quelque chose cloche.
+
+- **La connexion.** Le Claude Code embarqué par la bibliothèque reprend bien ta connexion faite avec `claude` ; ce que le SDK annonce comme source (abonnement ou clé) dans ton cas.
+- **L'installation.** `uv sync` installe la version verrouillée de la bibliothèque sur ton Mac ; Atelier redémarre à l'ouverture de session, y compris sans réseau.
+- **L'arrêt.** Après « Arrêter », le programme Claude Code de l'agent meurt bien, même s'il avait lancé des tâches de fond ; la conversation reprend après une réponse arrêtée, y compris si c'était la toute première.
+- **Les autorisations.** Un outil interdit au vérificateur n'arrive jamais sur une carte ; « Toujours pour ce projet » sur un outil entier est accepté par Claude Code ; tes réglages personnels de `~/.claude` peuvent permettre des outils sans carte, quel que soit le mode.
+- **L'arbitre.** La forme exacte de ses refus ; son retour aux cartes après trois refus de suite ; le message quand il n'est pas disponible.
+- **La répétition.** Les cartes pour les modifications, la carte de passage à l'exécution, et le mode appliqué ensuite.
+- **La mise à jour.** Le délai réel du redémarrage par macOS, et l'installation d'une dépendance nouvelle au redémarrage.
+- **Les commandes `launchctl`** du LISEZMOI.
 
 ## Deux points d'attention
 

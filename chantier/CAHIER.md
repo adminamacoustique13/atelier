@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Ga, D2.1, D3a et D3b sont vérifiées ; Gb est en cours ; restera la clôture.
+État général : toutes les tâches automatisées sont vérifiées, enregistrées et poussées sur la branche `chantier/agent-sdk`. Il reste la tâche F, le premier essai réel, qui revient à la personne responsable (voir `chantier/ESSAI-MAC.md`), puis sa décision de fusionner dans `main`. Le contrat a été amendé plusieurs fois le 2026-11-11 (voir `chantier/CONTRAT.md`).
 
 ## Suivi
 
-Compteur : 44 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur final : 44 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). État du dépôt à la clôture : 622 tests verts, contrôle de forme vert, trois essais dans le navigateur (247 vérifications), et plus aucune trace de l'ancien câblage hors de `chantier/` et de `DECISIONS.md`.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -23,12 +23,34 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
 | E.1 | vérifié | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | Validé du premier coup : 457 tests verts ; 29 870 enchaînements du vérificateur sans écart, et 111 110 pour R1 et R2 |
 | Ga | vérifié | Sonnet, effort moyen | Opus, bornée | 1 | Validé du premier coup : 27 tests verts ; douze cas de dossier abîmé ou de phrase trompeuse essayés par le vérificateur, aucun défaut bloquant |
-| Gb | en cours | Sonnet, effort moyen | mécanique, avec relecture des captures | 1 | |
+| Gb | vérifié | Sonnet, effort moyen | mécanique, avec relecture des captures | 1 | 622 tests verts ; essai dans le navigateur : 70 vérifications ; captures `G-confirmation.png` et `G-etroit.png` relues par l'orchestrateur |
 | I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
+
+### Clôture, le 2026-11-11
+- Pas de passe générale de simplification : la personne responsable a demandé de ne plus alourdir le déroulement, et une réécriture de fin de chantier sur 8 600 lignes ajoutées aurait demandé une vérification de plus. Les restes ci-dessous sont proposés à sa décision.
+- La carte du code (table « Les fichiers » du LISEZMOI) est à jour : `guichet.py`, `mise_a_jour.py` et `projets.py` y figurent.
+- `chantier/DOSAGE.md` est écrit. `chantier/LECONS.md` porte les deux leçons validées en cours de route.
+
+### Restes mineurs connus, non corrigés
+Aucun ne touche aux droits des agents ni à la facturation.
+- Activité : pendant la proposition d'un plan, la ligne de l'orchestrateur montre le texte brut du plan.
+- Fil : les notes « Ouvrier lancé » et « Vérificateur lancé » sont écrites même quand l'agent ne part pas, après un arrêt.
+- Modes : en passant de « Refuser sans demander » à l'arbitre pendant un tour, un refus du premier mode peut s'afficher comme un refus de l'arbitre ; les refus de « Refuser sans demander » n'apparaissent nulle part.
+- Mise à jour : un agent qui démarrerait entre le contrôle « un agent travaille » et le `git pull` serait arrêté par le redémarrage ; pas de phrase dédiée pour un fichier non suivi en conflit.
+- Guichet : « 1 caractères de plus » au singulier ; aucun test ne couvre `eval` dans la liste des lanceurs.
+- Désinstallation : `outils/desinstaller-mac.sh` laisse le dossier `.venv` (le LISEZMOI le dit).
+- Moteur : chaque « Relancer » ajoute deux agents à l'enveloppe du chantier servi, même après un arrêt avant le départ. Règle antérieure au chantier, dans une partie que le contrat protège.
+- Contrôles : trois lignes mortes dans `_config` de `atelier/controles.py`. Fichier protégé par le contrat.
+- Produit : Atelier enregistre le travail par git avec la configuration de la personne ; une signature des commits qui demande une saisie échouerait sans doute sous l'agent de lancement.
+- Tests : quatre bornes de temps dans les tests du pont et des agents, jamais vues en échec.
+
+### Historique de la tâche Gb
+- Vérification mécanique : 622 tests verts trois fois de suite, l'essai du bouton relancé par l'orchestrateur (70 vérifications), deux captures relues. L'ouvrier a lu dans le script d'installation que l'agent de lancement relance Atelier après n'importe quelle sortie, et s'arrête donc par une sortie ordinaire.
+- À transmettre à F : la liste « À essayer en vrai » de la fiche de relais Gb, reprise dans `chantier/ESSAI-MAC.md`.
 
 ### Historique de la tâche A
 - Première vérification : recalé. Chemin nominal bon et fidèle au SDK (essayé avec le vrai `ClaudeSDKClient` sur un faux exécutable `claude`). Trois défauts : `fermer()` pendant un envoi peut bloquer l'appel une heure ; la déconnexion annulée au bout de cinq secondes peut laisser le processus Claude Code vivant ; un « toujours » avec une règle vide autorisait l'outil entier. Trou de la consigne relevé : un faux client aux `interrupt` et `disconnect` instantanés ne peut pas montrer ce qui dépend des durées réelles ; il fallait exiger un essai avec le vrai client sur un faux exécutable.

@@ -192,7 +192,10 @@ Pas encore essayé avec de vrais agents : aucune machine du chantier n'était co
 | `atelier/consignes.py` | Les consignes de l'ouvrier, du vérificateur et du découpage |
 | `atelier/agents.py` | Les agents : celui qui passe par le pont vers Claude, et le simulateur |
 | `atelier/sdk.py` | Le pont vers `claude-agent-sdk` : sessions, autorisations, arrêt |
+| `atelier/guichet.py` | Le guichet des autorisations : demandes en attente, règle « toujours », phrases des cartes |
 | `atelier/controles.py` | Périmètre, commandes du profil, copies de travail et fusion git |
 | `atelier/moteur.py` | Le chef de chantier |
+| `atelier/projets.py` | Les projets ouverts : création, reprise d'un dépôt existant, liaison à un dépôt en ligne |
+| `atelier/mise_a_jour.py` | La mise à jour de l'Atelier lui-même : vérification en ligne et `git pull` |
 | `atelier/serveur.py` | Le serveur local du tableau de bord |
 | `atelier/tableau/index.html` | Le tableau de bord |
