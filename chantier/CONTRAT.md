@@ -4,6 +4,8 @@ Validé le 2026-11-11 par la personne responsable.
 
 Amendé le 2026-11-11 par la personne responsable : le mode `auto` de Claude Code entre dans le périmètre (tâche D3 du cahier), sans bypass.
 
+Amendé le 2026-11-11 par la personne responsable : l'enveloppe passe de 18 à 24 agents lancés.
+
 ## Objectif
 Faire piloter les agents d'Atelier par l'Agent SDK au lieu de `claude -p`. Chaque agent travaille alors en direct sous les yeux de la personne responsable, peut lui demander une autorisation depuis le tableau de bord (une fois, toujours pour ce projet, ou non avec une indication), et peut être arrêté d'un bouton.
 
@@ -24,7 +26,7 @@ Ce qui ne change pas : la connexion par ton abonnement, le modèle et l'effort p
 - La logique de dosage, d'escalade et de vérification (`dosage.py`, `consignes.py`, et l'enchaînement dans `moteur.py`), en dehors de ce que la tâche D1 y ajoute pour l'arrêt.
 
 ## Enveloppe
-- Agents lancés au maximum : 18 (6 tâches automatisées, un ouvrier et un vérificateur chacune, plus la moitié en marge)
+- Agents lancés au maximum : 24 (porté de 18 à 24 le 2026-11-11 : 7 tâches automatisées depuis l'ajout de D3, et les passes supplémentaires de A et de B)
 - Tentatives par tâche au maximum : 3 (le premier essai, la seconde chance, puis un cran au-dessus)
 - Montées en gamme au maximum : 3 sur l'ensemble du chantier
 

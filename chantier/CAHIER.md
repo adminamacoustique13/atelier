@@ -4,7 +4,7 @@
 
 ## Suivi
 
-Enveloppe : 11 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 9 lancements prévus au minimum (vérification de C, puis D1, D2, D3 et E à deux agents chacune), soit 20 : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11 : porter l'enveloppe à 24. En attendant, rien n'est lancé au-delà de 18.
+Enveloppe : 11 agents lancés sur 24 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24 le 2026-11-11. Il reste 9 lancements prévus au minimum (vérification de C, puis D1, D2, D3 et E à deux agents chacune) : la marge est de 4.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
