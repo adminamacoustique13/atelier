@@ -278,6 +278,8 @@ class Requetes(BaseHTTPRequestHandler):
                 self.atelier.message(corps["texte"])
             elif self.path == "/api/projets/creer":
                 self.projets.creer(corps["nom"])
+            elif self.path == "/api/projets/cloner":
+                self.projets.cloner(corps["adresse"])
             elif self.path == "/api/projets/ouvrir":
                 self.projets.ouvrir(corps["id"])
             else:

@@ -366,3 +366,51 @@ def test_sans_projet_l_atelier_attend_qu_on_en_cree_un(tmp_path):
     au_redemarrage.decouvrir()
     au_redemarrage.ouvrir_le_premier()
     assert au_redemarrage.vue()["projet"] == "Premier"
+
+
+def test_on_reprend_un_depot_existant_et_l_etat_reste_hors_de_son_historique(tmp_path):
+    import subprocess
+
+    import pytest
+
+    from atelier.modele import ProjetImpossible
+    from atelier.projets import Projets, creer_depot, ouvrir_depot
+
+    def git(dossier, *args):
+        identite = ["-c", "user.name=t", "-c", "user.email=t@t"]
+        subprocess.run(["git", *identite, *args], cwd=dossier, check=True, capture_output=True)
+
+    source = tmp_path / "ailleurs" / "Mon-Code.git"
+    source.mkdir(parents=True)
+    git(source, "init", "-q")
+    (source / "LISEZMOI.md").write_text("bonjour\n")
+    git(source, "add", "-A")
+    git(source, "commit", "-q", "-m", "debut")
+
+    racine = tmp_path / "racine"
+    racine.mkdir()
+    projets = Projets(racine, creer_depot, ouvrir_depot)
+    assert projets.cloner(f"  {source}/ ") == "mon-code"
+    clone = racine / "mon-code"
+    assert (clone / "LISEZMOI.md").read_text() == "bonjour\n"
+    assert projets.vue()["projet"] == "mon-code"
+    assert ".atelier/" in (clone / ".git" / "info" / "exclude").read_text()
+    statut = subprocess.run(
+        ["git", "status", "--porcelain"], cwd=clone, capture_output=True, text=True
+    ).stdout
+    # Le cahier est fait pour être versionné ; l'état interne, jamais.
+    assert ".atelier" not in statut
+
+    with pytest.raises(ProjetImpossible, match="existe déjà"):
+        projets.cloner(str(source))
+    for _ in range(2):  # un échec ne bloque pas un nouvel essai sous le même nom
+        with pytest.raises(ProjetImpossible, match="Aucun dépôt|Git a refusé"):
+            projets.cloner(str(tmp_path / "absent"))
+    assert not projets.en_cours
+    with pytest.raises(ProjetImpossible, match="Colle l'adresse"):
+        projets.cloner("   ")
+
+    autres = Projets(racine, creer_depot, ouvrir_depot)
+    (racine / "pas-un-depot").mkdir()
+    autres.decouvrir()
+    assert [p["id"] for p in autres.liste()] == ["mon-code"]

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import threading
@@ -27,8 +28,35 @@ def lire_profil(depot: Path) -> dict:
     return json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
 
 
+def exclure_etat(depot: Path) -> None:
+    """Tient l'état de l'Atelier (.atelier/) hors de l'historique git, sans toucher au dépôt."""
+    exclusions = depot / ".git" / "info" / "exclude"
+    if not exclusions.parent.is_dir():
+        return
+    actuel = exclusions.read_text("utf-8") if exclusions.exists() else ""
+    if ".atelier/" not in actuel.split():
+        exclusions.write_text(
+            actuel.rstrip("\n") + ("\n" if actuel.strip() else "") + ".atelier/\n"
+        )
+
+
+def expliquer_refus_de_clonage(message: str) -> str:
+    """Traduit en clair les refus de git les plus courants au moment de récupérer un dépôt."""
+    if any(m in message for m in ("Username", "Authentication", "Permission denied", "403")):
+        return (
+            "GitHub demande une connexion. Soit l'adresse est fausse, soit le dépôt est privé "
+            "et git n'est pas encore connecté à ton compte sur cet ordinateur."
+        )
+    if "not found" in message or "does not exist" in message or "does not appear" in message:
+        return "Aucun dépôt à cette adresse. Vérifie-la en l'ouvrant dans le navigateur."
+    if "Could not resolve host" in message:
+        return "Pas d'accès au réseau, ou nom de site mal écrit."
+    return message
+
+
 def ouvrir_depot(depot: Path) -> Atelier:
     """Monte l'atelier d'un dépôt existant, avec de vrais agents Claude Code."""
+    exclure_etat(depot)
     profil = lire_profil(depot)
     etat = depot / ".atelier" / "etat.json"
     if etat.exists():
@@ -39,11 +67,21 @@ def ouvrir_depot(depot: Path) -> Atelier:
     return Atelier(depot, chantier, AgentClaude(profil), controles, profil)
 
 
-def _git(dossier: Path, *arguments: str) -> str:
+def _git(dossier: Path, *arguments: str, delai: int = 120) -> str:
+    # Pas de question posée par git : l'Atelier tourne sans terminal, il échouerait en silence.
+    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
     try:
         sortie = subprocess.run(
-            ["git", *arguments], cwd=dossier, capture_output=True, text=True, check=True
+            ["git", *arguments],
+            cwd=dossier,
+            capture_output=True,
+            text=True,
+            check=True,
+            env=env,
+            timeout=delai,
         )
+    except subprocess.TimeoutExpired as erreur:
+        raise ProjetImpossible("Git n'a pas répondu à temps.") from erreur
     except (OSError, subprocess.CalledProcessError) as erreur:
         detail = getattr(erreur, "stderr", "") or str(erreur)
         raise ProjetImpossible(f"Git a refusé : {detail.strip()[:200]}") from erreur
@@ -74,6 +112,7 @@ class Projets:
         self.racine = Path(racine)
         self._creer, self._ouvrir = creer, ouvrir
         self.verrou = threading.Lock()
+        self.en_cours: set[str] = set()
         self.ateliers: dict[str, Atelier] = {}
         self.dossiers: dict[str, Path] = {}
         self.courant = ""
@@ -85,9 +124,10 @@ class Projets:
         return cle
 
     def decouvrir(self) -> None:
-        """Repère sous la racine les dossiers qui ont déjà un chantier d'atelier."""
+        """Repère sous la racine les dépôts git et les dossiers qui ont déjà un chantier."""
         for dossier in sorted(self.racine.iterdir()):
-            if (dossier / ".atelier" / "etat.json").exists() and dossier.name not in self.ateliers:
+            connu = (dossier / ".git").exists() or (dossier / ".atelier" / "etat.json").exists()
+            if dossier.is_dir() and connu and dossier.name not in self.ateliers:
                 self.dossiers[dossier.name] = dossier
 
     def atelier(self) -> Atelier:
@@ -127,6 +167,37 @@ class Projets:
             if dossier.exists() or cle in self.ateliers:
                 raise ProjetImpossible(f"Un dossier « {cle} » existe déjà à cet endroit.")
             self.ateliers[cle] = self._creer(dossier, nom)
+            self.courant = cle
+        return cle
+
+    def cloner(self, adresse: str) -> str:
+        """Récupère un dépôt existant (GitHub ou autre) dans la racine, puis l'ouvre."""
+        adresse = adresse.strip()
+        nom = re.sub(r"\.git$", "", adresse.rstrip("/").rsplit("/", 1)[-1].rsplit(":", 1)[-1])
+        cle = cle_de(nom)
+        if not adresse or not cle:
+            raise ProjetImpossible(
+                "Colle l'adresse du dépôt, par exemple https://github.com/moi/projet."
+            )
+        if not self._ouvrir:
+            raise ProjetImpossible("La démonstration ne récupère pas de vrai dépôt.")
+        dossier = self.racine / cle
+        with self.verrou:
+            if dossier.exists() or cle in self.ateliers or cle in self.en_cours:
+                raise ProjetImpossible(f"Un dossier « {cle} » existe déjà à cet endroit.")
+            self.en_cours.add(cle)
+        try:
+            # Hors du verrou : un gros dépôt ne bloque ni les autres projets ni l'affichage.
+            try:
+                _git(self.racine, "clone", "--quiet", "--", adresse, str(dossier), delai=600)
+            except ProjetImpossible as erreur:
+                raise ProjetImpossible(expliquer_refus_de_clonage(str(erreur))) from erreur
+            atelier = self._ouvrir(dossier)
+        finally:
+            with self.verrou:
+                self.en_cours.discard(cle)
+        with self.verrou:
+            self.ateliers[cle] = atelier
             self.courant = cle
         return cle
 

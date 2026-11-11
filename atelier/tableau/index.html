@@ -78,6 +78,7 @@ dialog::backdrop { background: rgba(0, 0, 0, 0.38); }
 dialog form { display: flex; flex-direction: column; gap: 10px; }
 dialog h2 { font-size: 15px; font-weight: 600; }
 dialog .boutons { margin-top: 6px; }
+dialog .reprise { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.12); }
 input[type="text"] {
   height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--bord); background: var(--creux); color: var(--texte);
   font: inherit; font-size: 13.5px; outline: 0;
@@ -385,6 +386,16 @@ td.droite, th.droite { text-align: right; }
     <div class="boutons">
       <button class="principal" type="submit" id="creer">Créer le projet</button>
       <button type="button" id="annuler-creation">Annuler</button>
+    </div>
+  </form>
+  <form id="form-clonage" class="reprise">
+    <h2>Ou reprendre un dépôt existant</h2>
+    <label class="etiquette" for="adresse-depot">Adresse du dépôt (GitHub ou autre)</label>
+    <input id="adresse-depot" type="text" placeholder="https://github.com/compte/projet" autocomplete="off" spellcheck="false" required>
+    <p class="petit">Le dépôt est récupéré dans le dossier des projets avec tes accès git habituels. Un dépôt privé demande que git soit déjà connecté à GitHub sur cet ordinateur.</p>
+    <p class="alerte" id="erreur-clonage" role="alert"></p>
+    <div class="boutons">
+      <button class="principal" type="submit" id="cloner">Récupérer le dépôt</button>
     </div>
   </form>
 </dialog>
@@ -831,6 +842,9 @@ document.getElementById("nouveau").addEventListener("click", () => {
   alerte.textContent = "";
   champNom.value = "";
   document.getElementById("creer").disabled = rejoue;
+  document.getElementById("form-clonage").hidden = !reel;
+  document.getElementById("adresse-depot").value = "";
+  document.getElementById("erreur-clonage").textContent = "";
   document.getElementById("lieu-creation").textContent = rejoue
     ? "Démonstration rejouée : pour créer un projet, lance l'Atelier sur ton ordinateur."
     : `Un dossier à ce nom sera créé dans ${(derniere && derniere.racine) || "le dossier des projets"}${reel ? ", avec son dépôt git" : " (démonstration, agents simulés)"}.`;
@@ -841,6 +855,21 @@ document.getElementById("form-creation").addEventListener("submit", async (e) =>
   e.preventDefault();
   const { ok, donnees } = await demander("/api/projets/creer", { nom: champNom.value });
   if (!ok) { alerte.textContent = donnees.erreur || "Le projet n'a pas pu être créé."; return; }
+  dialogue.close();
+  location.hash = "#conversation";
+  changerDeProjet(donnees);
+});
+
+document.getElementById("form-clonage").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const bouton = document.getElementById("cloner"), erreur = document.getElementById("erreur-clonage");
+  bouton.disabled = true;
+  bouton.textContent = "Récupération en cours…";
+  erreur.textContent = "";
+  const { ok, donnees } = await demander("/api/projets/cloner", { adresse: document.getElementById("adresse-depot").value });
+  bouton.disabled = false;
+  bouton.textContent = "Récupérer le dépôt";
+  if (!ok) { erreur.textContent = donnees.erreur || "Le dépôt n'a pas pu être récupéré."; return; }
   dialogue.close();
   location.hash = "#conversation";
   changerDeProjet(donnees);
