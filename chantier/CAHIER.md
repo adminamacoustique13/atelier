@@ -1,6 +1,22 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat en attente de validation. Rien n'est lancé.
+État général : contrat validé le 2026-11-11. Sous-plan 1 en cours : A et B sont lancées en parallèle.
+
+## Suivi
+
+Enveloppe : 2 agents lancés sur 18, 0 montée en gamme sur 3.
+
+| Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
+|---|---|---|---|---|---|
+| A | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
+| B | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
+| C | à lancer | Opus, effort élevé | Fable, effort élevé | 0 | |
+| D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
+| D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
+| F | revient à la personne responsable | | | | |
+
+Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
 
 ## Contrats communs, fixés avant le lancement
 
@@ -29,6 +45,20 @@ Ils sont relayés par un rappel `sur_evenement(evenement)`, fourni par le serveu
 - « Toujours » ajoute la règle à cette liste.
 - Ce sont les mêmes règles que celles qu'on écrirait dans `.claude/settings.json`.
 - La clé existante `commandes_permises` reste lue comme avant.
+
+## Précisions fixées au lancement
+
+Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSDKClient`, `can_use_tool`, `interrupt`, `effort`, `include_partial_messages` et `apiKeySource` existent tous sous ces noms. Aucune correction de nom n'a été nécessaire.
+
+**4. Qui importe qui.** `atelier/sdk.py` importe `Resultat` et `decrire_outil` depuis `atelier/agents.py`. En retour, `agents.py` (tâche C) importera `atelier.sdk` à l'intérieur de ses méthodes, pas en tête de fichier, pour éviter un import en boucle. La bibliothèque `claude_agent_sdk` n'est importée qu'à l'ouverture d'une session réelle : la démonstration et les tests ne l'appellent jamais.
+
+**5. L'arrêt pendant une attente.** Le guichet offre en plus `annuler(agent)`, qui ferme sur « non » les demandes ouvertes de cet agent, avec le message « Arrêté par la personne responsable. ». Le pont l'appelle dans `arreter()`. Sans cela, une carte d'autorisation resterait affichée pour un agent déjà arrêté.
+
+**6. Les quatre types d'événements.** C'est le pont qui émet aussi « attente » (quand une demande part au guichet) et « fin » (quand l'appel se termine), en plus de « texte » et « outil ».
+
+**7. La conversation suivie.** Le pont accepte un identifiant de session et une reprise (options `session_id` et `resume` du SDK), parce que la conversation de l'orchestrateur se poursuit d'un message à l'autre.
+
+**8. Le texte ajouté au rôle.** Le SDK n'a pas d'option `append_system_prompt` : le texte passe par `system_prompt={"type": "preset", "preset": "claude_code", "append": ...}`.
 
 ## Sous-plan 1 — Le socle
 
