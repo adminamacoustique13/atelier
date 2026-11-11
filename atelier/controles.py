@@ -117,7 +117,8 @@ class ControlesGit:
         """Crée pour la tâche une copie de travail propre, partie de l'état vérifié."""
         arbre = self._arbre(tache)
         if arbre.exists():
-            self._git("worktree", "remove", "--force", str(arbre))
+            with self.verrou_fusion:
+                self._git("worktree", "remove", "--force", str(arbre))
         arbre.parent.mkdir(parents=True, exist_ok=True)
         with self.verrou_fusion:
             self._git("worktree", "add", "-q", "-B", f"tache/{tache.id}", str(arbre), "HEAD")
@@ -212,4 +213,5 @@ class ControlesGit:
     def annuler(self, tache, dossier) -> None:
         """Jette le travail refusé : la tentative suivante repartira d'un état propre."""
         if dossier and Path(dossier).exists():
-            self._git("worktree", "remove", "--force", str(dossier))
+            with self.verrou_fusion:
+                self._git("worktree", "remove", "--force", str(dossier))
