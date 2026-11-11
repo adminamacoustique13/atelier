@@ -1,10 +1,10 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C est vérifiée, D1 et H sont lancées en parallèle.
+État général : contrat validé le 2026-11-11, amendé le même jour (tâches D3 et G, enveloppe). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C et H sont vérifiées, D1 est en cours.
 
 ## Suivi
 
-Enveloppe : 16 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 10 lancements prévus au minimum (les vérifications de D1 et de H, puis D2, D3, E et G à deux agents chacune), plus la simplification de clôture.
+Enveloppe : 17 agents lancés sur 36 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. La personne responsable a porté l'enveloppe de 18 à 24, puis à 36, le 2026-11-11. Il reste 9 lancements prévus au minimum (la vérification de D1, puis D2, D3, E et G à deux agents chacune), plus la simplification de clôture.
 
 Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 et E en parallèle, puis D3, puis G. À la clôture, une recherche dans tout le dépôt confirme qu'il ne reste aucun lien avec l'ancien câblage.
 
@@ -18,7 +18,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | E | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
-| H | en cours | Sonnet, effort moyen | Opus, effort moyen | 1 | |
+| H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
 | F | revient à la personne responsable | | | | |
 
 Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme vert.
@@ -259,6 +259,9 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Dépendances** : C. Lancée en parallèle de D1, sans fichier en commun (revu le 2026-11-11, à la demande de la personne responsable de faire ce ménage sans attendre la fin).
 - **Preuve** : une recherche dans le dépôt, hors `chantier/` et `DECISIONS.md`, ne trouve plus `claude -p`, `lire_flux_claude`, `lire_sortie_claude` ni « en ligne de commande » à propos de Claude Code ; la suite de tests et le contrôle de forme restent verts.
 - **Départ** : Sonnet, effort moyen. C'est un retrait bien cadré, mais il touche aux tests.
+- **Fait le 2026-11-11** : les trois anciens lecteurs et les deux tests d'origine sont retirés ; il reste 33 tests d'origine. L'état des lieux ci-dessus décrit la situation d'avant.
+- **Restes relevés par le vérificateur, confiés à la tâche E** : `LISEZMOI.md` ligne 5 (« Aucune dépendance », devenu faux), ligne 109 (« la lecture du flux de Claude Code », et un nombre de tests périmé), ligne 111 (« Claude Code accepte la ligne de commande »), ligne 120 (« Claude Code en ligne de commande, et le simulateur ») ; `outils/installer-mac.sh` lignes 45 à 47 (exige la commande `claude`) ; `atelier/__main__.py` (attrape encore `subprocess.SubprocessError`).
+- **Restes mineurs, à reprendre à la clôture** : le mot « CLI » dans quatre commentaires du pont et des agents ; le relevé de `atelier/serveur.py`, `atelier/moteur.py` et `atelier/__main__.py` est à refaire après D1.
 - **Accord de la personne responsable, le 2026-11-11** : le retrait des deux tests d'origine (zone rouge levée pour eux seuls) et l'enveloppe portée à 36.
 
 ### F. Premier essai réel sur ton Mac — revient à la personne responsable
