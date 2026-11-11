@@ -37,7 +37,11 @@ Un fichier `chantier/profil.json` dans chaque dépôt :
 ```
 
 - `commandes` : les contrôles automatiques lancés par l'atelier après chaque livrable.
-- `commandes_permises` : les seules commandes qu'un agent a le droit de lancer.
+- `commandes_permises` : les seules commandes qu'un agent a le droit de lancer (chaque entrée permet la commande et tout ce qui la suit : `uv` permet `uv add`, `uv run pytest`…). Sans cette clé, l'atelier permet `uv`, `python3`, `cargo`, `npm` et `npx`, de quoi installer les outils et lancer les tests ; un projet neuf est créé avec cette liste écrite dans son profil.
+
+Tu n'as pas à modifier ce fichier à la main. Quand un chantier demande un outil qui n'est pas permis, ou pour fixer les contrôles, l'orchestrateur propose un réglage : il apparaît au tableau de bord comme une décision (« Accepter ce réglage » ou « Refuser »). Accepté, il prend effet tout de suite, même en plein chantier, et l'atelier l'enregistre dans le profil. Une tâche revenue faute d'outil se relance ensuite avec « Relancer au même niveau », sans monter le dosage.
+
+L'orchestrateur, en conversation, n'a jamais ces commandes : il lit le dépôt et son historique, rien de plus. Seuls les ouvriers et les vérificateurs les lancent, chacun dans sa propre copie du dépôt.
 - `dosage` (facultatif) : remplace la table de départ, par exemple `{"mecanique": ["sonnet", "low"]}`.
 
 ## Installer l'Atelier sur ton Mac, avec son icône dans le Dock

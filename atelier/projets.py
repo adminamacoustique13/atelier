@@ -22,10 +22,17 @@ def cle_de(nom: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", sans_accents.lower()).strip("-")
 
 
+# Ce que les agents peuvent lancer d'emblée : de quoi installer leurs outils et lancer les
+# tests en Python, Rust ou JavaScript. Un profil qui fixe sa propre liste la garde telle quelle.
+COMMANDES_PAR_DEFAUT = ["uv", "python3", "cargo", "npm", "npx"]
+
+
 def lire_profil(depot: Path) -> dict:
-    """Lit le profil du projet, ou rend un profil vide."""
+    """Lit le profil du projet ; sans liste de commandes permises, celle par défaut vaut."""
     chemin = depot / "chantier" / "profil.json"
-    return json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
+    profil = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
+    profil.setdefault("commandes_permises", list(COMMANDES_PAR_DEFAUT))
+    return profil
 
 
 def exclure_etat(depot: Path) -> None:
@@ -77,7 +84,8 @@ def _git(dossier: Path, *arguments: str, delai: int = 120) -> str:
 def creer_depot(dossier: Path, nom: str) -> Atelier:
     """Crée le dossier d'un nouveau projet, son dépôt git et son profil, puis l'ouvre."""
     (dossier / "chantier").mkdir(parents=True)
-    profil = json.dumps({"nom": nom, "commandes": []}, ensure_ascii=False, indent=2)
+    profil = {"nom": nom, "commandes": [], "commandes_permises": COMMANDES_PAR_DEFAUT}
+    profil = json.dumps(profil, ensure_ascii=False, indent=2)
     (dossier / "chantier" / "profil.json").write_text(profil + "\n", "utf-8")
     (dossier / ".gitignore").write_text(".atelier/\n", "utf-8")
     _git(dossier, "init", "-q", "-b", "main")

@@ -6,7 +6,7 @@ from atelier.agents import AgentSimule, lire_sortie_claude
 from atelier.consignes import consigne_ouvrier, lire_verdict
 from atelier.controles import ControlesGit, ControlesSimules, hors_perimetre, se_chevauchent
 from atelier.modele import Chantier, Contrat, Tache
-from atelier.moteur import ABANDONNER, RELANCER, ContratNonValide, Moteur
+from atelier.moteur import ABANDONNER, RELANCER, RELANCER_TEL, ContratNonValide, Moteur
 
 
 def chantier(taches, **contrat):
@@ -80,7 +80,18 @@ def test_au_plafond_la_tache_revient_avec_une_seule_decision():
     assert c.tache("A").etat == "revenu"
     assert not c.termine
     assert len(c.demandes) == 1
-    assert c.demandes[0]["options"] == [RELANCER, ABANDONNER]
+    assert c.demandes[0]["options"] == [RELANCER_TEL, RELANCER, ABANDONNER]
+
+
+def test_relancer_au_meme_niveau_garde_le_dosage():
+    c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
+    m, _ = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m.executer()
+    avant = (c.tache("A").modele, c.tache("A").effort)
+    m.repondre(c.demandes[0]["id"], RELANCER_TEL)
+    assert (c.tache("A").modele, c.tache("A").effort) == avant
+    m.executer()
+    assert c.tache("A").etat == "verifie"
 
 
 def test_relancer_apres_decision_monte_d_un_cran_et_termine():
@@ -468,3 +479,42 @@ def test_un_projet_relie_a_un_depot_en_ligne_y_envoie_chaque_tache(tmp_path, mon
     with pytest.raises(ValueError, match="contient déjà"):
         controles.relier(str(en_ligne))
     assert "A : Tâche A" in git(projet, "log", "--format=%s")
+
+
+def test_l_orchestrateur_propose_des_outils_et_un_clic_les_fait_valoir(tmp_path):
+    import json
+    from types import SimpleNamespace
+
+    from atelier.projets import COMMANDES_PAR_DEFAUT, creer_depot, lire_profil
+    from atelier.serveur import ACCEPTER_OUTILS
+
+    atelier = creer_depot(tmp_path / "p", "P")
+    assert atelier.moteur.profil["commandes_permises"] == COMMANDES_PAR_DEFAUT
+    assert "Bash(uv:*)" in atelier.moteur.agent._outils(lecture_seule=False)
+
+    # Un projet créé avant ce réglage, sans liste : les commandes par défaut valent.
+    ancien = tmp_path / "ancien" / "chantier"
+    ancien.mkdir(parents=True)
+    (ancien / "profil.json").write_text('{"nom": "Ancien", "commandes": []}')
+    assert lire_profil(ancien.parent)["commandes_permises"] == COMMANDES_PAR_DEFAUT
+
+    bloc = {"commandes_permises": ["maturin"], "commandes": ["uv run pytest -q"], "pourquoi": "x"}
+    texte = f"Il faut maturin.\n```atelier-outils\n{json.dumps(bloc)}\n```\nVoilà."
+    atelier._recevoir("?", SimpleNamespace(ok=True, texte=texte, cout_usd=0, tokens=0))
+    dit = [e for e in atelier.moteur.chantier.evenements if e.get("auteur") == "orchestrateur"]
+    assert "atelier-outils" not in dit[-1]["texte"] and "Voilà." in dit[-1]["texte"]
+    demande = atelier.moteur.chantier.demandes[-1]
+    assert demande["nature"] == "outils" and "maturin" in demande["question"]
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+    profil = json.loads((tmp_path / "p" / "chantier" / "profil.json").read_text())
+    assert profil["commandes_permises"] == [*COMMANDES_PAR_DEFAUT, "maturin"]
+    assert profil["commandes"] == ["uv run pytest -q"]
+    assert "Bash(maturin:*)" in atelier.moteur.agent._outils(lecture_seule=False)
+    assert atelier.moteur.controles.commandes == ["uv run pytest -q"]
+    historique = subprocess.run(
+        ["git", "log", "--format=%s"], cwd=tmp_path / "p", capture_output=True, text=True
+    ).stdout
+    assert "Outils du projet" in historique
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)  # un second clic ne refait rien
+    assert historique.count("Outils du projet") == 1

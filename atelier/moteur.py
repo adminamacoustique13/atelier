@@ -24,6 +24,7 @@ from atelier.modele import Chantier, Tache
 
 ACTIFS = ("en_cours", "en_verification")
 RELANCER, ABANDONNER = "Relancer un cran plus haut", "Abandonner cette tâche"
+RELANCER_TEL = "Relancer au même niveau"
 
 
 class ContratNonValide(Exception):
@@ -113,7 +114,7 @@ class Moteur:
                     "id": f"{tache.id}-{len(self.chantier.demandes) + 1}",
                     "tache": tache.id,
                     "question": f"Tâche {tache.id}, « {tache.titre} » : {raison}",
-                    "options": [RELANCER, ABANDONNER],
+                    "options": [RELANCER_TEL, RELANCER, ABANDONNER],
                     "reponse": None,
                 }
             )
@@ -278,10 +279,12 @@ class Moteur:
             demande = next(d for d in self.chantier.demandes if d["id"] == demande_id)
             demande["reponse"] = choix
             tache = self.chantier.tache(demande["tache"])
-            if choix == RELANCER:
+            if choix in (RELANCER, RELANCER_TEL):
+                # Au même niveau : utile quand la cause était ailleurs (un outil manquant, un
+                # réglage corrigé depuis), pas dans la difficulté de la tâche.
                 dernier = tache.historique[-1]["issue"] if tache.historique else ""
                 suivant = dosage.monter(tache.modele, tache.effort, dernier)
-                if suivant:
+                if suivant and choix == RELANCER:
                     tache.modele, tache.effort = suivant
                 tache.rallonge = tache.tentatives
                 tache.etat = "a_lancer"

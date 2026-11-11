@@ -154,11 +154,22 @@ class ControlesGit:
 
     def enregistrer_cahier(self, message: str) -> None:
         """Fait entrer le cahier du chantier dans l'historique, et lui seul."""
-        if not (self.depot / CAHIER).exists():
+        self.enregistrer_fichier(CAHIER, message)
+
+    def enregistrer_fichier(self, chemin: str, message: str) -> None:
+        """Enregistre un fichier de l'atelier (cahier, profil) dans l'historique, et lui seul."""
+        if not (self.depot / chemin).exists():
             return
-        self._git("add", "--", CAHIER)
-        if self._git("diff", "--cached", "--name-only", "--", CAHIER).strip():
-            self._git("commit", "-q", "-m", message, "--", CAHIER)
+        self._git("add", "--", chemin)
+        if self._git("diff", "--cached", "--name-only", "--", chemin).strip():
+            self._git("commit", "-q", "-m", message, "--", chemin)
+
+    def regler_outils(self, profil: dict) -> None:
+        """Prend en compte un nouveau profil et l'enregistre, puis l'envoie s'il y a lieu."""
+        self.commandes = list(profil.get("commandes", []))
+        with self.verrou_fusion:
+            self.enregistrer_fichier("chantier/profil.json", "Outils du projet")
+        self.envoyer()
 
     def distant(self) -> str:
         """Adresse du dépôt en ligne (origin), ou chaîne vide s'il n'y en a pas."""

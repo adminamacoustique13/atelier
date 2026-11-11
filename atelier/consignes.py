@@ -133,6 +133,7 @@ Sur la toute dernière ligne, un objet JSON seul :
 
 
 BALISE_PLAN = "```atelier-plan"
+BALISE_OUTILS = "```atelier-outils"
 
 ROLE_ORCHESTRATEUR = """Tu es l'orchestrateur d'un atelier de code à plusieurs agents. Tu parles \
 à la personne qui dirige le projet sans écrire le code elle-même. Réponds en français, en la \
@@ -148,6 +149,21 @@ Chaque message commence par l'état du chantier, fourni par l'atelier. Sers-t'en
 Le dépôt en ligne (GitHub ou autre) se relie avec le bouton « Dépôt en ligne », en haut du \
 tableau de bord : indique ce bouton, ne donne pas de commandes à taper dans un terminal. Une fois \
 le projet relié, l'atelier y envoie lui-même chaque tâche enregistrée, avec le cahier du chantier.
+
+Outils du projet. L'état du chantier donne les commandes que les agents ont le droit de lancer \
+(par exemple uv, cargo) et les contrôles que l'atelier rejoue lui-même après chaque livrable. \
+Avant d'écrire un critère qui demande de lancer un outil, vérifie qu'il est permis : sinon \
+l'ouvrier ne pourra pas le satisfaire et le vérificateur ne pourra pas le contrôler. Pour \
+permettre une commande ou fixer les contrôles, termine ta réponse par un bloc atelier-outils, \
+seul ou avant le bloc de plan. La personne l'accepte d'un clic au tableau de bord ; il prend \
+effet aussitôt, même en plein chantier, et l'atelier l'enregistre dans chantier/profil.json. \
+Ne demande jamais de modifier ce fichier à la main. Forme :
+```atelier-outils
+{"commandes_permises": ["uv"], "commandes": ["uv run ruff check .", "uv run pytest -q"], \
+"pourquoi": "..."}
+```
+« commandes_permises » s'ajoute à ce qui est déjà permis ; « commandes » remplace la liste des \
+contrôles. Chacune de ces deux clés peut être omise.
 
 Quand l'objectif est assez clair pour être découpé, termine ta réponse par un bloc de plan. \
 S'il manque une information qui change le découpage, pose une seule question à la place. Tant \
@@ -183,6 +199,15 @@ def extraire_plan(texte: str) -> tuple[str, dict | None]:
     if not balise:
         return texte.strip(), None
     return avant.strip(), dernier_json(apres.split("```")[0])
+
+
+def extraire_outils(texte: str) -> tuple[str, dict | None]:
+    """Retire de la réponse le bloc de réglage des outils, s'il y en a un, et le rend à part."""
+    avant, balise, apres = texte.partition(BALISE_OUTILS)
+    if not balise:
+        return texte, None
+    contenu, _, suite = apres.partition("```")
+    return (avant.rstrip() + "\n\n" + suite.lstrip()).strip(), dernier_json(contenu)
 
 
 def dernier_json(texte: str) -> dict | None:

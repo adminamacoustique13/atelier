@@ -12,7 +12,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from atelier import dosage
-from atelier.consignes import BALISE_PLAN, extraire_plan, message_avec_etat
+from atelier.consignes import (
+    BALISE_OUTILS,
+    BALISE_PLAN,
+    extraire_outils,
+    extraire_plan,
+    message_avec_etat,
+)
 from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire_cahier
 from atelier.moteur import Moteur, taches_du_plan
 
@@ -85,6 +91,9 @@ def vue(chantier: Chantier, en_marche: bool, mode: str, occupe=False, brouillon=
     return donnees
 
 
+ACCEPTER_OUTILS, REFUSER_OUTILS = "Accepter ce réglage", "Refuser"
+
+
 class Atelier:
     """Relie un dépôt, un chantier, le moteur et le tableau de bord."""
 
@@ -116,7 +125,7 @@ class Atelier:
     def vue(self) -> dict:
         with self.moteur.verrou:
             brouillon = {
-                "texte": self.brouillon["texte"].split(BALISE_PLAN)[0],
+                "texte": self.brouillon["texte"].split(BALISE_PLAN)[0].split(BALISE_OUTILS)[0],
                 "outils": list(self.brouillon["outils"]),
             }
             donnees = vue(self.moteur.chantier, self.en_marche(), self.mode, self.occupe, brouillon)
@@ -148,8 +157,82 @@ class Atelier:
         self.lancer()
 
     def decider(self, demande_id: str, choix: str) -> None:
+        demande = next(d for d in self.moteur.chantier.demandes if d["id"] == demande_id)
+        if demande.get("nature") == "outils":
+            return self._regler_outils(demande, choix)
         self.moteur.repondre(demande_id, choix)
         self.lancer()
+
+    # --- les outils du projet ----------------------------------------------------
+
+    def _proposer_outils(self, outils: dict) -> None:
+        """Transforme un réglage d'outils proposé par l'orchestrateur en décision à prendre."""
+
+        def liste(cle: str) -> list[str] | None:
+            valeur = outils.get(cle)
+            if not isinstance(valeur, list):
+                return None
+            return [v.strip() for v in valeur if isinstance(v, str) and v.strip()]
+
+        permises, controles = liste("commandes_permises"), liste("commandes")
+        if not permises and controles is None:
+            return self._dire("(Le réglage d'outils proposé était illisible : rien n'a changé.)")
+        parties = ["L'orchestrateur propose de régler les outils du projet."]
+        if permises:
+            parties.append("Commandes permises aux agents : " + ", ".join(permises) + ".")
+        if controles is not None:
+            rejoues = " ; ".join(controles) if controles else "aucun"
+            parties.append(f"Contrôles rejoués par l'atelier après chaque livrable : {rejoues}.")
+        if str(outils.get("pourquoi") or "").strip():
+            parties.append(f"Pourquoi : {str(outils['pourquoi']).strip()}")
+        with self.moteur.verrou:
+            demandes = self.moteur.chantier.demandes
+            demandes.append(
+                {
+                    "id": f"outils-{len(demandes) + 1}",
+                    "tache": None,
+                    "nature": "outils",
+                    "question": " ".join(parties),
+                    "options": [ACCEPTER_OUTILS, REFUSER_OUTILS],
+                    "reponse": None,
+                    "outils": {"commandes_permises": permises, "commandes": controles},
+                }
+            )
+
+    def _regler_outils(self, demande: dict, choix: str) -> None:
+        """Applique (ou écarte) un réglage d'outils, l'écrit dans le profil et le fait valoir."""
+        with self.moteur.verrou:
+            if demande["reponse"] is not None:
+                return
+            demande["reponse"] = choix
+        if choix != ACCEPTER_OUTILS:
+            return self._dire("Réglage des outils écarté : rien n'a changé.")
+        chemin = self.depot / "chantier" / "profil.json"
+        fichier = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
+        actuelles = fichier.get(
+            "commandes_permises", self.moteur.profil.get("commandes_permises", [])
+        )
+        permises = list(
+            dict.fromkeys([*actuelles, *(demande["outils"]["commandes_permises"] or [])])
+        )
+        fichier["commandes_permises"] = permises
+        if demande["outils"]["commandes"] is not None:
+            fichier["commandes"] = demande["outils"]["commandes"]
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text(json.dumps(fichier, ensure_ascii=False, indent=2) + "\n", "utf-8")
+        # Le même profil est lu par l'atelier, le moteur et les agents : tous suivent tout de suite.
+        lus = (self.moteur.profil, getattr(self.moteur.agent, "profil", None))
+        for profil in {id(p): p for p in lus if isinstance(p, dict)}.values():
+            profil["commandes_permises"] = permises
+            if "commandes" in fichier:
+                profil["commandes"] = fichier["commandes"]
+        if hasattr(self.moteur.controles, "regler_outils"):
+            self.moteur.controles.regler_outils(fichier)
+        self._dire(
+            "Outils réglés. Commandes permises aux agents : " + ", ".join(permises) + ". "
+            "Une tâche revenue vers toi peut maintenant être relancée."
+        )
+        self._sauver()
 
     # --- la conversation ---------------------------------------------------------
 
@@ -182,6 +265,10 @@ class Atelier:
         chantier = self.moteur.chantier
         lignes = [point_d_etape(chantier, self.en_marche())]
         lignes += [f"- {t.id} {t.titre} : {ETATS_FR.get(t.etat, t.etat)}" for t in chantier.taches]
+        permises = ", ".join(self.moteur.profil.get("commandes_permises", [])) or "aucune"
+        lignes.append(f"Commandes permises aux agents : {permises}")
+        rejoues = " ; ".join(self.moteur.profil.get("commandes", [])) or "aucun"
+        lignes.append(f"Contrôles rejoués par l'atelier après chaque livrable : {rejoues}")
         controles = self.moteur.controles
         if hasattr(controles, "distant"):
             adresse = controles.distant()
@@ -221,11 +308,14 @@ class Atelier:
         """Affiche la réponse de l'orchestrateur et, s'il rend un plan, prépare le contrat."""
         if not reponse.ok:
             return self._dire(f"Je n'ai pas pu joindre Claude Code. {reponse.erreur}")
-        texte, plan = extraire_plan(reponse.texte)
+        texte, outils = extraire_outils(reponse.texte)
+        texte, plan = extraire_plan(texte)
         with self.moteur.verrou:
             self.moteur.chantier.cout_usd += reponse.cout_usd
             self.moteur.chantier.tokens += reponse.tokens
         self._dire(texte or "Voici le plan.")
+        if outils:
+            self._proposer_outils(outils)
         if plan:
             self._adopter(plan, demande)
 

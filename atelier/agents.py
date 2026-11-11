@@ -115,7 +115,8 @@ class AgentClaude:
             "--effort", "high",
             "--output-format", "stream-json", "--verbose", "--include-partial-messages",
             "--append-system-prompt", ROLE_ORCHESTRATEUR,
-            "--allowedTools", *self._outils(lecture_seule=True),
+            # En conversation : lecture seule, sans les commandes du projet (qui exécutent du code).
+            "--allowedTools", *OUTILS_LECTURE, *GIT_LECTURE,
             "--disallowedTools", *OUTILS_ECRITURE,
             *(["--resume", session] if reprise else ["--session-id", session]),
         ]  # fmt: skip
