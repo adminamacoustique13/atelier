@@ -87,7 +87,7 @@ Pendant qu'un agent travaille :
 - Toute phrase qui t'a paru fausse, obscure ou en trop.
 - Tout ce qui t'a surpris, même si tu ne sais pas si c'est un défaut.
 
-## Deux limites connues
+## Deux points d'attention
 
-- Si tu changes ta façon de te connecter pendant qu'Atelier tourne (par exemple avec `/login`), le fil ne le redit qu'après une relance d'Atelier : `launchctl kickstart -k gui/$(id -u)/fr.atelier.serveur`, ou relance `./outils/installer-mac.sh`. Une petite tâche est ouverte pour corriger ce point.
+- Si tes commits git sont signés par une clé qui demande une saisie (une phrase secrète, une clé matérielle), dis-le-moi avant l'essai : Atelier enregistre le travail vérifié par git, sans terminal pour répondre à cette demande, et cela n'a pas pu être essayé.
 - Les commandes `launchctl` du LISEZMOI ont été écrites d'après la documentation de macOS, sans avoir pu être essayées : dis-moi si l'une d'elles ne marche pas.

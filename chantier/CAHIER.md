@@ -1,6 +1,6 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). Restent E.1, D3 et G.
+État général : contrat validé le 2026-11-11, amendé plusieurs fois le même jour (voir `chantier/CONTRAT.md`). A, B, C, H, D1, I, E et D2 sont vérifiées : la branche est prête pour le premier essai réel (voir `chantier/ESSAI-MAC.md`). E.1 est vérifiée aussi. Restent D3a, D3b et G.
 
 ## Suivi
 
@@ -20,7 +20,7 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | D3a | à lancer, après E.1 | Opus, effort élevé | Fable, complète | 0 | |
 | D3b | à lancer, après D3a | Sonnet, effort moyen | bornée | 0 | |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
-| E.1 | en vérification | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | 457 tests verts cinq fois de suite ; test exhaustif de 6 174 enchaînements |
+| E.1 | vérifié | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | Validé du premier coup : 457 tests verts ; 29 870 enchaînements du vérificateur sans écart, et 111 110 pour R1 et R2 |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
@@ -80,6 +80,11 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 - Seconde chance (même ouvrier, même niveau) : les trois défauts sont corrigés, l'essai passe de 67 à 89 vérifications et couvre maintenant « Toujours », l'identifiant envoyé, le double-clic et le journal long.
 - Seconde vérification, mécanique : l'essai relancé deux fois par l'orchestrateur, et les captures `D2-regles.png`, `D2-carte-conversation.png` et `D2-arret-confirmation.png` relues. Pas de vérificateur : décision de la personne responsable du 2026-11-11 de proportionner la vérification au risque. Tâche vérifiée.
 - À transmettre à D3 : pendant la proposition d'un plan, la ligne d'activité de l'orchestrateur montre le texte brut du plan ; c'est au serveur de couper cette ligne.
+
+### Historique de la tâche E.1
+- Vérification étroite : validé du premier coup. Le défaut de règle est levé dans les deux sens, une source inchangée ne coûte rien, une écriture qui échoue est retentée, aucun interblocage n'est possible.
+- Limite acceptée : la source est lue sur un attribut de l'agent commun à toutes ses sessions (`atelier/agents.py`). Deux sessions simultanées lancées de part et d'autre d'un changement de connexion peuvent se croiser ; le fil est alors corrigé par la session suivante. À reprendre si `agents.py` est rouvert : passer la source dans l'événement.
+- À dire à la personne responsable : Atelier enregistre le travail par git avec sa configuration à elle. Une signature des commits qui demande une saisie échouerait sans doute sous l'agent de lancement, qui n'a pas de terminal. Ajouté à `chantier/ESSAI-MAC.md`.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
