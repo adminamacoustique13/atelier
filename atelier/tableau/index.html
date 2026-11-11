@@ -297,6 +297,9 @@ td.droite, th.droite { text-align: right; }
 
 /* Autorisations et agents en marche */
 button.discret { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 400; background: transparent; color: var(--discret); }
+.maj-phrase { flex: none; margin: -4px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
+.maj-phrase .page { display: block; color: var(--faible); }
+#maj[disabled] { opacity: 0.6; cursor: default; }
 button.discret.confirme { color: var(--refus); border-color: color-mix(in srgb, var(--refus) 60%, transparent); font-weight: 500; }
 .autorisation { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .autor-corps { display: flex; flex-direction: column; gap: 6px; min-width: 0; cursor: pointer; border-radius: 8px; }
@@ -382,8 +385,10 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
       <a href="#plan" data-onglet="plan">Plan<span class="cpt" id="cpt-plan"></span></a>
     </nav>
     <div class="pousse"></div>
+    <button type="button" class="discret" id="maj" data-action="maj" hidden>Mettre à jour</button>
     <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="pastille-cout"></span><span id="mode"></span></div>
   </header>
+  <p class="maj-phrase" id="maj-phrase" role="status" hidden></p>
 
   <section class="accueil" aria-label="Accueil">
     <article class="carte">
@@ -1010,6 +1015,7 @@ function afficherAccueil(vue) {
 
 function afficher(vue) {
   derniere = vue;
+  afficherMaj(vue);
   document.querySelector(".app").classList.toggle("sans-projet", Boolean(vue.aucun_projet));
   if (vue.aucun_projet) return afficherAccueil(vue);
   const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
@@ -1142,6 +1148,81 @@ async function arreter(cle, tache) {
   if (retour) dire(retour.phrase); else if (!rejoue) dire("L'arrêt n'est pas parti. Réessaie dans un instant.");
 }
 
+
+/* Le bouton « Mettre à jour » : le serveur dit s'il y a une mise à jour (vue.mise_a_jour.disponible). Le premier
+   clic arme le bouton cinq secondes (« Confirmer la mise à jour »), le second lance la mise à jour. Si elle a
+   réussi, Atelier s'arrête et son agent de lancement le relance : la page attend son retour sans alarme. */
+const DELAI_RETOUR = 2500, PATIENCE_RETOUR = 120000; // ms : un retour plus rapide n'est pas encore un redémarrage
+let majArmee = false, majArmeeLe = 0, minuteMaj = null, majEnvoi = false, majPhrase = "", minutePhrase = null, majAttente = null;
+
+const majDisponible = (vue) => Boolean(vue && vue.mise_a_jour && vue.mise_a_jour.disponible === true);
+function afficherMaj(vue) {
+  const bouton = document.getElementById("maj"), zone = document.getElementById("maj-phrase");
+  const actif = Boolean(majEnvoi || majAttente);
+  bouton.hidden = !majDisponible(vue) && !actif;
+  bouton.disabled = actif;
+  bouton.classList.toggle("confirme", majArmee && !actif);
+  bouton.textContent = majAttente ? "Redémarrage" : majEnvoi ? "Mise à jour en cours" : majArmee ? "Confirmer la mise à jour" : "Mettre à jour";
+  bouton.title = majArmee ? "Clique encore pour mettre Atelier à jour et le redémarrer, sinon la demande est annulée."
+    : "Met Atelier à jour depuis le dépôt en ligne, puis le redémarre.";
+  const lignes = [majPhrase ? propre(majPhrase) : "",
+    majAttente ? `<span class="page">Atelier redémarre : cette page reprendra dès qu'il répondra.</span>` : ""].filter(Boolean);
+  zone.hidden = !lignes.length;
+  zone.innerHTML = lignes.join("");
+}
+function direMaj(texte, duree = 15000) {
+  majPhrase = texte;
+  clearTimeout(minutePhrase);
+  if (texte && duree) minutePhrase = setTimeout(() => { majPhrase = ""; afficherMaj(derniere); }, duree);
+  afficherMaj(derniere);
+}
+/* Appelée à chaque réponse du serveur : Atelier est-il revenu après son redémarrage ? */
+function majRetour() {
+  if (!majAttente) return;
+  const coupure = majAttente.coupure;
+  if (!coupure && performance.now() - majAttente.depuis < DELAI_RETOUR) return; // l'ancien processus répond peut-être encore
+  majAttente = null;
+  if (coupure) direMaj("Atelier est revenu sur son nouveau code.");
+  else direMaj(majPhrase);
+}
+/* Appelée quand le serveur ne répond pas : rend vrai si c'est attendu (pas d'erreur à montrer). */
+function majCoupure() {
+  if (!majAttente) return false;
+  majAttente.coupure = true;
+  if (performance.now() - majAttente.depuis > PATIENCE_RETOUR) {
+    majAttente = null;
+    direMaj("Atelier n'est pas revenu. Relance-le à la main : le LISEZMOI explique comment.", 0);
+    return false;
+  }
+  afficherMaj(derniere);
+  return true;
+}
+async function mettreAJour() {
+  if (majEnvoi || majAttente) return;
+  if (!majArmee) {
+    majArmee = true; majArmeeLe = performance.now();
+    clearTimeout(minuteMaj);
+    minuteMaj = setTimeout(() => { majArmee = false; afficherMaj(derniere); }, 5000);
+    return afficherMaj(derniere);
+  }
+  if (performance.now() - majArmeeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
+  clearTimeout(minuteMaj); majArmee = false;
+  if (rejoue) return direMaj("Démonstration rejouée : il n'y a rien à mettre à jour.");
+  majEnvoi = true;
+  direMaj("");
+  let donnees = null;
+  try {
+    const retour = await fetch("/api/mise-a-jour", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    if (retour.ok) donnees = await retour.json();
+  } catch (erreur) { donnees = null; }
+  majEnvoi = false;
+  const faite = donnees && donnees.mise_a_jour_faite;
+  if (!faite || typeof faite.phrase !== "string") return direMaj("La demande n'est pas partie. Réessaie dans un instant.");
+  if (faite.fait === true && donnees.mode !== "démonstration") majAttente = { depuis: performance.now(), coupure: false };
+  if (Array.isArray(donnees.taches) || donnees.aucun_projet) afficher(donnees);
+  direMaj(faite.phrase, majAttente ? 0 : 15000);
+}
+
 function agir(cible) {
   const action = cible.dataset.action;
   if (action === "valider") envoyer("/api/contrat/valider");
@@ -1153,6 +1234,7 @@ function agir(cible) {
   if (action === "detail") { const id = cible.dataset.id; if (details.has(id)) details.delete(id); else details.add(id); rafraichir(); }
   if (action === "derouler") { const nom = cible.dataset.nom; if (deroules.has(nom)) deroules.delete(nom); else deroules.add(nom); rafraichir(); }
   if (action === "mode") choisirMode(cible.dataset.mode);
+  if (action === "maj") mettreAJour();
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();
@@ -1196,8 +1278,11 @@ async function charger() {
   try {
     const retour = await fetch("/api/etat", { cache: "no-store" });
     if (!retour.ok) throw new Error("pas de serveur");
-    afficher(await retour.json());
+    const vue = await retour.json();
+    majRetour();
+    afficher(vue);
   } catch (erreur) {
+    if (majCoupure()) return; // Atelier redémarre : rien d'alarmant à dire
     if (INSTANTANES.length) {
       rejoue = true;
       afficher(INSTANTANES[0]);

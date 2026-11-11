@@ -5,6 +5,7 @@ Aucun appel réel : des agents simulés, un guichet de l'atelier, et le vrai ser
 """
 
 import json
+import pathlib
 import sys
 import threading
 import time
@@ -14,10 +15,13 @@ from argparse import Namespace
 
 import pytest
 
+from atelier import mise_a_jour as mise_a_jour_module
 from atelier.__main__ import commande_instantanes, projet_simule
 from atelier.agents import AgentClaude, AgentSimule, Resultat
 from atelier.controles import ControlesSimules
 from atelier.guichet import Guichet
+from atelier.mise_a_jour import Etat, MiseAJour, MiseAJourSimulee
+from atelier.mise_a_jour import Resultat as ResultatMaj
 from atelier.modele import Chantier, Contrat, Tache
 from atelier.moteur import Moteur
 from atelier.projets import Projets
@@ -25,6 +29,7 @@ from atelier.serveur import (
     ACCEPTER_OUTILS,
     Activite,
     Atelier,
+    SuiviMiseAJour,
     creer_serveur,
     point_d_etape,
     statistiques,
@@ -1436,3 +1441,319 @@ def test_une_retombee_qui_revient_apres_un_nouveau_choix_est_redite(tmp_path):
     finally:
         pas["n"] = 5
         fil.join(5)
+
+
+# --- La mise à jour d'Atelier : aucun git, aucun réseau, aucun arrêt réel -----------------------
+
+PHRASE_REDEMARRAGE = (
+    "Atelier a été mis à jour. Il redémarre ; s'il ne revient pas dans quelques secondes, "
+    "relance-le à la main."
+)
+PHRASE_DEJA_EN_COURS = "Une mise à jour est déjà en cours. Patiente un instant."
+PHRASE_AGENT = "Mise à jour impossible : un agent travaille. Réessaie quand il aura fini."
+
+
+class FausseMiseAJour:
+    """Joue l'objet de mise à jour : note chaque appel, rend ce qu'on lui a préparé."""
+
+    def __init__(self, disponible=True, resultat=None, bloquer=None):
+        self.disponible = disponible
+        self.resultat = resultat or ResultatMaj(True, "Atelier a été mis à jour. Il va redémarrer.")
+        self.bloquer = bloquer  # un événement : mettre_a_jour attend qu'on le libère
+        self.verifications = []  # le fil de chaque appel de verifier
+        self.mises_a_jour = []  # l'argument « agent au travail » de chaque appel
+        self.entree = threading.Event()
+
+    def verifier(self):
+        self.verifications.append(threading.current_thread())
+        return Etat(self.disponible, "Une mise à jour d'Atelier est disponible.", True)
+
+    def mettre_a_jour(self, agent_au_travail):
+        self.mises_a_jour.append(agent_au_travail)
+        self.entree.set()
+        if self.bloquer:
+            self.bloquer.wait(5)
+        return self.resultat
+
+
+@pytest.fixture(autouse=True)
+def pas_de_vrai_git_pour_la_mise_a_jour(monkeypatch):
+    """Garde-fou : aucun test de ce fichier ne peut lancer git dans le module de mise à jour."""
+
+    def interdit(*arguments, **options):
+        pytest.fail("un test a appelé git pour la mise à jour")
+
+    monkeypatch.setattr(mise_a_jour_module, "_git", interdit)
+
+
+class TableauMaj(Tableau):
+    """Un serveur HTTP réel avec des projets (zéro, un ou plusieurs) et un suivi de mise à jour."""
+
+    def __init__(self, ateliers, racine, suivi):
+        self.atelier = ateliers[0] if ateliers else None
+        projets = Projets(racine, lambda dossier, nom: None)
+        for atelier in ateliers:
+            projets.ajouter(atelier)
+        self.serveur = creer_serveur(projets, 0, suivi)
+        self.port = self.serveur.server_address[1]
+        threading.Thread(target=self.serveur.serve_forever, args=(0.01,), daemon=True).start()
+
+    def fermer(self):
+        self.serveur.shutdown()
+        self.serveur.server_close()
+
+
+@pytest.fixture
+def maj_servie(tmp_path):
+    """Monte un serveur dont le suivi tient une fausse mise à jour ; nettoie à la fin."""
+    ouverts = []
+
+    def monter(faux=None, ateliers=None, arreter="espion", demarrer=True):
+        faux = faux or FausseMiseAJour()
+        arrets = []
+        if arreter == "espion":
+            arreter = lambda: arrets.append(1)  # noqa: E731
+        suivi = SuiviMiseAJour(faux, arreter, pause_s=1000)
+        if ateliers is None:
+            ateliers = [atelier_simule(tmp_path / "un")]
+        tableau = TableauMaj(ateliers, tmp_path, suivi)
+        ouverts.append((tableau, suivi))
+        if demarrer:
+            suivi.demarrer()
+            assert attendre(lambda: suivi.etat is not None)
+        return tableau, suivi, faux, arrets
+
+    yield monter
+    for tableau, suivi in ouverts:
+        suivi.finir()
+        tableau.fermer()
+
+
+def fil_de(atelier):
+    return [e["texte"] for e in atelier.moteur.chantier.evenements]
+
+
+def test_la_vue_porte_la_mise_a_jour_lue_dans_l_etat_garde(maj_servie):
+    tableau, suivi, _, _ = maj_servie()
+    assert tableau.etat()["mise_a_jour"] == {
+        "disponible": True, "phrase": "Une mise à jour d'Atelier est disponible."}
+    suivi.etat = Etat(False, "Atelier est à jour.", True)
+    assert tableau.etat()["mise_a_jour"] == {"disponible": False, "phrase": "Atelier est à jour."}
+
+
+def test_avant_la_premiere_reponse_le_bouton_n_apparait_pas(maj_servie):
+    tableau, _, faux, _ = maj_servie(demarrer=False)
+    assert tableau.etat()["mise_a_jour"] == {"disponible": False, "phrase": ""}
+    assert faux.verifications == []
+
+
+def test_seul_le_fil_demon_appelle_verifier_jamais_la_vue(maj_servie):
+    tableau, _, faux, _ = maj_servie()
+    for _ in range(3):
+        tableau.etat()
+        tableau.appeler("/api/message", {"texte": ""})
+    assert len(faux.verifications) == 1
+    fil = faux.verifications[0]
+    assert fil.daemon and fil is not threading.current_thread()
+
+
+def test_la_mise_a_jour_est_dans_la_vue_meme_sans_projet(maj_servie):
+    tableau, _, _, _ = maj_servie(ateliers=[])
+    vue = tableau.etat()
+    assert vue["aucun_projet"] is True
+    assert vue["mise_a_jour"]["disponible"] is True
+
+
+def test_un_serveur_sans_suivi_dit_pas_de_mise_a_jour_et_refuse_la_route(tableau, tmp_path):
+    serveur = tableau(atelier_simule(tmp_path / "un"))
+    assert serveur.etat()["mise_a_jour"] == {"disponible": False, "phrase": ""}
+    code, reponse = serveur.appeler("/api/mise-a-jour")
+    assert code == 400 and "erreur" in reponse
+
+
+@pytest.mark.parametrize("cas", ["chantier", "orchestrateur"])
+def test_un_agent_au_travail_empeche_la_mise_a_jour_et_le_fil_dit_pourquoi(
+        maj_servie, cas, tmp_path):
+    atelier = atelier_simule(tmp_path / "un")
+    liberer = threading.Event()
+    if cas == "chantier":
+        atelier.fil = threading.Thread(target=liberer.wait, args=(5,), daemon=True)
+        atelier.fil.start()
+    else:
+        atelier.occupe = True
+    faux = FausseMiseAJour(resultat=ResultatMaj(False, PHRASE_AGENT))
+    tableau, _, faux, arrets = maj_servie(faux, [atelier])
+    try:
+        code, vue = tableau.appeler("/api/mise-a-jour")
+    finally:
+        liberer.set()
+    assert code == 200
+    assert faux.mises_a_jour == [True]
+    assert vue["mise_a_jour_faite"] == {"fait": False, "phrase": PHRASE_AGENT}
+    assert fil_de(atelier)[-1] == PHRASE_AGENT
+    assert arrets == []
+
+
+def test_un_agent_dans_un_autre_projet_ouvert_compte_aussi(maj_servie, tmp_path):
+    affiche = atelier_simule(tmp_path / "affiche")
+    autre = atelier_simule(tmp_path / "autre")
+    autre.occupe = True
+    faux = FausseMiseAJour(resultat=ResultatMaj(False, PHRASE_AGENT))
+    tableau, _, faux, arrets = maj_servie(faux, [affiche, autre])
+    tableau.appeler("/api/mise-a-jour")
+    assert faux.mises_a_jour == [True]
+    assert fil_de(affiche)[-1] == PHRASE_AGENT
+    assert PHRASE_AGENT not in fil_de(autre)
+    assert arrets == []
+
+
+def test_sans_agent_au_travail_la_mise_a_jour_est_lancee_puis_le_processus_s_arrete(
+        maj_servie):
+    recue = threading.Event()
+    constats = []
+    arrets = []
+
+    def arreter():
+        constats.append(recue.wait(5))  # la réponse a-t-elle atteint la page avant l'arrêt ?
+        arrets.append(1)
+
+    faux = FausseMiseAJour()
+    tableau, _, faux, _ = maj_servie(faux, arreter=arreter)
+    code, vue = tableau.appeler("/api/mise-a-jour")  # reçue pendant que l'arrêt attend
+    recue.set()
+    assert code == 200
+    assert vue["mise_a_jour_faite"] == {"fait": True, "phrase": PHRASE_REDEMARRAGE}
+    assert vue["mise_a_jour"]["disponible"] is True  # la vue complète accompagne la réponse
+    assert faux.mises_a_jour == [False]
+    assert attendre(lambda: arrets == [1])
+    assert constats == [True]
+    assert fil_de(tableau.atelier)[-1] == PHRASE_REDEMARRAGE
+
+
+def test_un_echec_ne_change_rien_ne_s_arrete_pas_et_le_fil_explique(maj_servie, capsys):
+    phrase = "Mise à jour impossible : le dépôt en ligne ne répond pas."
+    faux = FausseMiseAJour(resultat=ResultatMaj(False, phrase, "fatal: unable to access 'x'"))
+    tableau, _, faux, arrets = maj_servie(faux)
+    code, vue = tableau.appeler("/api/mise-a-jour")
+    assert code == 200
+    assert vue["mise_a_jour_faite"] == {"fait": False, "phrase": phrase}
+    assert fil_de(tableau.atelier)[-1] == phrase
+    assert arrets == []
+    assert tableau.etat()["en_marche"] is False  # Atelier continue de répondre
+
+
+def test_le_detail_va_au_journal_et_jamais_dans_la_vue_ni_le_fil(maj_servie, capsys):
+    detail = "fatal: détail brut de git"
+    faux = FausseMiseAJour(resultat=ResultatMaj(False, "Mise à jour impossible : git.", detail))
+    tableau, _, _, _ = maj_servie(faux)
+    _, vue = tableau.appeler("/api/mise-a-jour")
+    assert detail in capsys.readouterr().err
+    assert detail not in json.dumps(vue, ensure_ascii=False)
+    assert detail not in json.dumps(fil_de(tableau.atelier), ensure_ascii=False)
+
+
+def test_une_seule_mise_a_jour_a_la_fois(maj_servie):
+    liberer = threading.Event()
+    faux = FausseMiseAJour(bloquer=liberer)
+    tableau, _, faux, arrets = maj_servie(faux)
+    premiere = []
+    fil = threading.Thread(
+        target=lambda: premiere.append(tableau.appeler("/api/mise-a-jour")), daemon=True)
+    fil.start()
+    assert faux.entree.wait(5)
+    code, vue = tableau.appeler("/api/mise-a-jour")  # pendant la première : rend tout de suite
+    assert code == 200
+    assert vue["mise_a_jour_faite"] == {"fait": False, "phrase": PHRASE_DEJA_EN_COURS}
+    assert faux.mises_a_jour == [False]
+    liberer.set()
+    fil.join(5)
+    assert premiere[0][1]["mise_a_jour_faite"]["fait"] is True
+    assert attendre(lambda: arrets == [1])
+    assert faux.mises_a_jour == [False]  # le second clic n'a rien lancé
+
+
+def test_sans_fonction_d_arret_le_serveur_ne_s_arrete_pas_meme_si_fait_est_vrai(maj_servie):
+    tableau, _, faux, _ = maj_servie(arreter=None)
+    code, vue = tableau.appeler("/api/mise-a-jour")
+    assert code == 200
+    # Le double de la démonstration rend « fait » vrai : la phrase est la sienne, sans redémarrage.
+    assert vue["mise_a_jour_faite"] == {
+        "fait": True, "phrase": "Atelier a été mis à jour. Il va redémarrer."}
+
+
+def test_la_demonstration_passe_par_le_double_simule_et_ne_s_arrete_pas(tmp_path):
+    atelier = projet_simule(tmp_path / "demo", "Démo", 0.0)
+    suivi = SuiviMiseAJour(MiseAJourSimulee(), pause_s=1000)
+    serveur = TableauMaj([atelier], tmp_path, suivi)
+    try:
+        suivi.demarrer()
+        assert attendre(lambda: serveur.etat()["mise_a_jour"]["disponible"])
+        code, vue = serveur.appeler("/api/mise-a-jour")
+        assert code == 200
+        assert vue["mise_a_jour_faite"] == {
+            "fait": True, "phrase": "Mise à jour simulée : rien n'a changé."}
+        assert "Mise à jour simulée : rien n'a changé." in fil_de(atelier)
+        assert suivi.arreter is None
+        assert serveur.etat()["mise_a_jour"]["disponible"] is True  # le double l'annonce toujours
+    finally:
+        suivi.finir()
+        serveur.fermer()
+
+
+def test_la_route_sans_projet_ouvert_n_ecrit_au_fil_de_personne(maj_servie):
+    # Aucune ligne du fil n'est écrite sans projet ouvert, et rien ne plante.
+    faux = FausseMiseAJour(resultat=ResultatMaj(False, "Atelier est déjà à jour."))
+    tableau, _, _, arrets = maj_servie(faux, ateliers=[])
+    code, vue = tableau.appeler("/api/mise-a-jour")
+    assert code == 200
+    assert vue["mise_a_jour_faite"] == {"fait": False, "phrase": "Atelier est déjà à jour."}
+    assert arrets == []
+
+
+def monter_commande(monkeypatch, tmp_path):
+    """Remplace le serveur et les projets : on lit seulement ce que la commande y branche."""
+    from atelier import __main__ as principal
+
+    pris = {}
+
+    class FauxServeur:
+        def serve_forever(self):
+            pass
+
+    def fabriquer(projets, port, suivi=None):
+        pris["suivi"] = suivi
+        return FauxServeur()
+
+    monkeypatch.setattr(principal, "creer_serveur", fabriquer)
+    monkeypatch.setattr(SuiviMiseAJour, "demarrer", lambda self: pris.setdefault("demarre", True))
+    monkeypatch.setattr(principal, "monter_projets", lambda a: (Projets(tmp_path, None), tmp_path))
+    return principal, pris
+
+
+def test_servir_vise_le_dossier_d_atelier_et_s_arrete_par_la_fonction_d_arret(
+        monkeypatch, tmp_path):
+    principal, pris = monter_commande(monkeypatch, tmp_path)
+    principal.commande_servir(Namespace(port=0))
+    suivi = pris["suivi"]
+    assert isinstance(suivi.maj, MiseAJour)
+    racine = (pathlib.Path(principal.__file__).resolve().parent.parent)
+    assert suivi.maj.dossier == racine and (racine / "atelier").is_dir()
+    assert suivi.arreter is principal.arreter_le_processus
+    assert pris["demarre"] is True
+
+
+def test_la_demonstration_recoit_le_double_simule_sans_fonction_d_arret(monkeypatch, tmp_path):
+    principal, pris = monter_commande(monkeypatch, tmp_path)
+    monkeypatch.setattr(principal, "atelier_de_demonstration", lambda d: atelier_simule(tmp_path))
+    principal.commande_demo(Namespace(port=0, delai=0.0))
+    suivi = pris["suivi"]
+    assert isinstance(suivi.maj, MiseAJourSimulee) and suivi.arreter is None
+
+
+def test_la_fonction_d_arret_sort_avec_le_code_zero_apres_avoir_vide_les_sorties(monkeypatch):
+    from atelier import __main__ as principal
+
+    sorties = []
+    monkeypatch.setattr(principal.os, "_exit", lambda code: sorties.append(code))
+    principal.arreter_le_processus()
+    assert sorties == [0]

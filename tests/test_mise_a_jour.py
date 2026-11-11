@@ -313,6 +313,55 @@ def test_histoire_divergee_laisse_le_dossier_intact(depots):
     assert git(atelier, "status", "--porcelain") == ""
 
 
+def test_le_pull_tire_main_d_origin_et_pas_la_branche_amont(depots):
+    nu, atelier, collegue = depots
+    git(collegue, "checkout", "-q", "-b", "autre")
+    commit(collegue, "autre.txt", "autre")
+    git(collegue, "push", "-q", "origin", "autre")
+    git(atelier, "fetch", "-q", "origin")
+    git(atelier, "branch", "-q", "--set-upstream-to=origin/autre", "main")
+    avant = instantane(atelier)
+    resultat = maj_avec(atelier).mettre_a_jour(False)
+    assert resultat.fait is False
+    assert resultat.phrase == "Atelier est déjà à jour."
+    assert instantane(atelier) == avant
+    assert not (atelier / "autre.txt").exists()
+    publier(collegue_sur_main(collegue))
+    assert maj_avec(atelier).mettre_a_jour(False).fait is True
+    assert not (atelier / "autre.txt").exists()
+    assert (atelier / "b.txt").read_text("utf-8") == "deux"
+
+
+def collegue_sur_main(collegue):
+    git(collegue, "checkout", "-q", "main")
+    return collegue
+
+
+@pytest.mark.parametrize("erreur, divergence", [
+    ("fatal: Not possible to fast-forward, aborting.", True),
+    ("fatal: Need to specify how to reconcile divergent branches.", True),
+    ("hint: Diverging branches can't be fast-forwarded", True),
+    ("fatal: Cannot fast-forward to multiple branches.", False),
+])
+def test_la_divergence_n_est_reconnue_que_sur_ses_vrais_messages(
+        depots, monkeypatch, erreur, divergence):
+    _, atelier, _ = depots
+    vrai = mise_a_jour._git
+
+    def faux(dossier, *arguments):
+        if arguments[0] == "pull":
+            return 128, "", erreur
+        return vrai(dossier, *arguments)
+
+    monkeypatch.setattr(mise_a_jour, "_git", faux)
+    phrase = maj_avec(atelier).mettre_a_jour(False).phrase
+    attendue = ("Mise à jour impossible : l'histoire du dossier d'Atelier a divergé de celle "
+                "du dépôt en ligne.")
+    assert (phrase == attendue) is divergence
+    if not divergence:
+        assert phrase == "Mise à jour impossible : git n'a pas pu aller au bout."
+
+
 def test_depot_en_ligne_introuvable_laisse_le_dossier_intact(depots):
     nu, atelier, _ = depots
     git(atelier, "remote", "set-url", "origin", str(nu) + ".disparu")

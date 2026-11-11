@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import sys
 import threading
 import uuid
 from collections import deque
@@ -24,6 +25,7 @@ from atelier.consignes import (
     message_avec_etat,
 )
 from atelier.guichet import ARRETE, CHOIX, Guichet
+from atelier.mise_a_jour import Etat, Resultat
 from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire_cahier
 from atelier.moteur import ARRETEE, Moteur, taches_du_plan
 
@@ -774,6 +776,12 @@ class Atelier:
         self._dire(phrase)
         self._sauver()
 
+    def noter_au_fil(self, phrase: str) -> None:
+        """Écrit une phrase du moteur au fil du projet, et sauve l'état."""
+        with self.moteur.verrou:
+            self.moteur.chantier.noter(phrase)
+        self._sauver()
+
     # --- l'arrêt -----------------------------------------------------------------
 
     def arreter(self, tache=None) -> dict:
@@ -912,10 +920,84 @@ class Atelier:
             agent.perimetres = {t.id: t.perimetre for t in taches}
 
 
+PAUSE_VERIFICATION_S = 60  # `verifier` se limite seule à une interrogation par heure
+PHRASE_DEJA_EN_COURS = "Une mise à jour est déjà en cours. Patiente un instant."
+PHRASE_REDEMARRAGE = (
+    "Atelier a été mis à jour. Il redémarre ; s'il ne revient pas dans quelques secondes, "
+    "relance-le à la main."
+)
+
+
+class SuiviMiseAJour:
+    """La mise à jour d'Atelier côté serveur : un seul objet pour tout le serveur.
+
+    Un fil démon appelle `verifier()` et garde le dernier état ; la vue ne lit que cet état.
+    `arreter` est la fonction qui arrête le processus après une mise à jour réussie ; `None`
+    (démonstration, essais) : le serveur ne s'arrête jamais.
+    """
+
+    def __init__(self, maj, arreter=None, pause_s: float = PAUSE_VERIFICATION_S):
+        self.maj = maj
+        self.arreter = arreter
+        self.pause_s = pause_s
+        self.etat: Etat | None = None
+        self._verrou = threading.Lock()
+        self._fin = threading.Event()
+
+    def demarrer(self) -> threading.Thread:
+        fil = threading.Thread(target=self._boucle, daemon=True)
+        fil.start()
+        return fil
+
+    def _boucle(self) -> None:
+        while not self._fin.is_set():
+            self.etat = self.maj.verifier()
+            self._fin.wait(self.pause_s)
+
+    def finir(self) -> None:
+        """Arrête le fil de vérification (les essais)."""
+        self._fin.set()
+
+    def vue(self) -> dict:
+        etat = self.etat
+        return {"disponible": bool(etat and etat.disponible), "phrase": etat.phrase if etat else ""}
+
+    def lancer(self, projets) -> Resultat:
+        """Met à jour si aucun agent ne travaille et si aucune autre mise à jour n'est en cours."""
+        if not self._verrou.acquire(blocking=False):
+            return Resultat(False, PHRASE_DEJA_EN_COURS)
+        try:
+            travaille = any(a.en_marche() or a.occupe for a in list(projets.ateliers.values()))
+            resultat = self.maj.mettre_a_jour(travaille)
+        finally:
+            self._verrou.release()
+        if resultat.detail:
+            print(f"Mise à jour : {resultat.detail}", file=sys.stderr, flush=True)
+        if resultat.fait and self.arreter:
+            resultat = Resultat(True, PHRASE_REDEMARRAGE)
+        if projets.courant:
+            projets.atelier().noter_au_fil(resultat.phrase)
+        return resultat
+
+
 class Requetes(BaseHTTPRequestHandler):
     """Répond aux demandes du tableau de bord, pour le projet affiché."""
 
     projets = None  # les projets de l'atelier (atelier.projets.Projets)
+    suivi = None  # la mise à jour d'Atelier (SuiviMiseAJour), ou None
+    apres = None  # à faire une fois la réponse envoyée (l'arrêt après une mise à jour)
+
+    def vue(self) -> dict:
+        miseajour = self.suivi.vue() if self.suivi else {"disponible": False, "phrase": ""}
+        return {**self.projets.vue(), "mise_a_jour": miseajour}
+
+    def mettre_a_jour(self) -> dict:
+        if not self.suivi:
+            raise ProjetImpossible("La mise à jour n'est pas branchée sur ce serveur.")
+        resultat = self.suivi.lancer(self.projets)
+        if resultat.fait and self.suivi.arreter:
+            self.apres = self.suivi.arreter
+        return {"mise_a_jour_faite": {"fait": resultat.fait, "phrase": resultat.phrase}}
 
     @property
     def atelier(self) -> Atelier:
@@ -938,7 +1020,7 @@ class Requetes(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:
         if self.path == "/api/etat":
-            return self._json(self.projets.vue())
+            return self._json(self.vue())
         if self.path in ("/", "/index.html"):
             return self._repondre(200, PAGE.read_bytes(), "text/html")
         if self.path in ("/icone.png", "/apple-touch-icon.png", "/favicon.ico"):
@@ -961,7 +1043,10 @@ class Requetes(BaseHTTPRequestHandler):
             return self._json({"erreur": str(erreur)}, 400)
         except (KeyError, StopIteration, ValueError):
             return self._json({"erreur": "Demande introuvable ou incomplète."}, 400)
-        return self._json({**self.projets.vue(), **(en_plus or {})})
+        self._json({**self.vue(), **(en_plus or {})})
+        if self.apres:
+            self.wfile.flush()  # la page a sa réponse : le processus peut s'arrêter
+            self.apres()
 
 
 # Chaque route reçoit la requête et le corps lu ; elle peut rendre des champs de plus pour la
@@ -979,10 +1064,11 @@ ROUTES = {
     },
     "/api/arreter": lambda r, c: {"arret": r.atelier.arreter(c.get("tache"))},
     "/api/mode": lambda r, c: {"changement_mode": r.atelier.changer_mode(c["mode"])},
+    "/api/mise-a-jour": lambda r, c: r.mettre_a_jour(),
 }
 
 
-def creer_serveur(projets, port: int = 8765) -> ThreadingHTTPServer:
+def creer_serveur(projets, port: int = 8765, suivi=None) -> ThreadingHTTPServer:
     """Crée le serveur du tableau de bord, limité à la machine locale."""
-    gestionnaire = type("RequetesLiees", (Requetes,), {"projets": projets})
+    gestionnaire = type("RequetesLiees", (Requetes,), {"projets": projets, "suivi": suivi})
     return ThreadingHTTPServer(("127.0.0.1", port), gestionnaire)

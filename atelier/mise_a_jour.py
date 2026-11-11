@@ -27,6 +27,7 @@ _CAUSES = (  # (morceaux de la sortie de git, cause en mots simples), du plus pr
     (("does not appear to be a git repository", "not found", "could not read from remote",
       "no such remote"), "le dépôt en ligne est introuvable"),
 )
+_DIVERGENCE = ("not possible to fast-forward", "divergent branches", "diverging branches")
 _GENERIQUE = "git n'a pas pu aller au bout"
 _SANS_REPONSE = "le dépôt en ligne ne répond pas"
 
@@ -125,7 +126,7 @@ class MiseAJour:
         return Etat(True, "Une mise à jour d'Atelier est disponible.", True)
 
     def mettre_a_jour(self, agent_au_travail: bool) -> Resultat:
-        """`git pull --ff-only` dans le dossier d'Atelier, après les refus préalables."""
+        """`git pull --ff-only origin main` dans le dossier d'Atelier, après les refus."""
         try:
             refus = self._refus(agent_au_travail)
             return refus if refus else self._tirer()
@@ -155,10 +156,10 @@ class MiseAJour:
 
     def _tirer(self) -> Resultat:
         avant = _git(self.dossier, "rev-parse", "HEAD")[1]
-        code, sortie, erreur = _git(self.dossier, "pull", "--ff-only")
+        code, sortie, erreur = _git(self.dossier, "pull", "--ff-only", "origin", BRANCHE)
         detail = _nettoyer(sortie + "\n" + erreur)
         if code != 0:
-            if "fast-forward" in erreur.lower() or "diverg" in erreur.lower():
+            if any(m in erreur.lower() for m in _DIVERGENCE):
                 cause = "l'histoire du dossier d'Atelier a divergé de celle du dépôt en ligne"
             else:
                 cause = _cause(code, erreur)

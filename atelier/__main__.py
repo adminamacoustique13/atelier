@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -11,10 +13,11 @@ from pathlib import Path
 from atelier.agents import AgentClaude, AgentSimule
 from atelier.controles import ControlesSimules
 from atelier.guichet import Guichet
+from atelier.mise_a_jour import MiseAJour, MiseAJourSimulee
 from atelier.modele import Chantier, Contrat
 from atelier.moteur import RELANCER, planifier
 from atelier.projets import Projets, creer_depot, lire_profil, ouvrir_depot
-from atelier.serveur import PAGE, Atelier, creer_serveur
+from atelier.serveur import PAGE, Atelier, SuiviMiseAJour, creer_serveur
 
 OBJECTIF_DEMO = "Moteur de calcul : formules de la norme, validées sur les cas de référence."
 
@@ -92,7 +95,10 @@ def commande_demo(arguments) -> None:
     premier = atelier_de_demonstration(arguments.delai)
     projets = Projets(premier.depot.parent, lambda d, n: projet_simule(d, n, arguments.delai))
     projets.ajouter(premier)
-    serveur = creer_serveur(projets, arguments.port)
+    # Le double simulé : le bouton est visible, rien n'est appelé et le serveur ne s'arrête pas.
+    suivi = SuiviMiseAJour(MiseAJourSimulee())
+    suivi.demarrer()
+    serveur = creer_serveur(projets, arguments.port, suivi)
     print(f"Tableau de bord de démonstration : http://127.0.0.1:{arguments.port}")
     serveur.serve_forever()
 
@@ -138,9 +144,20 @@ def monter_projets(arguments) -> tuple[Projets, Path]:
     return projets, racine
 
 
+def arreter_le_processus() -> None:
+    """Sort avec le code 0 : l'agent de lancement (KeepAlive à vrai) relance Atelier."""
+    sys.stdout.flush()
+    sys.stderr.flush()
+    os._exit(0)
+
+
 def commande_servir(arguments) -> None:
     projets, racine = monter_projets(arguments)
-    serveur = creer_serveur(projets, arguments.port)
+    # La mise à jour vise le dossier d'Atelier lui-même (celui qui contient le paquet), jamais
+    # le dépôt d'un projet servi.
+    suivi = SuiviMiseAJour(MiseAJour(Path(__file__).resolve().parent.parent), arreter_le_processus)
+    suivi.demarrer()
+    serveur = creer_serveur(projets, arguments.port, suivi)
     print(f"Tableau de bord : http://127.0.0.1:{arguments.port}")
     print(f"Les nouveaux projets seront créés dans : {racine}")
     serveur.serve_forever()

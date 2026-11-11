@@ -64,6 +64,12 @@ Pour tout retirer : `./outils/desinstaller-mac.sh` (tes projets ne sont pas touc
 
 Le tableau de bord n'écoute que ton Mac (127.0.0.1). Le Mac doit rester allumé et éveillé pendant un chantier.
 
+## Mettre l'Atelier à jour
+
+Quand une nouvelle version de l'Atelier est publiée en ligne (la branche `main` du dépôt a avancé), un bouton « Mettre à jour » apparaît dans l'en-tête du tableau de bord, à droite. L'Atelier le vérifie au plus une fois par heure ; sans nouveauté, le bouton n'est pas là. Un premier clic arme le bouton (« Confirmer la mise à jour »), un second lance la mise à jour : l'Atelier récupère le nouveau code dans son propre dossier (un `git pull --ff-only` de `main`), puis s'arrête et se laisse relancer par macOS, qui le redémarre sur le nouveau code. La page attend son retour sans afficher d'erreur. Si tu l'as lancé à la main dans le Terminal (`python3 -m atelier servir`), il ne reviendra pas tout seul : relance-le.
+
+La mise à jour refuse parfois, et une phrase au fil et sous l'en-tête dit pourquoi : un agent travaille dans l'un des projets ouverts (réessaie quand il a fini) ; le dossier de l'Atelier contient des fichiers modifiés à la main ; le dossier n'est pas sur la branche `main` ; ou le dépôt en ligne ne répond pas. Dans tous ces cas rien ne change et l'Atelier continue de tourner. La mise à jour par le Terminal reste possible : dans le dossier de l'Atelier, `git pull`, puis relance-le. En démonstration, le bouton est visible mais simulé : rien n'est téléchargé et rien ne s'arrête. Cette mise à jour n'a pas été essayée sur un vrai Mac.
+
 ## La dépendance et la connexion
 
 Les agents passent par `claude-agent-sdk`, la bibliothèque d'Anthropic (licence MIT). Elle embarque son propre Claude Code : l'Atelier ne lance donc pas de commande `claude` à part, et la bibliothèque n'envoie de données qu'à Claude. La connexion par ton abonnement est conservée : si tu es connecté à ton compte Claude sur ce Mac, c'est lui qui est utilisé.
