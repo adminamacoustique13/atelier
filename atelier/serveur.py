@@ -177,13 +177,16 @@ LIGNES_MAX = 30  # lignes d'activité gardées par agent
 LARGEUR_MAX = 300  # caractères par ligne d'activité
 MORCEAU_MAX = LIGNES_MAX * LARGEUR_MAX  # de quoi remplir toutes les lignes : le reste est perdu
 AGENTS_MAX = 40  # agents gardés : au-delà, les plus anciens sont retirés
+SESSIONS_MAX = AGENTS_MAX  # sessions suivies pour la confirmation de connexion, de même
 
 
 class Activite:
     """Les dernières lignes d'activité de chaque agent en marche, en mémoire et bornées.
 
-    `ajouter` est le rappel `sur_evenement` des agents : il tourne dans la boucle de leur
-    session et ne fait que ranger l'événement, sous un verrou, sans rien écrire ni attendre.
+    `ajouter` est appelé par le rappel `sur_evenement` des agents, qui tourne dans la boucle de
+    leur session : il ne fait que ranger l'événement, sous un verrou, sans rien écrire ni
+    attendre. Hors démonstration, ce rappel est `Atelier._sur_evenement`, qui écrit en plus dans
+    le fil, rarement, une confirmation de la source de connexion.
     """
 
     def __init__(self):
@@ -271,7 +274,12 @@ class Atelier:
             agent.guichet = guichet
         agent.sur_evenement = self.activite.ajouter
         self._cle_presente = False
-        self._source_annoncee = True  # tant que `annoncer_connexion` n'a pas été appelée
+        # La dernière annonce de connexion du fil, telle que le rappel des agents la connaît ;
+        # vide si elle est inconnue (le fil sera relu). Elle n'est posée que sous `moteur.verrou`.
+        self._annonce_dite = ""
+        # Les sessions d'agent qui ont fait leur seule confirmation possible ; retirées au « fin ».
+        self._sessions_dites: dict[str, None] = {}
+        self._verrou_sessions = threading.Lock()  # ne protège que `_sessions_dites`
         self.fil: threading.Thread | None = None
         self.fil_message: threading.Thread | None = None
         self.occupe = False
@@ -302,33 +310,65 @@ class Atelier:
 
         En démonstration, rien n'est réel : une phrase suffit. Sinon la phrase dit seulement si la
         variable ANTHROPIC_API_KEY est dans l'environnement de l'Atelier, puis la vraie source est
-        annoncée dès qu'un agent l'a apprise. Le départ n'est écrit que s'il diffère du dernier
-        départ du fil ; la confirmation, que si la dernière annonce de connexion n'est pas déjà
-        elle : un simple redémarrage n'ajoute rien au fil.
+        annoncée dès qu'un agent l'a apprise, et de nouveau chaque fois qu'elle change. Le départ
+        n'est écrit que s'il diffère du dernier départ du fil ; la confirmation, que si la
+        dernière annonce de connexion n'est pas déjà elle : un simple redémarrage n'ajoute rien.
         """
         self._cle_presente = cle_api_presente(environnement)
         depart = annonce_de_depart(self.mode, self._cle_presente)
         self._noter_annonce(depart, DEPARTS + ANCIENNES_ANNONCES)
-        self._source_annoncee = self.mode == "démonstration"  # sinon : à confirmer plus tard
-        if not self._source_annoncee:
+        with self.moteur.verrou:
+            self._annonce_dite = ""  # le fil sera relu à la première source apprise
+        with self._verrou_sessions:
+            self._sessions_dites.clear()
+        if self.mode != "démonstration":  # en démonstration, aucune confirmation
             self.moteur.agent.sur_evenement = self._sur_evenement
         self._sauver()
 
     def _sur_evenement(self, evenement: dict) -> None:
-        """Rappel des agents : range l'activité, et annonce une fois la source de connexion."""
+        """Rappel des agents : range l'activité, et confirme la source de connexion si besoin.
+
+        Chaque session d'agent, de son premier événement à son « fin », confirme au plus une
+        fois : au premier de ses événements où la source est connue. Si la phrase est déjà la
+        dernière annonce connue, rien n'est fait de plus, sans verrou ni remontée du fil ;
+        sinon elle est écrite (`_confirmer`). Une écriture qui échoue est retentée à
+        l'événement suivant de la même session, « fin » compris.
+        """
         self.activite.ajouter(evenement)
-        if self._source_annoncee:
+        if not isinstance(evenement, dict):
             return
-        source = getattr(self.moteur.agent, "source_connexion", "")
-        phrase = annonce_de_source(source, self._cle_presente)
-        if not phrase:
-            return
-        with self.moteur.verrou:
-            if self._source_annoncee:
-                return
-            self._source_annoncee = True
-            self._noter_annonce(phrase, ANNONCES)
-        self._sauver()
+        nom = str(evenement.get("agent", ""))
+        if nom not in self._sessions_dites:
+            source = getattr(self.moteur.agent, "source_connexion", "")
+            phrase = annonce_de_source(source, self._cle_presente)
+            if phrase and (phrase == self._annonce_dite or self._confirmer(phrase)):
+                self._retenir_session(nom)
+        if evenement.get("type") == "fin" and nom in self._sessions_dites:
+            with self._verrou_sessions:
+                self._sessions_dites.pop(nom, None)
+
+    def _confirmer(self, phrase: str) -> bool:
+        """Écrit la confirmation selon R2 puis sauve ; rend False, sans lever, si cela échoue."""
+        try:
+            with self.moteur.verrou:
+                if self._annonce_dite != phrase:
+                    self._annonce_dite = ""  # inconnue tant que l'écriture n'a pas réussi
+                    self._noter_annonce(phrase, ANNONCES)
+                    self._annonce_dite = phrase
+            self._sauver()
+            return True
+        except Exception:
+            with self.moteur.verrou:
+                self._annonce_dite = ""  # relue au prochain essai : R2 évite tout doublon
+            return False
+
+    def _retenir_session(self, nom: str) -> None:
+        """Note que la session `nom` a confirmé ; au-delà de `SESSIONS_MAX`, oublie la plus
+        ancienne, qui pourrait alors confirmer une seconde fois."""
+        with self._verrou_sessions:
+            self._sessions_dites[nom] = None
+            while len(self._sessions_dites) > SESSIONS_MAX:
+                del self._sessions_dites[next(iter(self._sessions_dites))]
 
     def _sauver(self) -> None:
         with self.moteur.verrou:

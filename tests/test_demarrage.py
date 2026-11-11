@@ -175,11 +175,28 @@ def ouvrir(depot, variable, chantier=None):
     return atelier
 
 
+def fin(agent="A-ouvrier-1"):
+    return {"agent": agent, "type": "fin", "contenu": "L'agent a terminé."}
+
+
 def apprendre(atelier, source):
-    """La source arrive comme chez un vrai agent : posée sur l'agent, puis un événement."""
+    """Deux sessions simultanées apprennent la même source, comme chez un vrai agent.
+
+    La source est posée sur l'agent, puis chaque session envoie un événement, puis sa « fin ».
+    """
+    rappel = atelier.moteur.agent.sur_evenement
     atelier.moteur.agent.source_connexion = source
-    atelier.moteur.agent.sur_evenement(evenement())
-    atelier.moteur.agent.sur_evenement(evenement("B-ouvrier-1"))  # un second agent, en même temps
+    rappel(evenement())
+    rappel(evenement("B-ouvrier-1"))  # un second agent, en même temps
+    rappel(fin())
+    rappel(fin("B-ouvrier-1"))
+
+
+def session(atelier, source, nom="orchestrateur"):
+    """Une session d'agent : la source apprise, trois événements, puis sa « fin »."""
+    atelier.moteur.agent.source_connexion = source
+    for genre in ("texte", "outil", "fin"):
+        atelier.moteur.agent.sur_evenement({"agent": nom, "type": genre, "contenu": "Lit"})
 
 
 def annonces(fil):
@@ -242,17 +259,141 @@ def test_plusieurs_agents_apprennent_la_source_en_meme_temps(tmp_path):
         fil.join(timeout=5)
     assert not any(fil.is_alive() for fil in fils)
     assert textes(atelier)[avant:] == [CLE_SANS_VARIABLE]
-    assert len(appels) == 1  # le fil est parcouru une fois par ouverture, pas à chaque événement
+    assert len(appels) == 1  # le fil est relu une fois par source nouvelle, pas à chaque événement
 
 
-def test_une_seule_confirmation_par_ouverture_meme_si_la_source_change(tmp_path):
+def test_une_source_qui_change_dans_la_meme_ouverture_est_ecrite(tmp_path):
     atelier = ouvrir(tmp_path, False)
     apprendre(atelier, "abonnement")
-    apprendre(atelier, "clé API")  # la suivante attendra l'ouverture suivante
-    assert annonces(textes(atelier)) == [ATTENDUE, ABONNEMENT]
+    apprendre(atelier, "clé API")
+    apprendre(atelier, "clé API")  # inchangée : rien
+    assert annonces(textes(atelier)) == [ATTENDUE, ABONNEMENT, CLE_SANS_VARIABLE]
     atelier = ouvrir(tmp_path, False)
     apprendre(atelier, "clé API")
     assert annonces(textes(atelier)) == [ATTENDUE, ABONNEMENT, CLE_SANS_VARIABLE]
+
+
+def test_cle_api_annoncee_puis_reconnexion_l_agent_suivant_passe_par_l_abonnement(tmp_path):
+    # La personne lit qu'une clé inattendue est facturée, tape « /login » ou retire le réglage :
+    # la session suivante passe par l'abonnement, et le fil doit le dire sans redémarrage.
+    atelier = ouvrir(tmp_path, False)
+    session(atelier, "clé API")
+    assert textes(atelier)[-1] == CLE_SANS_VARIABLE
+    session(atelier, "abonnement", "A-ouvrier-1")
+    session(atelier, "abonnement")  # la conversation suivante, même source : rien
+    assert textes(atelier)[1:] == [ATTENDUE, CLE_SANS_VARIABLE, ABONNEMENT]
+    sauve = Chantier.charger(tmp_path / ".atelier" / "etat.json")
+    assert [e["texte"] for e in sauve.evenements] == textes(atelier)
+
+
+def test_abonnement_annonce_puis_une_cle_est_facturee_le_fil_le_dit(tmp_path):
+    for variable, avant, apres in ((False, ABONNEMENT, CLE_SANS_VARIABLE),
+                                   (True, ABONNEMENT_MALGRE_VARIABLE, CLE)):  # fmt: skip
+        atelier = ouvrir(tmp_path / str(variable), variable)
+        session(atelier, "abonnement")
+        session(atelier, "clé API")
+        assert annonces(textes(atelier))[-2:] == [avant, apres]
+
+
+def test_deux_sessions_simultanees_aux_sources_differentes_ne_font_pas_alterner(tmp_path):
+    atelier = ouvrir(tmp_path, False)
+    agent = atelier.moteur.agent
+    agent.source_connexion = "clé API"
+    agent.sur_evenement(evenement("X-ouvrier-1"))  # X parle la première
+    agent.source_connexion = "abonnement"
+    agent.sur_evenement(evenement("Y-ouvrier-1"))  # Y parle la dernière pour la première fois
+    for _ in range(5):  # la source lue sur l'agent suit la session qui parle
+        agent.source_connexion = "clé API"
+        agent.sur_evenement(evenement("X-ouvrier-1"))
+        agent.source_connexion = "abonnement"
+        agent.sur_evenement(evenement("Y-ouvrier-1"))
+    agent.sur_evenement(fin("X-ouvrier-1"))
+    agent.sur_evenement(fin("Y-ouvrier-1"))
+    assert textes(atelier)[1:] == [ATTENDUE, CLE_SANS_VARIABLE, ABONNEMENT]
+
+
+def test_un_message_intercale_ne_change_rien_aux_annonces(tmp_path):
+    atelier = ouvrir(tmp_path, True)
+    session(atelier, "abonnement")
+    atelier.moteur.chantier.noter("Tâche A vérifiée.")
+    session(atelier, "abonnement")  # la dernière annonce reste la même : rien
+    session(atelier, "clé API")
+    atelier.moteur.chantier.noter("Tâche B vérifiée.")
+    session(atelier, "clé API")
+    session(atelier, "abonnement")
+    assert textes(atelier)[1:] == [
+        CLE_PRESENTE,
+        ABONNEMENT_MALGRE_VARIABLE,
+        "Tâche A vérifiée.",
+        CLE,
+        "Tâche B vérifiée.",
+        ABONNEMENT_MALGRE_VARIABLE,
+    ]
+
+
+@pytest.mark.parametrize("etape", ["_noter_annonce", "_sauver"])
+def test_une_ecriture_qui_echoue_est_retentee_a_l_evenement_suivant(tmp_path, etape):
+    atelier = ouvrir(tmp_path, False)
+    vraie, echecs = getattr(atelier, etape), []
+
+    def fragile(*arguments):
+        if not echecs:
+            echecs.append(1)
+            raise OSError("disque plein")
+        return vraie(*arguments)
+
+    setattr(atelier, etape, fragile)
+    agent = atelier.moteur.agent
+    agent.source_connexion = "clé API"
+    agent.sur_evenement(evenement())  # l'écriture lève : le rappel, lui, ne lève pas
+    assert echecs == [1]
+    agent.sur_evenement(evenement())  # même session : la confirmation est retentée
+    agent.sur_evenement(evenement())
+    agent.sur_evenement(fin())
+    assert annonces(textes(atelier)) == [ATTENDUE, CLE_SANS_VARIABLE]
+    sauve = Chantier.charger(tmp_path / ".atelier" / "etat.json")
+    assert annonces([e["texte"] for e in sauve.evenements]) == [ATTENDUE, CLE_SANS_VARIABLE]
+
+
+class VerrouCompte:
+    """Un verrou réentrant qui compte ses prises."""
+
+    def __init__(self):
+        self.verrou, self.prises = threading.RLock(), 0
+
+    def __enter__(self):
+        self.prises += 1
+        return self.verrou.__enter__()
+
+    def __exit__(self, *erreur):
+        return self.verrou.__exit__(*erreur)
+
+
+def test_une_source_inchangee_ne_prend_aucun_verrou_ni_ne_relit_le_fil(tmp_path):
+    atelier = ouvrir(tmp_path, False)
+    session(atelier, "abonnement")
+    compte, appels = VerrouCompte(), []
+    atelier.moteur.verrou = compte
+    noter = atelier._noter_annonce
+    atelier._noter_annonce = lambda *arguments: (appels.append(1), noter(*arguments))
+    for numero in range(50):  # des sessions neuves, chacune de quelques événements
+        session(atelier, "abonnement", f"T{numero}-ouvrier-1")
+    assert (compte.prises, appels) == (0, [])
+    session(atelier, "clé API")  # une source nouvelle, elle, est écrite
+    assert appels == [1] and compte.prises > 0
+    assert textes(atelier)[-1] == CLE_SANS_VARIABLE
+
+
+def test_la_memoire_des_sessions_reste_bornee(tmp_path):
+    atelier = ouvrir(tmp_path, False)
+    atelier.moteur.agent.source_connexion = "abonnement"
+    for numero in range(1000):  # des sessions dont la « fin » n'arrive jamais
+        atelier.moteur.agent.sur_evenement(evenement(f"T{numero}-ouvrier-1"))
+    assert len(atelier._sessions_dites) == serveur.SESSIONS_MAX
+    for numero in range(1000):
+        atelier.moteur.agent.sur_evenement(fin(f"T{numero}-ouvrier-1"))
+    assert atelier._sessions_dites == {}
+    assert annonces(textes(atelier)) == [ATTENDUE, ABONNEMENT]
 
 
 def test_sans_variable_puis_avec_puis_sans_la_confirmation_promise_est_ecrite(tmp_path):
@@ -286,7 +427,9 @@ def test_un_redemarrage_identique_relu_sur_disque_n_ajoute_rien(tmp_path):
         assert annonces(avant)[-1] == (CLE if variable else CLE_SANS_VARIABLE)
 
 
-DEMARRAGES = [(v, s) for v in (False, True) for s in ("", "abonnement", "clé API")]
+SOURCES = ("", "abonnement", "clé API")
+# Un démarrage : la variable visible ou non, puis la source apprise par deux sessions successives.
+DEMARRAGES = [(v, (s1, s2)) for v in (False, True) for s1 in SOURCES for s2 in SOURCES]
 
 
 def promesse_en_attente(fil):
@@ -302,35 +445,45 @@ def relire(sauve):
     return Chantier.depuis_dict(json.loads(sauve)) if sauve else None
 
 
-def verifier_un_demarrage(depot, sauve, demarrage, precedent):
-    """Ouvre le projet sur l'état `sauve`, apprend la source, vérifie A, B, C et D.
-
-    Rend l'état sauvé à la fin de ce démarrage, tel que `Chantier.sauver` l'écrirait.
-    """
-    variable, source = demarrage
-    atelier = ouvrir(depot, variable, relire(sauve))
-    fil_ouvert = textes(atelier)
-    apprendre(atelier, source)
+def verifier_une_session(atelier, variable, source, precedente, promesse):
+    """Fait passer une session qui apprend `source`, puis vérifie A, C et D pour elle."""
+    avant = textes(atelier)
+    session(atelier, source)
     fil = textes(atelier)
+    if not source or source == precedente:
+        assert fil == avant  # C (et une source inconnue n'écrit rien)
     if source:
         confirmation = annonce_de_source(source, variable)
         assert annonces(fil)[-1] == confirmation  # A
-        if promesse_en_attente(fil_ouvert):
-            assert fil == [*fil_ouvert, confirmation]  # D : la promesse est tenue
-    else:
-        assert fil == fil_ouvert  # une source inconnue n'écrit rien
-    suite = annonces(fil)
+        if promesse:
+            assert fil == [*avant, confirmation]  # D : la promesse est tenue
+
+
+def verifier_un_demarrage(depot, sauve, demarrage, precedent):
+    """Ouvre le projet sur l'état `sauve`, fait passer ses deux sessions, vérifie A, B, C et D.
+
+    Rend l'état sauvé à la fin de ce démarrage, tel que `Chantier.sauver` l'écrirait.
+    """
+    variable, sources = demarrage
+    atelier = ouvrir(depot, variable, relire(sauve))
+    promesse, precedente = promesse_en_attente(textes(atelier)), ""
+    for source in sources:
+        verifier_une_session(atelier, variable, source, precedente, promesse)
+        promesse = promesse and not source
+        precedente = source or precedente
+    suite = annonces(textes(atelier))
     assert all(a != b for a, b in zip(suite, suite[1:], strict=False))  # B
-    if precedent == demarrage:
-        assert fil == [e["texte"] for e in relire(sauve).evenements]  # C : rien n'est ajouté
+    if precedent == demarrage and len(set(sources) - {""}) <= 1:  # C : rien n'a changé
+        assert textes(atelier) == [e["texte"] for e in relire(sauve).evenements]
     return json.dumps(atelier.moteur.chantier.en_dict(), ensure_ascii=False)
 
 
-def test_tous_les_enchainements_de_un_a_quatre_demarrages(tmp_path, monkeypatch):
-    """Parcourt l'arbre des enchaînements de un à quatre démarrages, sans réseau ni agent.
+def test_tous_les_enchainements_de_un_a_trois_demarrages(tmp_path, monkeypatch):
+    """Parcourt l'arbre des enchaînements de un à trois démarrages, sans réseau ni agent.
 
+    Chaque démarrage fait passer deux sessions successives, chacune avec sa source (ou aucune).
     Chaque nœud est un enchaînement : son dernier démarrage part de l'état laissé par son
-    préfixe, déjà vérifié, si bien que chaque enchaînement est vérifié démarrage par démarrage.
+    préfixe, déjà vérifié, si bien que chaque enchaînement est vérifié session par session.
     L'état passe d'un démarrage au suivant par le même JSON que `.atelier/etat.json`, mais en
     mémoire : l'écriture sur disque est coupée ici, et éprouvée par les tests nommés plus haut.
     """
@@ -339,14 +492,14 @@ def test_tous_les_enchainements_de_un_a_quatre_demarrages(tmp_path, monkeypatch)
     a_visiter = [((), "")]  # (enchaînement, état sauvé à sa fin ; vide avant le premier)
     while a_visiter:
         enchainement, sauve = a_visiter.pop()
-        if len(enchainement) == 4:
+        if len(enchainement) == 3:
             continue
         precedent = enchainement[-1] if enchainement else None
         for demarrage in DEMARRAGES:
             suite = verifier_un_demarrage(tmp_path, sauve, demarrage, precedent)
             parcourus += 1
             a_visiter.append(((*enchainement, demarrage), suite))
-    assert parcourus == 6 + 6**2 + 6**3 + 6**4  # 1554 enchaînements
+    assert parcourus == 18 + 18**2 + 18**3  # 6174 enchaînements
 
 
 def test_un_changement_d_environnement_est_ecrit_au_redemarrage(tmp_path):
