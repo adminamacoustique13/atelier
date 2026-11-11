@@ -359,6 +359,30 @@ async function main() {
     verifier("sur une fenêtre étroite, la carte ne déborde pas", debord.length === 0, debord);
     await capture(p2.locator("#vue-conversation"), "carte-etroite");
     await etroit.close();
+
+    // Anneau de progression et objectif long : les boîtes ne se recoupent pas
+    const longue = JSON.parse(JSON.stringify(base));
+    longue.contrat.objectif = "Reprendre entièrement le tableau de bord afin que chaque carte reste lisible, même lorsque la personne responsable décrit son objectif en plusieurs phrases détaillées, avec des précisions sur les cas limites, les fenêtres étroites, les textes très longs et les vérifications attendues avant la clôture du chantier. ".repeat(2);
+    longue.taches = longue.taches.length ? longue.taches : [{ id: "A", etat: "verifie", etat_fr: "Vérifiée" }];
+    for (const largeur of [1280, 400]) {
+      const ctx = await browser.newContext({ viewport: { width: largeur, height: 900 }, deviceScaleFactor: 2 });
+      const p = await ctx.newPage();
+      await p.route("**/api/etat", (route) => route.fulfill({ json: longue }));
+      await p.goto(s1.url);
+      await aller(p, "chantier");
+      await p.waitForSelector("#anneau svg.anneau");
+      const m = await p.evaluate(() => {
+        const r = (e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, d: b.right, bas: b.bottom }; };
+        const texte = document.getElementById("objectif");
+        return { anneau: r(document.querySelector("#anneau svg.anneau")), texte: r(texte.parentElement), lignes: Math.round(texte.getBoundingClientRect().height / parseFloat(getComputedStyle(texte).lineHeight)) };
+      });
+      const chevauche = m.anneau.x < m.texte.d && m.texte.x < m.anneau.d && m.anneau.y < m.texte.bas && m.texte.y < m.anneau.bas;
+      verifier(`objectif long à ${largeur} px : au moins 4 lignes`, m.lignes >= 4, m.lignes);
+      verifier(`objectif long à ${largeur} px : l'anneau garde 78 px`, Math.round(m.anneau.w) === 78 && Math.round(m.anneau.h) === 78, m.anneau);
+      verifier(`objectif long à ${largeur} px : l'anneau et le texte ne se chevauchent pas`, !chevauche, m);
+      if (largeur === 1280) await capture(p.locator("#vue-chantier .carte").first(), "anneau");
+      await ctx.close();
+    }
   }
 
   /* ---------- 5 bis. Ce que la carte dit de la règle, journal long, noms d'agent, armement ---------- */
