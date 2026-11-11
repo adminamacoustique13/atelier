@@ -22,3 +22,28 @@ Leçons validées par la personne responsable. L'orchestrateur les lit à l'ouve
 - **Preuve** : pendant le chantier « Agent SDK », chaque vérification complète a pris de 10 à 35 minutes, et presque chaque tâche en a demandé deux ou plus. Une correction de quatre lignes, déjà essayée par un vérificateur sur une copie, a reçu une vérification complète de plus. La tâche E a connu quatre tentatives pour une fonction que l'orchestrateur avait ajoutée à la seconde passe. En face, les vérifications complètes ont trouvé de vrais défauts sur le pont, les agents, l'arrêt et la facturation : c'est là qu'elles restent utiles.
 - **Portée** : ce dépôt. La vérification est décrite dans le skill `orchestrateur-chantier` (section « La vérification »), qui vit hors de ce dépôt : tant qu'il n'est pas modifié, l'ancienne règle s'applique ailleurs.
 - **À revoir** : le 2027-05-11, ou plus tôt si un défaut sérieux passe une vérification bornée ou mécanique.
+
+## Le dosage des modèles
+
+- **Règle** : Sonnet pour le travail cadré (retrait, script, textes, page, module isolé, branchement) ; Opus pour le gros du code, pour tout ce qui touche à la concurrence et pour toute logique à état, même petite ; Fable pour la conception, l'arbitrage, l'orchestration et ce qui est sensible (sécurité, facturation). Haiku n'est plus un point de départ pour du code.
+- **Le vérificateur** : Fable pour une vérification complète ; pour une vérification bornée, un modèle au moins égal à celui de l'ouvrier, avec un contexte neuf.
+- **Validée par** : la personne responsable, le 2026-11-11.
+- **Preuve** : chantier « Agent SDK ». Sonnet en effort moyen a calé trois fois sur la logique à état de la tâche E, qu'Opus a réécrite en une passe. Sonnet est passé du premier coup sur H, D2.1, D3b, Ga et Gb. Aucune seconde passe d'Opus ne venait d'un manque de capacité. Haiku n'a pas été utilisé : la règle qui l'écarte vient du jugement de la personne responsable, pas d'un constat. Détail dans `chantier/DOSAGE.md`.
+- **Portée** : ce dépôt. Le skill `orchestrateur-chantier` porte une autre table de départ tant qu'il n'est pas modifié.
+- **À revoir** : le 2027-05-11, ou à la sortie d'une nouvelle génération de modèles.
+
+## Relire la consigne avant de lancer une tâche délicate
+
+- **Règle** : avant de lancer une tâche délicate, l'orchestrateur relit sa consigne en se demandant ce qui manque pour que la preuve prouve le but. Il passe au moins ces questions : que se passe-t-il à l'arrêt, sur une erreur, sur un délai dépassé ? Chaque règle est-elle énoncée en entier, ou seulement par un exemple ? La preuve contient-elle un cas adverse ? Un composant simulé cache-t-il un comportement du vrai (durées, erreurs, ordre des messages) ? Un test peut-il rester vert alors que la règle est cassée ?
+- **Validée par** : la personne responsable, le 2026-11-11.
+- **Preuve** : chantier « Agent SDK ». Presque chaque verdict de recalage a relevé un trou de la consigne, et chacun a coûté un aller-retour de 30 à 60 minutes : un faux client aux réponses instantanées (A), une liste d'exclusions demandée alors qu'elle ne peut pas être complète (B), le moment où un appel arrêté rend la main (C), l'arrêt effectif de l'agent (D1), un exemple de règle limité aux commandes (D2), une règle de non-répétition jamais énoncée (E, quatre tentatives), « contient » au lieu de « commence par » (D3a).
+- **Portée** : ce dépôt.
+- **À revoir** : le 2027-05-11.
+
+## Couper une tâche qui traverse plus de trois fichiers
+
+- **Règle** : une tâche qui touche plus de trois fichiers, ou à la fois le fond et la page, est coupée en deux : le fond d'abord (avec ce qu'il fournit, écrit dans sa fiche de relais), la page ensuite. Les deux moitiés sont dosées et vérifiées séparément, et la seconde peut partir dès que le contrat de la première est stable.
+- **Validée par** : la personne responsable, le 2026-11-11.
+- **Preuve** : chantier « Agent SDK ». D3 et G, coupées en un fond et une page, ont avancé en parallèle : Ga a pris trois minutes d'ouvrier et trois de vérification, D3b et Gb sont passées du premier coup. Les tâches d'un seul bloc (E, D1, D2) ont toutes demandé au moins deux passes.
+- **Portée** : ce dépôt.
+- **À revoir** : le 2027-05-11.

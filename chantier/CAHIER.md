@@ -33,7 +33,7 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 ### Clôture, le 2026-11-11
 - Pas de passe générale de simplification : la personne responsable a demandé de ne plus alourdir le déroulement, et une réécriture de fin de chantier sur 8 600 lignes ajoutées aurait demandé une vérification de plus. Les restes ci-dessous sont proposés à sa décision.
 - La carte du code (table « Les fichiers » du LISEZMOI) est à jour : `guichet.py`, `mise_a_jour.py` et `projets.py` y figurent.
-- `chantier/DOSAGE.md` est écrit. `chantier/LECONS.md` porte les deux leçons validées en cours de route.
+- `chantier/DOSAGE.md` est écrit. `chantier/LECONS.md` porte cinq leçons validées par la personne responsable : deux en cours de route, trois à la clôture.
 
 ### Restes mineurs connus, non corrigés
 Aucun ne touche aux droits des agents ni à la facturation.
