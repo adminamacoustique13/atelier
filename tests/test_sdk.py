@@ -30,6 +30,7 @@ from claude_agent_sdk import (  # noqa: E402
 )
 
 from atelier.agents import decrire_outil  # noqa: E402
+from atelier.guichet import Guichet  # noqa: E402
 from atelier.sdk import (  # noqa: E402
     SessionSDK,
     lire_resultat,
@@ -84,6 +85,13 @@ class Permission:
     detachee: bool = False  # comme le vrai SDK : la demande vit dans sa propre tâche
 
 
+@dataclass
+class Geste:
+    """Étape : le faux client fait quelque chose de lui-même (`faire(client)`, asynchrone)."""
+
+    faire: object
+
+
 BLOQUE = object()  # étape du scénario : l'agent ne rend plus la main
 
 
@@ -113,6 +121,8 @@ class FauxClient:
                 self.detachees.append(asyncio.ensure_future(self._demander(etape)))
             elif isinstance(etape, Permission):
                 await self._demander(etape)
+            elif isinstance(etape, Geste):
+                await etape.faire(self)
             elif etape is BLOQUE:
                 try:
                     await asyncio.Event().wait()
@@ -578,6 +588,73 @@ def test_l_envoi_suivant_attend_la_fin_de_la_deconnexion(ouvrir):
     fil.join(GARDE_S)
     assert session.envoyer("Reprends.").ok
     assert fabrique.clients[0].deconnecte and not fabrique.clients[0].deconnexion_annulee
+
+
+# --- Les trois reliquats relevés par le vérificateur du pont ---------------------------
+
+
+def test_une_demande_tardive_d_un_client_coupe_ne_va_jamais_au_guichet(ouvrir):
+    """Reliquat a : l'envoi suivant est déjà parti quand l'ancien Claude Code, lent à
+    s'interrompre, demande encore une autorisation. Elle est refusée sans le guichet."""
+    guichet = FauxGuichet(Reponse("une_fois"))
+    tardive = Permission("Bash", {"command": "npm publish"})
+    reglages = {"lent": {"interrupt": 0.3}, "demande_pendant_interrupt": tardive}
+    session, fabrique, _ = ouvrir([BLOQUE], [fin(result="Repris.")], guichet=guichet,
+                                  client=reglages)  # fmt: skip
+    fil, rendus = en_fond(session)
+    assert commence(fabrique)
+    session.arreter()
+    fil.join(GARDE_S)
+    assert rendus[0].erreur == ARRETE
+    assert session.envoyer("Reprends.").texte == "Repris."  # part pendant l'interruption
+    ancien = fabrique.clients[0]
+    assert ancien.interrompu
+    assert guichet.demandes == []
+    assert ancien.decisions == [PermissionResultDeny(message=ARRETE, interrupt=True)]
+
+
+def test_fermer_juste_avant_la_creation_de_la_boucle_libere_le_fil(ouvrir):
+    """Reliquat b : `fermer` passe entre le contrôle de fermeture d'`envoyer` et la création
+    de la boucle. Il attend la fin du tour, puis libère le fil de la session."""
+    session, _, _ = ouvrir([fin()])
+    demarrer, fermeurs = session._demarrer_boucle, []
+
+    def demarrer_apres_fermer():
+        fermeurs.append(threading.Thread(target=session.fermer, daemon=True))
+        fermeurs[0].start()
+        fermeurs[0].join(0.2)  # laisse à `fermer` le temps de passer, ou d'attendre le tour
+        return demarrer()
+
+    session._demarrer_boucle = demarrer_apres_fermer
+    resultat = session.envoyer("Va.")
+    fermeurs[0].join(GARDE_S)
+    assert resultat.erreur == ARRETE
+    assert not fermeurs[0].is_alive()
+    assert attendre(lambda: not session._fil.is_alive(), 2)
+
+
+def test_une_demande_annulee_par_claude_code_ne_reste_pas_ouverte(ouvrir):
+    """Reliquat c : Claude Code retire lui-même sa demande, puis finit son tour sans erreur.
+    À la fin du tour, plus aucune demande de l'agent n'est ouverte au guichet."""
+    guichet = Guichet(delai_s=GARDE_S)
+
+    async def retirer_la_demande(client):
+        limite = time.monotonic() + GARDE_S
+        while not guichet.ouvertes() and time.monotonic() < limite:
+            await asyncio.sleep(0.005)
+        for demande in client.detachees:
+            demande.cancel()
+
+    entree = {"command": "npm install"}
+    session, _, _ = ouvrir(
+        [Permission("Bash", entree, detachee=True), Geste(retirer_la_demande), fin()],
+        guichet=guichet,
+    )
+    try:
+        assert session.envoyer("Installe.").ok
+        assert guichet.ouvertes() == []
+    finally:
+        guichet.annuler(AGENT)
 
 
 # --- Critère 6 : fin de session ---------------------------------------------------------

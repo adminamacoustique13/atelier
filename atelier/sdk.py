@@ -9,9 +9,13 @@ Règles de concurrence, à garder en tête en relisant :
 - le guichet, qui bloque, est toujours appelé dans un fil à part, jamais dans la boucle ;
 - `arreter` pose le drapeau du tour en cours (lisible de tout fil, attendable dans la boucle)
   et ferme les demandes ouvertes au guichet ; le tour rend alors l'arrêt sans attendre ;
+- chaque client a aussi son drapeau, posé quand il est coupé : une demande venue d'un client
+  coupé est refusée sans passer par le guichet, même si un nouveau tour a commencé ;
+- à la fin de tout tour, réussi ou non, les demandes de l'agent sont fermées au guichet ;
 - un client coupé est interrompu puis déconnecté dans une tâche à part, jamais annulée :
   le SDK doit pouvoir aller jusqu'au bout de sa fermeture (attente, SIGTERM, SIGKILL) ;
-- `fermer` attend la fin du tour en cours, puis celle des déconnexions, puis arrête la boucle.
+- `fermer` attend la fin du tour en cours (son verrou), puis celle des déconnexions, puis
+  arrête la boucle.
 """
 
 from __future__ import annotations
@@ -163,6 +167,7 @@ class SessionSDK:
         self.fabrique_client = fabrique_client
         self.source_connexion = ""
         self._client = None
+        self._coupure: _Arret | None = None  # le drapeau du client ouvert, posé à sa coupure
         self._deconnexions: set[asyncio.Task] = set()
         self._boucle: asyncio.AbstractEventLoop | None = None
         self._fil: threading.Thread | None = None
@@ -182,8 +187,7 @@ class SessionSDK:
             resultat = self._executer(consigne)
         finally:
             self._occupee.release()
-        if not resultat.ok:  # aucune demande ne doit rester ouverte au guichet après un échec
-            self._annuler_au_guichet()
+        self._annuler_au_guichet()  # un tour terminé ne garde aucune demande ouverte
         self._emettre("fin", "L'agent a terminé." if resultat.ok else resultat.erreur)
         return resultat
 
@@ -200,9 +204,8 @@ class SessionSDK:
             return
         self._fermee = True
         self.arreter()
-        if self._boucle is None:
-            return
-        if threading.current_thread() is self._fil:  # appelé depuis un rappel : pas d'attente
+        if self._fil is not None and threading.current_thread() is self._fil:
+            # Appelé depuis un rappel, dans la boucle : on n'y attend pas la fin du tour.
             threading.Thread(target=self._liberer, daemon=True).start()
         else:
             self._liberer()
@@ -210,11 +213,17 @@ class SessionSDK:
     def _liberer(self) -> None:
         """Attend la fin du tour en cours et des déconnexions, puis arrête la boucle.
 
-        Si le tour ne rend pas la main (un rappel bloque la boucle), on n'attend pas plus.
+        Le verrou est attendu avant de regarder la boucle : un `envoyer` entré juste avant
+        `fermer` a pu la créer entre-temps. Si le tour ne rend pas la main (un rappel bloque la
+        boucle), on n'attend pas plus.
         """
-        boucle = self._boucle
-        if self._occupee.acquire(timeout=self.delai_deconnexion_s):
+        libre = self._occupee.acquire(timeout=self.delai_deconnexion_s)
+        if libre:
             self._occupee.release()
+        boucle = self._boucle
+        if boucle is None:
+            return
+        if libre:
             with suppress(Exception):
                 asyncio.run_coroutine_threadsafe(self._tout_deconnecter(), boucle).result(
                     timeout=self.delai_deconnexion_s + 5
@@ -310,6 +319,11 @@ class SessionSDK:
         """Crée le client SDK. C'est ici, et seulement ici, qu'on charge la bibliothèque."""
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
+        coupure = self._coupure = _Arret(self._boucle)
+
+        async def autoriser(outil, entree, contexte=None):
+            return await self._autoriser(outil, entree, contexte, coupure)
+
         prompt = {"type": "preset", "preset": "claude_code"}
         if self.role_ajoute:
             prompt["append"] = self.role_ajoute
@@ -320,7 +334,7 @@ class SessionSDK:
             allowed_tools=self.outils_permis,
             disallowed_tools=self.outils_interdits,
             permission_mode=self.mode_permission,
-            can_use_tool=self._autoriser,
+            can_use_tool=autoriser,
             include_partial_messages=True,
             system_prompt=prompt,
             session_id=None if self.reprise else self.session,
@@ -354,14 +368,17 @@ class SessionSDK:
         if identifiant:
             self.session, self.reprise = identifiant, True
 
-    async def _autoriser(self, outil: str, entree: dict, contexte=None):
+    async def _autoriser(self, outil: str, entree: dict, contexte, coupure: _Arret):
         """Rappel `can_use_tool` du SDK : pose la question au guichet, sans bloquer la boucle.
 
-        Hors d'un tour, ou après un arrêt, la demande est refusée sans déranger le guichet.
-        Un arrêt pendant l'attente refuse aussitôt, sans attendre la réponse du guichet.
+        Hors d'un tour, après un arrêt, ou venue d'un client déjà coupé, la demande est refusée
+        sans déranger le guichet. Un arrêt ou une coupure pendant l'attente refuse aussitôt,
+        sans attendre la réponse du guichet.
         """
         from claude_agent_sdk import PermissionResultDeny
 
+        if coupure.pose.is_set():  # l'ancien Claude Code, en train de s'interrompre
+            return PermissionResultDeny(message=ARRET, interrupt=True)
         arret = self._arret
         self._emettre("attente", decrire_outil({"name": outil, "input": entree}))
         if self.guichet is None:
@@ -369,14 +386,15 @@ class SessionSDK:
         if arret is None or arret.pose.is_set():
             return PermissionResultDeny(message=ARRET, interrupt=True)
         demande = _dans_un_fil(self.guichet.demander, self.agent, outil, entree)
-        veille = asyncio.ensure_future(arret.evenement.wait())
+        veilles = {asyncio.ensure_future(a.evenement.wait()) for a in (arret, coupure)}
         try:
-            await asyncio.wait({demande, veille}, return_when=asyncio.FIRST_COMPLETED)
+            await asyncio.wait({demande, *veilles}, return_when=asyncio.FIRST_COMPLETED)
         finally:
-            veille.cancel()
+            for veille in veilles:
+                veille.cancel()
             if not demande.done():
                 demande.cancel()
-        if arret.pose.is_set() or demande.cancelled():
+        if arret.pose.is_set() or coupure.pose.is_set() or demande.cancelled():
             threading.Thread(target=self._annuler_au_guichet, daemon=True).start()
             return PermissionResultDeny(message=ARRET, interrupt=True)
         if demande.exception() is not None:
@@ -388,6 +406,9 @@ class SessionSDK:
     def _couper(self) -> None:
         """Retire le client et le déconnecte à part ; le prochain envoi rouvrira la session."""
         client, self._client = self._client, None
+        coupure, self._coupure = self._coupure, None
+        if coupure is not None:
+            coupure.poser()
         if client is not None:
             tache = asyncio.ensure_future(self._deconnecter(client))
             self._deconnexions.add(tache)
