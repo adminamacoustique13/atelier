@@ -4,7 +4,7 @@
 
 ## Suivi
 
-Compteur : 34 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
+Compteur : 36 agents lancés (chaque reprise d'un agent compte pour un lancement), 1 montée en gamme sur 3 (tâche E, de Sonnet à Opus). Le plafond du nombre d'agents a été retiré par la personne responsable le 2026-11-11 ; le compteur reste tenu. Les limites de trois tentatives par tâche et de trois montées en gamme restent en vigueur.
 
 Niveau de vérification, depuis la décision de la personne responsable du 2026-11-11 (voir `chantier/LECONS.md`) : complète pour D3 et pour la quatrième tentative de E, déjà lancée ; bornée pour la seconde vérification de D2 et pour G ; mécanique seule pour les restes mineurs repris à la clôture. Une seconde passe ne corrige plus que ce qui a été recalé.
 
@@ -17,9 +17,10 @@ Ordre de la suite, revu le 2026-11-11 : C, puis D1 et H en parallèle, puis D2 e
 | C | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 371 tests verts ; deux vérifications, 94 casses du code essayées, 180 arrêts en boucle sans blocage ni fil restant |
 | D1 | vérifié | Sonnet, effort élevé | Opus, effort élevé | 2 | 421 tests verts ; deux vérifications, ancien et nouveau moteur comparés sur 36 parties et 20 parties en parallèle sans écart |
 | D2 | vérifié | Sonnet, effort moyen | Opus, effort moyen, puis vérification mécanique | 2 | Essai dans le navigateur : 89 vérifications passées deux fois de suite ; captures relues par l'orchestrateur |
-| D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
+| D3a | à lancer, après E.1 | Opus, effort élevé | Fable, complète | 0 | |
+| D3b | à lancer, après D3a | Sonnet, effort moyen | bornée | 0 | |
 | E | vérifié, avec une limite connue reprise par E.1 | Opus, effort élevé (après Sonnet, effort moyen) | Fable, effort élevé | 4 | 449 tests verts ; la règle des annonces est prouvée sur 1 554 enchaînements par l'ouvrier et sur plus de 400 000 par le vérificateur, sans écart |
-| E.1 | à lancer | Opus, effort moyen | complète mais étroite (facturation) | 0 | |
+| E.1 | en vérification | Opus, effort moyen | Fable, complète mais étroite (facturation) | 1 | 457 tests verts cinq fois de suite ; test exhaustif de 6 174 enchaînements |
 | G | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | I | vérifié | Sonnet, effort élevé | Opus, effort élevé | 1 | Validé du premier coup : 0 échec sur 220 passages sous charge, contre 6 sur 212 avant la correction ; aucun interblocage possible |
 | H | vérifié | Sonnet, effort moyen | Opus, effort moyen | 1 | Validé du premier coup : 371 tests verts, chaque règle des deux tests retirés cassée sur une copie et rattrapée par un test |
@@ -236,6 +237,10 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
 - **Dépendances** : D2
 - **Preuve** : des tests du serveur avec un agent simulé, qui changent le mode pendant qu'il tourne et simulent un refus de l'arbitre puis une retombée en `default` ; et l'essai dans le navigateur sans écran.
 - **Départ** : Sonnet, effort élevé. La tâche touche à la sécurité des agents.
+- **Découpage décidé le 2026-11-11 par l'orchestrateur**, pour deux raisons : la tâche traversait six fichiers et quatre modules, et la personne responsable a demandé depuis que le gros du code soit confié à Opus, Sonnet gardant le travail cadré.
+  - **D3a, le fond** : le pont sait changer de mode à chaud et relaie les refus de l'arbitre et le mode réellement appliqué ; les agents appliquent le mode aux ouvriers seulement ; le serveur enregistre le choix, l'applique et le dit. Fichiers : `atelier/sdk.py`, `atelier/agents.py`, `atelier/serveur.py`, `atelier/guichet.py` (une phrase), et leurs tests. Opus, effort élevé ; vérification complète par Fable, parce que c'est ce qui décide de ce que les agents font sans demander.
+  - **D3b, la page** : le menu « Mode des ouvriers » dans l'onglet Chantier, l'essai dans le navigateur, et la section du LISEZMOI. Fichiers : `atelier/tableau/index.html`, `chantier/essais/D3-modes.js`, `chantier/captures/D3-*.png`, `LISEZMOI.md`. Sonnet, effort moyen ; vérification bornée.
+- **Fait observé pendant ce chantier**, utile au critère 4 : quand l'arbitre du mode auto refuse une action, l'agent reçoit comme résultat de l'outil un texte qui commence par « Permission for this action was denied by the Claude Code auto mode classifier. Reason: [Exfil Scouting]. », le nom entre crochets étant la règle qui a joué.
 - **Faits vérifiés le 2026-11-11** dans la documentation de Claude Code (pages « permission modes », « Agent SDK : permissions » et « Agent SDK : hooks ») et dans le SDK 0.2.172 :
   - `set_permission_mode` et les cinq modes existent. Le changement vaut tout de suite pour les demandes d'outil suivantes.
   - Refus de l'arbitre : l'agent en reçoit la raison dans le résultat de l'outil, le plus souvent le nom de la règle (par exemple `[Data Exfiltration]`). Le crochet `PermissionDenied`, qui annonce ces refus, n'existe que dans le SDK TypeScript, pas dans le SDK Python. Côté Python il reste le flux de messages (résultats d'outils) et le champ `permission_denials` du résultat final. La forme exacte de ces refus n'a pas pu être observée ici : à confirmer à l'essai réel F.
