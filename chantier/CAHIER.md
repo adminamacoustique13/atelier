@@ -1,16 +1,16 @@
 # Cahier du chantier « Agent SDK »
 
-État général : contrat validé le 2026-11-11. Sous-plan 1 en cours : A et B sont lancées en parallèle.
+État général : contrat validé le 2026-11-11, amendé le même jour (tâche D3). Sous-plan 1 terminé : A et B sont vérifiées. Sous-plan 2 en cours : C est lancée.
 
 ## Suivi
 
-Enveloppe : 9 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 11 lancements prévus au minimum (vérification de A, puis C, D1, D2, D3 et E à deux agents chacune), soit 20 : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11 : porter l'enveloppe à 24. En attendant, rien n'est lancé au-delà de 18.
+Enveloppe : 11 agents lancés sur 18 (chaque reprise d'un agent compte pour un lancement), 0 montée en gamme sur 3. Il reste 9 lancements prévus au minimum (vérification de C, puis D1, D2, D3 et E à deux agents chacune), soit 20 : le reste ne tient plus dans l'enveloppe. Question posée à la personne responsable le 2026-11-11 : porter l'enveloppe à 24. En attendant, rien n'est lancé au-delà de 18.
 
 | Tâche | État | Ouvrier | Vérificateur | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| A | en cours (seconde chance) | Opus, effort élevé | Fable, effort élevé | 2 | Chemin nominal et fidélité au SDK validés à la première vérification |
+| A | vérifié | Opus, effort élevé | Fable, effort élevé | 2 | 71 tests du pont verts, dont deux avec le vrai client du SDK sur un faux exécutable ; deux vérifications, 800 courses sans blocage |
 | B | vérifié | Opus, effort élevé | Fable, effort élevé | 3 | 206 tests du guichet verts ; trois vérifications, dont 150 manches de 40 agents sans défaut et 448 formes de shell sans règle |
-| C | à lancer | Opus, effort élevé | Fable, effort élevé | 0 | |
+| C | en cours | Opus, effort élevé | Fable, effort élevé | 1 | |
 | D1 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
 | D2 | à lancer | Sonnet, effort moyen | Opus, effort moyen | 0 | |
 | D3 | à lancer | Sonnet, effort élevé | Opus, effort élevé | 0 | |
@@ -22,8 +22,12 @@ Point de départ contrôlé le 2026-11-11 : 35 tests verts, contrôle de forme v
 ### Historique de la tâche A
 - Première vérification : recalé. Chemin nominal bon et fidèle au SDK (essayé avec le vrai `ClaudeSDKClient` sur un faux exécutable `claude`). Trois défauts : `fermer()` pendant un envoi peut bloquer l'appel une heure ; la déconnexion annulée au bout de cinq secondes peut laisser le processus Claude Code vivant ; un « toujours » avec une règle vide autorisait l'outil entier. Trou de la consigne relevé : un faux client aux `interrupt` et `disconnect` instantanés ne peut pas montrer ce qui dépend des durées réelles ; il fallait exiger un essai avec le vrai client sur un faux exécutable.
 - Seconde chance (même ouvrier, même niveau), avec cet essai ajouté à la preuve.
-- À transmettre à C : la liste « À savoir pour la tâche C » de la fiche de relais A.
-- À transmettre à F : essayer « toujours » sur un outil entier, et un envoi qui suit un résultat en erreur.
+- Seconde vérification : validé. Les trois défauts sont levés, sur le faux client comme sur le vrai. Limites acceptées : une réponse « une_fois » arrivée au moment exact de l'arrêt peut laisser passer l'outil juste avant l'interruption ; un rappel `sur_evenement` bloquant bloque `envoyer` jusqu'au garde-fou.
+- Trois reliquats mineurs du pont, confiés à la tâche C (son périmètre est étendu à `atelier/sdk.py` et `tests/test_sdk.py` pour eux seuls) : le drapeau d'arrêt lié au client ; `fermer` qui attend le verrou avant de regarder la boucle ; `guichet.annuler` appelé à la fin de tout tour.
+- Les deux tests avec le vrai client ne détectent pas les défauts 1 et 2 (leur faux exécutable obéit à la fermeture) : seuls les tests à faux client les détectent. À couvrir à l'essai réel F.
+- Transmis à C : la liste « À savoir pour la tâche C » de la fiche de relais A.
+- À transmettre à D1 : le rappel `sur_evenement` du serveur ne fait que déposer dans une file bornée, rien de lent.
+- À transmettre à F : essayer « toujours » sur un outil entier ; un envoi qui suit un résultat en erreur (il peut échouer une fois avant de se reconnecter) ; l'arrêt d'un agent qui a des tâches de fond, pour vérifier que Claude Code meurt bien.
 
 ### Historique de la tâche B
 - Première vérification : recalé. La concurrence tient (150 manches de 40 agents sans défaut). Trois défauts : filtre des lanceurs contournable (`/bin/bash -lc`, `time bash -c`), site affiché différent du site visité pour une adresse piégée, dix casses du code sur soixante-trois non détectées par les tests. Trous de la consigne relevés : aucune preuve adverse demandée pour la règle, phrase coupée sans accès au texte complet.
@@ -121,7 +125,8 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   4. Le vérificateur et la conversation restent sans aucun outil d'écriture, même si une règle « toujours » le permettrait.
   5. L'agent simulé sait jouer une demande d'autorisation, pour que la démonstration en montre une.
   6. Plus aucun `claude -p` n'est lancé par `agents.py`.
-- **Périmètre** : `atelier/agents.py`, `tests/test_agents.py` (nouveau)
+  7. Les trois reliquats du pont relevés à la seconde vérification de A sont corrigés, chacun avec son test (ajouté le 2026-11-11).
+- **Périmètre** : `atelier/agents.py`, `tests/test_agents.py` (nouveau) ; étendu le 2026-11-11 à `atelier/sdk.py` et `tests/test_sdk.py` pour les trois reliquats du pont seulement
 - **Contrats** : attend A et B ; fournit à D1 un agent qui accepte `sur_evenement`, un guichet et `arreter(tache)`.
 - **Dépendances** : A, B
 - **Preuve** : `tests/test_agents.py` (avec le faux client SDK de A) et les 35 tests existants restent verts sans modification.
@@ -191,7 +196,7 @@ Vérification faite sur `claude-agent-sdk` 0.2.172 avant de lancer A : `ClaudeSD
   4. Le LISEZMOI explique la nouvelle dépendance, les cartes d'autorisation, la clé `autorisations` et le bouton « Arrêter ».
 - **Périmètre** : `outils/installer-mac.sh`, `atelier/__main__.py`, `LISEZMOI.md`
 - **Contrats** : attend A (lecture de la source de connexion).
-- **Dépendances** : A
+- **Dépendances** : A, et C depuis le 2026-11-11 : la source de connexion n'est connue qu'après l'ouverture d'une session, il faudra peut-être une fonction de sondage dans `atelier/sdk.py`, que C modifie. E sera lancée en parallèle de D1, sans fichier en commun.
 - **Preuve** : `bash -n` et `shellcheck` sur le script, et un test du message de démarrage avec les deux sources simulées.
 - **Départ** : Sonnet, effort moyen.
 
