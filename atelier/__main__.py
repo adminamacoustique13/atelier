@@ -6,10 +6,12 @@ import argparse
 import json
 import subprocess
 import tempfile
+import time
 from pathlib import Path
 
 from atelier.agents import AgentClaude, AgentSimule
 from atelier.controles import ControlesSimules
+from atelier.guichet import Guichet
 from atelier.modele import Chantier, Contrat
 from atelier.moteur import RELANCER, planifier
 from atelier.projets import Projets, creer_depot, lire_profil, ouvrir_depot
@@ -72,7 +74,11 @@ def projet_simule(dossier: Path, nom: str, delai_s: float) -> Atelier:
     plan, scenario = plan_de_demonstration()
     chantier = Chantier(projet=nom, contrat=Contrat(objectif=""))
     agent = AgentSimule(scenario, delai_s, plan=plan)
-    return Atelier(dossier, chantier, agent, ControlesSimules(), {}, mode="démonstration")
+    # Un vrai guichet : la demande d'exemple du premier ouvrier attend un clic sur la carte.
+    guichet = Guichet()
+    return Atelier(
+        dossier, chantier, agent, ControlesSimules(), {}, mode="démonstration", guichet=guichet
+    )
 
 
 def atelier_de_demonstration(delai_s: float) -> Atelier:
@@ -122,6 +128,17 @@ def commande_servir(arguments) -> None:
     serveur.serve_forever()
 
 
+def _attendre_une_autorisation(atelier: Atelier, delai_s: float = 10.0) -> str:
+    """Attend la demande d'autorisation simulée et rend son identifiant."""
+    limite = time.monotonic() + delai_s
+    while time.monotonic() < limite:
+        ouvertes = atelier.guichet.ouvertes()
+        if ouvertes:
+            return ouvertes[0]["id"]
+        time.sleep(0.01)
+    raise SystemExit("La démonstration n'a pas déposé sa demande d'autorisation.")
+
+
 def commande_instantanes(arguments) -> None:
     """Joue la démonstration d'une traite et l'inscrit dans une page autonome."""
     atelier = atelier_de_demonstration(0.0)
@@ -130,6 +147,9 @@ def commande_instantanes(arguments) -> None:
     atelier.message(OBJECTIF_DEMO)
     atelier.fil_message.join()
     atelier.valider_contrat()
+    autorisation = _attendre_une_autorisation(atelier)
+    vues.append(atelier.vue())  # la carte d'autorisation est ouverte
+    atelier.autoriser(autorisation, "une_fois")  # la même voie qu'un clic sur la carte
     atelier.fil.join()
     demande = atelier.moteur.chantier.demandes[0]["id"]
     vues.append(atelier.vue())

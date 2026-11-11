@@ -20,11 +20,16 @@ from atelier.consignes import (
     lire_verdict,
 )
 from atelier.controles import hors_perimetre, se_chevauchent
+from atelier.guichet import ARRETE
 from atelier.modele import Chantier, Tache
 
 ACTIFS = ("en_cours", "en_verification")
 RELANCER, ABANDONNER = "Relancer un cran plus haut", "Abandonner cette tâche"
 RELANCER_TEL = "Relancer au même niveau"
+# Le motif d'une tâche que la personne responsable a arrêtée : ni seconde chance, ni montée.
+ARRETEE = "arretee"
+MOTIF_ARRET = "arrêtée par toi."
+DETAIL_ARRET = "Arrêtée par la personne responsable."
 
 
 class ContratNonValide(Exception):
@@ -79,6 +84,8 @@ class Moteur:
         self.profil = profil or {}
         self.sur_changement = sur_changement or (lambda: None)
         self.verrou = threading.RLock()
+        self._arretees: set[str] = set()  # les tâches dont l'arrêt est demandé, pas encore pris
+        self._enregistrement: set[str] = set()  # acceptées : l'arrêt vient trop tard
         for tache in chantier.taches:
             if not tache.modele:
                 tache.modele, tache.effort = dosage.depart(tache.type, self.profil.get("dosage"))
@@ -119,6 +126,40 @@ class Moteur:
                 }
             )
         self._noter(f"J'ai besoin de toi : {raison}", tache)
+
+    # --- l'arrêt d'une tâche -------------------------------------------------------
+
+    def arreter(self, identifiant: str) -> bool:
+        """Arrête une tâche en cours ou en vérification et la rend à la personne responsable.
+
+        Rend False si elle n'est ni l'une ni l'autre, ou si elle est déjà acceptée et en cours
+        d'enregistrement : l'arrêt ne pèse alors sur rien. Quand aucun agent n'est en marche
+        (entre l'ouvrier et le vérificateur, ou juste avant leur départ), c'est ce drapeau, relu
+        juste avant chaque lancement d'agent, qui retient la tâche : une fois l'arrêt demandé,
+        plus aucun agent ne démarre pour elle.
+        """
+        with self.verrou:
+            tache = next((t for t in self.chantier.taches if t.id == identifiant), None)
+            if tache is None or tache.etat not in ACTIFS:
+                return False
+            if identifiant in self._enregistrement:
+                return False
+            self._arretees.add(identifiant)
+        self.agent.arreter(identifiant)
+        return True
+
+    def enregistree(self, identifiant: str) -> bool:
+        """Dit si la tâche est vérifiée, ou acceptée et en cours d'enregistrement."""
+        with self.verrou:
+            tache = next((t for t in self.chantier.taches if t.id == identifiant), None)
+            return identifiant in self._enregistrement or bool(tache and tache.etat == "verifie")
+
+    def _arretee(self, tache: Tache, resultat=None) -> bool:
+        """Dit si la tâche a été arrêtée, par le drapeau ou par le résultat de l'agent."""
+        with self.verrou:
+            demande = tache.id in self._arretees
+            self._arretees.discard(tache.id)
+        return demande or (resultat is not None and resultat.erreur == ARRETE)
 
     # --- ordonnancement ------------------------------------------------------------
 
@@ -167,28 +208,31 @@ class Moteur:
     # --- une tâche, de l'ouvrier au vérificateur -----------------------------------
 
     def _traiter(self, tache: Tache) -> None:
+        try:
+            self._boucle(tache)
+        finally:  # rien de ce qui précède ne pèse sur un lancement suivant
+            with self.verrou:
+                self._arretees.discard(tache.id)
+                self._enregistrement.discard(tache.id)
+
+    def _boucle(self, tache: Tache) -> None:
         remarques = ""
         while True:
+            if self._arretee(tache):  # arrêt demandé avant le départ de l'ouvrier
+                return self._arret_avant_depart(tache)
             if not self._prendre_agent():
                 return self._rendre(tache, "l'enveloppe d'agents du contrat est épuisée.")
-            with self.verrou:
-                tache.tentatives += 1
-                tache.etat = "en_cours"
-            self._noter(
-                f"Ouvrier lancé ({dosage.libelle(tache.modele, tache.effort)}), "
-                f"tentative {tache.tentatives}.",
-                tache,
-            )
-            dossier = self.controles.preparer(tache)
-            resultat = self.agent.executer(
-                consigne_ouvrier(tache, self.chantier.contrat, self.profil, remarques),
-                tache.modele,
-                tache.effort,
-                dossier,
-                contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
-            )
-            self._compter(tache, resultat)
+            dossier, resultat = self._lancer_ouvrier(tache, remarques)
+            if resultat is None:  # arrêt demandé pendant la préparation : l'ouvrier n'est pas parti
+                self.controles.annuler(tache, dossier)
+                return self._arret_avant_depart(tache)
             motif, detail = self._juger(tache, resultat, dossier)
+            if motif is None:
+                with self.verrou:  # dernier mot : un arrêt demandé jusqu'ici l'emporte
+                    if self._arretee(tache):
+                        motif, detail = ARRETEE, DETAIL_ARRET
+                    else:
+                        self._enregistrement.add(tache.id)
             with self.verrou:
                 tache.historique.append(
                     {
@@ -209,8 +253,54 @@ class Moteur:
             if not self._apres_echec(tache, motif, detail):
                 return None
 
+    def _lancer_ouvrier(self, tache: Tache, remarques: str):
+        """Prépare le travail et lance l'ouvrier ; rend (dossier, résultat).
+
+        Le résultat est None si l'arrêt a été demandé pendant la préparation : l'agent n'est
+        alors pas lancé, et ni l'enveloppe ni le compte des tentatives ne le gardent.
+        """
+        with self.verrou:
+            tache.tentatives += 1
+            tache.etat = "en_cours"
+        self._noter(
+            f"Ouvrier lancé ({dosage.libelle(tache.modele, tache.effort)}), "
+            f"tentative {tache.tentatives}.",
+            tache,
+        )
+        dossier = self.controles.preparer(tache)
+        if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
+            with self.verrou:
+                tache.tentatives -= 1
+                self.chantier.agents_lances -= 1
+            return dossier, None
+        resultat = self.agent.executer(
+            consigne_ouvrier(tache, self.chantier.contrat, self.profil, remarques),
+            tache.modele,
+            tache.effort,
+            dossier,
+            contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
+        )
+        self._compter(tache, resultat)
+        return dossier, resultat
+
+    def _arret_avant_depart(self, tache: Tache) -> None:
+        """Rend la tâche arrêtée avant qu'un ouvrier n'ait travaillé, en gardant la trace."""
+        with self.verrou:
+            tache.historique.append(
+                {
+                    "tentative": tache.tentatives + 1,
+                    "modele": tache.modele,
+                    "effort": tache.effort,
+                    "issue": ARRETEE,
+                    "detail": DETAIL_ARRET,
+                }
+            )
+        self._rendre(tache, MOTIF_ARRET)
+
     def _juger(self, tache: Tache, resultat, dossier) -> tuple[str | None, str]:
         """Rend (None, résumé) si le livrable est accepté, sinon (motif, détail)."""
+        if self._arretee(tache, resultat):
+            return ARRETEE, DETAIL_ARRET
         if not resultat.ok:
             return "ne_sait_pas", f"L'agent s'est arrêté sur une erreur : {resultat.erreur}"
         modifies = self.controles.fichiers_modifies(tache, dossier, resultat)
@@ -220,12 +310,33 @@ class Moteur:
         passe, sortie = self.controles.mecaniques(tache, dossier)
         if not passe:
             return "ne_sait_pas", "Les contrôles automatiques échouent :\n" + sortie[-1500:]
+        if self._arretee(tache):  # aucun agent n'est en marche : le vérificateur ne part pas
+            return ARRETEE, DETAIL_ARRET
         if not self._prendre_agent():
             return "enveloppe", "L'enveloppe d'agents est épuisée avant la vérification."
+        avis = self._lancer_verificateur(tache, dossier)
+        if avis is None or self._arretee(tache, avis):
+            return ARRETEE, DETAIL_ARRET
+        verdict = lire_verdict(avis.texte) if avis.ok else lire_verdict("")
+        with self.verrou:
+            tache.verdict = verdict["resume"]
+        if verdict["valide"]:
+            return None, verdict["resume"]
+        return verdict["motif"], verdict["resume"]
+
+    def _lancer_verificateur(self, tache: Tache, dossier):
+        """Lance le vérificateur ; rend son avis, ou None si l'arrêt a été demandé avant son départ.
+
+        Dans ce cas l'agent n'est pas lancé et ne compte pas dans l'enveloppe.
+        """
         with self.verrou:
             tache.etat = "en_verification"
         modele, effort = dosage.verificateur(tache.modele, tache.effort)
         self._noter(f"Vérificateur lancé ({dosage.libelle(modele, effort)}).", tache)
+        if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
+            with self.verrou:
+                self.chantier.agents_lances -= 1
+            return None
         avis = self.agent.executer(
             consigne_verificateur(tache, self.chantier.contrat, self.profil),
             modele,
@@ -235,16 +346,14 @@ class Moteur:
             contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
         )
         self._compter(tache, avis)
-        verdict = lire_verdict(avis.texte) if avis.ok else lire_verdict("")
-        with self.verrou:
-            tache.verdict = verdict["resume"]
-        if verdict["valide"]:
-            return None, verdict["resume"]
-        return verdict["motif"], verdict["resume"]
+        return avis
 
     def _apres_echec(self, tache: Tache, motif: str, detail: str) -> bool:
         """Décide de la suite après un refus. Rend False si la tâche s'arrête là."""
         contrat = self.chantier.contrat
+        if motif == ARRETEE:  # ni seconde chance ni montée : la personne reprend la main
+            self._rendre(tache, MOTIF_ARRET)
+            return False
         if motif == "enveloppe":
             self._rendre(tache, "l'enveloppe d'agents du contrat est épuisée.")
             return False
