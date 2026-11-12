@@ -312,7 +312,7 @@ async function main() {
     verifier("la commande instantanes réussit", r.status === 0, r.stderr);
     const { page, contexte, erreurs, requetes } = await ouvrir(browser, `file://${fichier}`, { viewport: { width: 1280, height: 800 } });
     const nombre = await page.evaluate(() => INSTANTANES.length);
-    verifier("la page rejoue ses 46 vues enregistrées", nombre === 46, nombre);
+    verifier("la page rejoue ses 43 vues enregistrées", nombre === 43, nombre);
     await jusqua(async () => page.evaluate(() => rejoue === true), 8000);
     verifier("sans champ mise_a_jour dans les vues, aucun bouton", !(await bouton(page).isVisible()));
     await page.evaluate(() => { INSTANTANES.forEach((v) => { v.mise_a_jour = { disponible: true, phrase: "" }; }); afficher(INSTANTANES[pas]); });

@@ -123,6 +123,11 @@ Mesuré par le second vérificateur : 0 faux positif sur 3 046 paires de refus r
 - Les tests du filtre sont paramétrés sur la constante elle-même : retirer un nom de la liste ne fait échouer aucun test. Les paramétrer sur une liste écrite en dur dans le test.
 - Si la personne tranche un blocage pendant le diagnostic, la question de la demande d'outils promet encore une relance qui n'aura pas lieu.
 
+### V3b : deux points à régler avant le premier vrai chantier (tâche V3b.1)
+- Faux blocage : tout outil refusé à l'ouvrier bloque une passe refusée pour un vrai défaut (rejoué : `Bash(git push)` refusé et un verdict « bâclé » donnent un blocage au lieu de la reprise à chaud). Règle décidée par l'orchestrateur : un outil refusé seul ne bloque pas ; il est cité dans le message de reprise ; il bloque tout de suite seulement s'il est le premier mot d'une commande de contrôle du profil (le cas `uv`) ; une ligne « EMPÊCHÉ » ou le champ `empeche` bloquent comme aujourd'hui.
+- Le serveur lit « Relancer au même niveau » dans `options[0]` ; si l'ordre glissait, accepter un réglage monterait d'un cran ou abandonnerait en silence. Remplacer par une méthode `Moteur.relancer_au_meme_niveau(id)`.
+- Mineurs : limite ou surcharge deux fois mènent à un blocage et à un diagnostic voué à l'échec (à reprendre en V3f) ; la question dit « deux fois » quand le troisième refus tombe sans cran ; accepter la demande née à la validation ne relance pas une tâche déjà bloquée ; les preuves (jusqu'à 10 Ko) vont dans l'état sauvé.
+
 ### Restes relevés par les vérificateurs de V0, V1 et M8
 - V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.
 - V1 : la consigne ne dit pas quoi faire d'un fichier que chaque tâche doit toucher (le journal d'un projet) ; la phrase de `plan.py` devient illisible quand beaucoup de tâches partagent un fichier ; aucun test ne garde les consignes ; accords (« toutes deux », « A et A ») ; récursion sur une chaîne de 1 000 tâches.

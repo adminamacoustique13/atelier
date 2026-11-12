@@ -18,7 +18,14 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from atelier import archives, dosage
-from atelier.agents import MODE_PAR_DEFAUT, MODES_OUVRIERS, AgentSimule, lire_mode, mode_valide
+from atelier.agents import (
+    MODE_PAR_DEFAUT,
+    MODES_OUVRIERS,
+    AgentSimule,
+    commande_permise,
+    lire_mode,
+    mode_valide,
+)
 from atelier.carte import ExplicateurAuto, ExplicateurClaude, SuiviCarte, provisoire
 from atelier.consignes import (
     BALISE_OUTILS,
@@ -26,6 +33,7 @@ from atelier.consignes import (
     extraire_outils,
     extraire_plan,
     message_avec_etat,
+    message_de_diagnostic,
 )
 from atelier.guichet import ARRETE, CHOIX, Guichet
 from atelier.mise_a_jour import Etat, Resultat
@@ -435,6 +443,106 @@ class Activite:
 
 
 ACCEPTER_OUTILS, REFUSER_OUTILS = "Accepter ce réglage", "Refuser"
+# Où en est le diagnostic d'un blocage, gardé dans sa demande (donc dans l'état sauvé) : rangé en
+# attente de la conversation, envoyé à l'orchestrateur, puis l'une des issues (« propose »,
+# « sans_proposition », « lanceur », « echec », « arrete », « sans_objet », « interrompu »). Les
+# deux premiers, relus à l'ouverture, disent un diagnostic resté sans réponse quand l'Atelier
+# s'est arrêté. Avec « propose », la demande de blocage porte aussi `reglage` : l'identifiant de la
+# demande d'outils qu'il a fait naître, seule à pouvoir relancer la tâche.
+DIAGNOSTIC_EN_ATTENTE, DIAGNOSTIC_EN_COURS = "en_attente", "en_cours"
+DIAGNOSTIC_INACHEVE = (DIAGNOSTIC_EN_ATTENTE, DIAGNOSTIC_EN_COURS)
+DIAGNOSTIC_PROPOSE = "propose"
+BLOCAGE_OUVERT = "sa demande reste ouverte, avec ses options."
+DEBLOQUE = "Ce réglage débloque la tâche "  # la phrase d'une demande d'outils liée à un blocage
+# Les lanceurs généraux, que l'atelier ne propose jamais de permettre d'un clic : ils laisseraient
+# les agents lancer tout le reste. Comparés au nom de base de chaque mot de la commande proposée
+# (« /bin/bash » vaut « bash », « bash.exe » aussi). Un interprète n'en est un que suivi d'une
+# option qui exécute du code (`python -c`, `node -e`) : seul, il est déjà permis par le socle
+# (`python`, `node`) ou par les commandes par défaut (`python3`).
+LANCEURS_GENERAUX = frozenset(
+    {
+        "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "pwsh",
+        "powershell", "cmd", "env", "eval", "exec", "command", "builtin", "xargs", "time",
+        "nohup", "nice", "timeout", "setsid", "stdbuf", "busybox", "parallel", "watch",
+        "script", "sudo", "doas", "su", "npx", "pnpx", "bunx", "uvx",
+    }
+)  # fmt: skip
+INTERPRETE = re.compile(
+    r"(python|pypy|node|nodejs|perl|ruby|php|deno|bun|lua|luajit|rscript|osascript|tclsh)[\d.]*"
+)
+OPTION_DE_CODE = re.compile(r"-[a-z]*[cepr]|--(eval|print|command|exec)(=.*)?")
+# Un premier mot proposé à la validation doit être un nom de commande simple : pas une variable
+# posée devant, pas une option, pas une parenthèse.
+MOT_DE_COMMANDE = re.compile(r"[\w./][\w.+/-]*")
+
+
+def nom_de_base(mot: str) -> str:
+    """Le nom d'une commande sans son chemin, ses guillemets ni « .exe », en minuscules."""
+    nom = mot.strip("'\"").replace("\\", "/").rsplit("/", 1)[-1]
+    return nom.lower().removesuffix(".exe")
+
+
+def lanceur_general(commande: str) -> bool:
+    """Dit si permettre cette commande (un mot ou un préfixe de plusieurs mots) laisserait les
+    agents tout lancer : l'un de ses mots est un lanceur général, ou un interprète suivi d'une
+    option qui exécute du code. Le seul filtre des lanceurs, pour la validation et le diagnostic."""
+    noms = [nom_de_base(m) for m in str(commande).split()]
+    for rang, nom in enumerate(noms):
+        if nom in LANCEURS_GENERAUX:
+            return True
+        if INTERPRETE.fullmatch(nom) and any(OPTION_DE_CODE.fullmatch(o) for o in noms[rang + 1 :]):
+            return True
+    return False
+
+
+def lanceurs_proposes(outils) -> list[str]:
+    """Les commandes d'un réglage d'outils proposé que `lanceur_general` écarte, dans l'ordre."""
+    valeur = outils.get("commandes_permises") if isinstance(outils, dict) else None
+    if not isinstance(valeur, list):
+        return []
+    return [v.strip() for v in valeur if isinstance(v, str) and lanceur_general(v)]
+
+
+def premier_mot_a_permettre(commande: str) -> str:
+    """Le premier mot d'une commande de contrôle, s'il peut être permis sans risque ; sinon ""."""
+    mots = commande.split()
+    mot = mots[0] if mots else ""
+    simple = MOT_DE_COMMANDE.fullmatch(mot) is not None
+    return mot if simple and not lanceur_general(mot) else ""
+
+
+def delier_du_blocage(demande: dict) -> dict:
+    """Un réglage d'outils gardé par un nouveau plan perd son lien au blocage de l'ancien chantier,
+    et sa question la phrase qui promettait la relance : c'est un réglage ordinaire."""
+    if demande.pop("pour_blocage", None) is not None:
+        avant, trouvee, _ = demande["question"].rpartition(" " + DEBLOQUE)
+        if trouvee:
+            demande["question"] = avant
+    return demande
+
+
+def phrase_controles_non_permis(
+    refusees: list[str], mots: list[str], sans_reglage: list[str]
+) -> str:
+    """Ce que l'atelier dit, à la validation, des commandes de contrôle non permises aux agents."""
+
+    def citees(commandes: list[str]) -> str:
+        return " ; ".join(f"« {c} »" for c in commandes)
+
+    parties = [
+        "Les contrôles que l'atelier rejoue après chaque livrable lancent des commandes que les "
+        f"agents n'ont pas le droit de lancer : {citees(refusees)}. Sans elles, un ouvrier ne "
+        "peut pas vérifier lui-même son travail, et sa tâche risque d'être refusée pour rien."
+    ]
+    if mots:
+        parties.append("Je te propose de permettre aux agents : " + ", ".join(mots) + ".")
+    if sans_reglage:
+        parties.append(
+            f"Pour {citees(sans_reglage)}, je ne sais pas proposer de réglage sûr : demande à "
+            "l'orchestrateur de s'en occuper."
+        )
+    parties.append("Le chantier démarre quand même.")
+    return " ".join(parties)
 
 
 RACINE_ATELIER = Path(__file__).resolve().parent.parent  # la démonstration cartographie l'Atelier
@@ -491,6 +599,10 @@ class Atelier:
         self._verrou_sessions = threading.Lock()  # ne protège que `_sessions_dites`
         self.fil: threading.Thread | None = None
         self.fil_message: threading.Thread | None = None
+        self.fil_diagnostic: threading.Thread | None = None
+        # Les demandes de blocage dont le diagnostic attend que la conversation se libère, dans
+        # l'ordre où le moteur les a signalées. Protégée par `moteur.verrou`, comme `occupe`.
+        self._diagnostics: deque[dict] = deque()
         self.occupe = False
         self.brouillon = {"texte": "", "outils": []}
         self.sur_vue = None
@@ -514,7 +626,21 @@ class Atelier:
             phrase = phrase_mode_illisible(lu)
             if not chantier.evenements or chantier.evenements[-1]["texte"] != phrase:
                 chantier.noter(phrase, auteur="orchestrateur")  # une fois par ouverture
+        self._signaler_diagnostics_interrompus()
         self._sauver()
+
+    @property
+    def moteur(self) -> Moteur:
+        return self._moteur
+
+    @moteur.setter
+    def moteur(self, moteur: Moteur) -> None:
+        """Chaque moteur que l'atelier crée ou adopte lui signale ses blocages (`_sur_blocage`).
+
+        Un nouveau chantier garde le même moteur, et donc ce rappel.
+        """
+        moteur.sur_blocage = self._sur_blocage
+        self._moteur = moteur
 
     def _noter_annonce(self, phrase: str, comparee_a: tuple) -> None:
         """Écrit la phrase, sauf si la dernière annonce du fil prise dans `comparee_a` est elle.
@@ -672,10 +798,37 @@ class Atelier:
 
     def valider_contrat(self) -> None:
         with self.moteur.verrou:
+            neuf = not self.moteur.chantier.contrat.valide
             self.moteur.chantier.contrat.valide = True
             self.moteur.chantier.noter("Contrat validé. Je lance le chantier.")
+            if neuf:  # la question se pose une fois, quand la personne valide : elle est là
+                self._verifier_les_controles()
         self._sauver()
         self.lancer()
+
+    def _verifier_les_controles(self) -> None:
+        """Sous le verrou, à la validation, sans modèle : les contrôles du profil sont-ils permis
+        aux agents ? Sinon, une seule demande d'outils propose de permettre leurs premiers mots.
+
+        Le moteur démarre quand même : l'atelier rejoue lui-même ces contrôles après chaque
+        livrable, avec ses propres droits ; un agent qui ne peut pas les lancer travaille sans
+        eux, ou demande une carte, et un refus qui se répète devient un blocage.
+        """
+        profil = self.moteur.profil
+        commandes = profil.get("commandes", [])
+        if not _liste_de_textes(commandes):
+            return
+        refusees = [c.strip() for c in commandes if c.strip() and not commande_permise(profil, c)]
+        if not refusees:
+            return
+        mots = [premier_mot_a_permettre(c) for c in refusees]
+        mots = list(dict.fromkeys(m for m in mots if m and not commande_permise(profil, m)))
+        sans_reglage = [c for c in refusees if premier_mot_a_permettre(c) not in mots]
+        question = phrase_controles_non_permis(refusees, mots, sans_reglage)
+        if mots:  # visible au tableau de bord comme tout réglage d'outils, avant tout lancement
+            self._ajouter_reglage(question, {"commandes_permises": mots, "commandes": None})
+        else:  # rien à proposer d'un clic : le fil le dit
+            self.moteur.chantier.noter(question)
 
     def decider(self, demande_id: str, choix: str) -> None:
         demande = next(d for d in self.moteur.chantier.demandes if d["id"] == demande_id)
@@ -686,8 +839,13 @@ class Atelier:
 
     # --- les outils du projet ----------------------------------------------------
 
-    def _proposer_outils(self, outils: dict) -> None:
-        """Transforme un réglage d'outils proposé par l'orchestrateur en décision à prendre."""
+    def _proposer_outils(self, outils: dict, blocage: dict | None = None) -> dict | None:
+        """Transforme un réglage d'outils proposé par l'orchestrateur en décision à prendre.
+
+        Rend la demande créée, ou None si le réglage était illisible. Avec `blocage` (la demande
+        de blocage que ce réglage doit lever), la demande porte `pour_blocage` : l'accepter
+        relancera seule la tâche bloquée, au même niveau.
+        """
 
         def liste(cle: str) -> list[str] | None:
             valeur = outils.get(cle)
@@ -706,32 +864,54 @@ class Atelier:
             parties.append(f"Contrôles rejoués par l'atelier après chaque livrable : {rejoues}.")
         if str(outils.get("pourquoi") or "").strip():
             parties.append(f"Pourquoi : {str(outils['pourquoi']).strip()}")
+        en_plus = {}
+        if blocage is not None:
+            parties.append(
+                f"{DEBLOQUE}{blocage['tache']} : si tu l'acceptes, je la relance seul, au même "
+                "niveau."
+            )
+            en_plus["pour_blocage"] = blocage["id"]
+        reglage = {"commandes_permises": permises, "commandes": controles}
+        return self._ajouter_reglage(" ".join(parties), reglage, **en_plus)
+
+    def _ajouter_reglage(self, question: str, reglage: dict, **en_plus) -> dict:
+        """Ajoute aux décisions une demande d'outils, qu'on accepte ou refuse ; la rend.
+
+        Son identifiant est « outils-N », N le rang qu'elle prend ; s'il est déjà pris (un
+        réglage gardé par un nouveau plan), le suivant libre : deux demandes ne se confondent pas.
+        """
         with self.moteur.verrou:
             demandes = self.moteur.chantier.demandes
-            demandes.append(
-                {
-                    "id": f"outils-{len(demandes) + 1}",
-                    "tache": None,
-                    "nature": "outils",
-                    "question": " ".join(parties),
-                    "options": [ACCEPTER_OUTILS, REFUSER_OUTILS],
-                    "reponse": None,
-                    "outils": {"commandes_permises": permises, "commandes": controles},
-                }
-            )
+            pris, rang = {d.get("id") for d in demandes}, len(demandes) + 1
+            while f"outils-{rang}" in pris:
+                rang += 1
+            demande = {
+                "id": f"outils-{rang}",
+                "tache": None,
+                "nature": "outils",
+                "question": question,
+                "options": [ACCEPTER_OUTILS, REFUSER_OUTILS],
+                "reponse": None,
+                "outils": reglage,
+                **en_plus,
+            }
+            demandes.append(demande)
+        return demande
 
     def _regler_outils(self, demande: dict, choix: str) -> None:
         """Applique (ou écarte) un réglage d'outils, l'écrit dans le profil et le fait valoir.
 
         Un réglage accepté mais non appliqué (profil illisible ou non écrit) redevient en
-        attente : l'accepter à nouveau, une fois le profil corrigé, l'applique.
+        attente : l'accepter à nouveau, une fois le profil corrigé, l'applique. Un réglage qui
+        lève un blocage, une fois appliqué, relance seul la tâche bloquée (`_annoncer_reglage`).
         """
         with self.moteur.verrou:
             if demande["reponse"] is not None:
                 return
             demande["reponse"] = choix
         if choix != ACCEPTER_OUTILS:
-            return self._dire("Réglage des outils écarté : rien n'a changé.")
+            suite = self._blocage_encore_ouvert(demande)
+            return self._dire(f"Réglage des outils écarté : rien n'a changé.{suite}")
         with self._verrou_profil:  # le même verrou que pour une règle « toujours »
             try:
                 fichier = self._profil_avec_outils(demande["outils"])
@@ -748,12 +928,57 @@ class Atelier:
             return self._rouvrir_reglage(demande, raison)
         if hasattr(self.moteur.controles, "regler_outils"):
             self.moteur.controles.regler_outils(fichier)
-        self._dire(
+        relancee = self._annoncer_reglage(demande, fichier)
+        self._sauver()
+        if relancee:
+            self.lancer()
+
+    def _annoncer_reglage(self, demande: dict, fichier: dict) -> bool:
+        """Dit au fil que le réglage est appliqué. S'il lève un blocage qui l'a fait naître et
+        attend encore, relance la tâche au même niveau, comme le bouton « Relancer au même
+        niveau » ; rend alors True (le moteur est à lancer). Ce choix est lu dans les options de
+        la demande de blocage, que le moteur écrit toujours dans le même ordre (`_rendre`)."""
+        debut = (
             "Outils réglés. Commandes permises aux agents : "
             + ", ".join(fichier["commandes_permises"])
-            + ". Une tâche revenue vers toi peut maintenant être relancée."
+            + "."
         )
-        self._sauver()
+        if not demande.get("pour_blocage"):
+            self._dire(debut + " Une tâche revenue vers toi peut maintenant être relancée.")
+            return False
+        with self.moteur.verrou:  # la demande de blocage ne peut pas recevoir d'autre réponse ici
+            blocage = self._blocage_lie(demande)
+            if blocage is None:
+                self._dire(f"{debut} Je ne relance rien : le blocage n'attend plus ta réponse.")
+                return False
+            self._dire(f"{debut} Je relance seul la tâche {blocage['tache']}, au même niveau.")
+            relancer_tel = blocage["options"][0]  # « Relancer au même niveau », toujours en tête
+            self.moteur.repondre(blocage["id"], relancer_tel)
+        return True
+
+    def _blocage_lie(self, demande: dict) -> dict | None:
+        """Sous le verrou : la demande de blocage que ce réglage d'outils doit lever, si c'est
+        bien celle qui l'a fait naître (son diagnostic l'a proposé, et la désigne en retour) et
+        si elle attend encore sa réponse ; sinon None. Un identifiant repris par un autre blocage,
+        après un nouveau plan, ne suffit donc jamais à relancer une tâche."""
+        ident = demande.get("pour_blocage")
+        if not ident:
+            return None
+        for blocage in self.moteur.chantier.demandes:
+            if blocage.get("nature") != "blocage" or blocage.get("id") != ident:
+                continue
+            ne_d_elle = blocage.get("diagnostic") == DIAGNOSTIC_PROPOSE
+            if ne_d_elle and blocage.get("reglage") == demande.get("id"):
+                return blocage if blocage.get("reponse") is None else None
+        return None
+
+    def _blocage_encore_ouvert(self, demande: dict) -> str:
+        """Après un réglage écarté : ce qu'il advient du blocage qu'il devait lever, ou ""."""
+        with self.moteur.verrou:
+            blocage = self._blocage_lie(demande)
+            if blocage is None:
+                return ""
+            return f" La tâche {blocage['tache']} reste bloquée : {BLOCAGE_OUVERT}"
 
     def _profil_avec_outils(self, outils: dict) -> dict:
         """Sous `_verrou_profil` : le profil lu, avec le réglage d'outils ajouté.
@@ -1141,9 +1366,11 @@ class Atelier:
     def message(self, texte: str) -> None:
         """Reçoit un message de la personne responsable et y répond en arrière-plan."""
         texte = texte.strip()
-        if not texte or self.occupe:
+        if not texte:
             return
-        with self.moteur.verrou:
+        with self.moteur.verrou:  # relu sous le verrou : un diagnostic peut prendre la main
+            if self.occupe:
+                return
             self.moteur.chantier.noter(texte, auteur="toi")
             self.occupe = True
         self._sauver()
@@ -1158,6 +1385,7 @@ class Atelier:
                 self.occupe = False
                 self.brouillon = {"texte": "", "outils": []}
             self._sauver()
+            self._lancer_diagnostic()  # un blocage signalé pendant la réponse passe maintenant
 
     def _dire(self, texte: str) -> None:
         with self.moteur.verrou:
@@ -1233,6 +1461,181 @@ class Atelier:
             self._dire(ecrit)
         self._dire("(Réponse arrêtée par toi. Tu peux écrire la suite.)")
 
+    # --- le diagnostic d'un blocage -------------------------------------------------
+
+    def _sur_blocage(self, demande: dict) -> None:
+        """Rappel du moteur quand il bloque une tâche : range sa demande pour un diagnostic.
+
+        Appelé depuis un fil du moteur, hors de son verrou : rend la main tout de suite. Le
+        message part dans un fil à part (`_diagnostiquer`) dès que la conversation est libre,
+        un seul par demande, dans l'ordre des blocages. Ne lève jamais : une erreur ici ne doit
+        pas passer pour une panne de la tâche.
+        """
+        try:
+            with self.moteur.verrou:
+                rangee = self._demande_du_chantier(demande)
+                if rangee is None or rangee.get("nature") != "blocage" or "diagnostic" in rangee:
+                    return
+                rangee["diagnostic"] = DIAGNOSTIC_EN_ATTENTE
+                self._diagnostics.append(rangee)
+            self._lancer_diagnostic()
+        except Exception as erreur:
+            with suppress(Exception):
+                self._dire(f"Je n'ai pas pu faire chercher la cause du blocage ({erreur}).")
+
+    def _demande_du_chantier(self, demande) -> dict | None:
+        """Sous le verrou : la demande du chantier en cours, elle-même ou de même identifiant."""
+        demandes = self.moteur.chantier.demandes
+        trouvee = next((d for d in demandes if d is demande), None)
+        if trouvee is None and isinstance(demande, dict):
+            trouvee = next((d for d in demandes if d.get("id") == demande.get("id")), None)
+        return trouvee
+
+    def _lancer_diagnostic(self) -> None:
+        """Envoie le diagnostic suivant si la conversation est libre ; sinon il attend sa fin."""
+        with self.moteur.verrou:
+            if self.occupe:
+                return
+            demande = self._prochain_diagnostic()
+            if demande is None:
+                return
+            self.occupe = True
+            demande["diagnostic"] = DIAGNOSTIC_EN_COURS
+            self.fil_diagnostic = threading.Thread(
+                target=self._diagnostiquer, args=(demande,), daemon=True
+            )
+            self.fil_diagnostic.start()
+
+    def _prochain_diagnostic(self) -> dict | None:
+        """Sous le verrou : la prochaine demande rangée qui attend encore, ou None.
+
+        Une demande qui a reçu entre-temps la réponse de la personne, ou qui n'est plus celle
+        du chantier en cours, n'est pas envoyée : la question ne se pose plus.
+        """
+        demandes = self.moteur.chantier.demandes
+        while self._diagnostics:
+            demande = self._diagnostics.popleft()
+            if any(d is demande for d in demandes) and demande["reponse"] is None:
+                return demande
+            demande["diagnostic"] = "sans_objet"
+        return None
+
+    def _diagnostiquer(self, demande: dict) -> None:
+        """Dans son fil : demande à l'orchestrateur la cause d'un blocage, et suit sa réponse."""
+        try:
+            self._recevoir_diagnostic(demande, self._envoyer_diagnostic(demande))
+        except Exception as erreur:
+            detail = " ".join(f"{type(erreur).__name__} : {erreur}".split())[:300]
+            phrase = (
+                f"Le diagnostic du blocage de la tâche {demande.get('tache')} a échoué sur une "
+                f"erreur de l'Atelier ({detail}) : {BLOCAGE_OUVERT}"
+            )
+            self._finir_diagnostic(demande, "echec", phrase)
+        finally:
+            with self.moteur.verrou:
+                self.occupe = False
+                self.brouillon = {"texte": "", "outils": []}
+            self._sauver()
+            self._lancer_diagnostic()
+
+    def _envoyer_diagnostic(self, demande: dict):
+        """Envoie le message de diagnostic dans la conversation ; rend la réponse."""
+
+        def liste(cle: str) -> list:
+            valeur = demande.get(cle)
+            return valeur if isinstance(valeur, list) else []
+
+        with self.moteur.verrou:
+            tache = self.moteur.chantier.tache(demande["tache"])
+            message = message_de_diagnostic(tache, liste("preuves"), liste("empechements"))
+            phrase = (
+                f"La tâche {tache.id} est bloquée : je demande à l'orchestrateur d'en chercher la "
+                "cause, sans t'attendre."
+            )
+            self.moteur.chantier.noter(phrase, tache.id, auteur="orchestrateur")
+        self._sauver()
+        return self._interroger(message)
+
+    def _recevoir_diagnostic(self, demande: dict, reponse) -> None:
+        """Affiche la réponse au diagnostic ; un bloc d'outils devient une demande liée au blocage.
+
+        Le plan, lui, ne change plus : un bloc de plan rendu ici n'est pas repris.
+        """
+        tache = demande.get("tache")
+        if not reponse.ok and reponse.erreur == ARRETE:
+            self._arreter_reponse(reponse)
+            phrase = f"Diagnostic du blocage de la tâche {tache} arrêté : {BLOCAGE_OUVERT}"
+            return self._finir_diagnostic(demande, "arrete", phrase)
+        if not reponse.ok:
+            phrase = (
+                f"Le diagnostic du blocage de la tâche {tache} a échoué, faute de joindre Claude "
+                f"Code ({reponse.erreur}) : {BLOCAGE_OUVERT}"
+            )
+            return self._finir_diagnostic(demande, "echec", phrase)
+        texte, outils = extraire_outils(reponse.texte)
+        texte, plan = extraire_plan(texte)
+        with self.moteur.verrou:
+            self.moteur.chantier.cout_usd += reponse.cout_usd
+            self.moteur.chantier.tokens += reponse.tokens
+        if texte:
+            self._dire(texte)
+        if plan:
+            self._dire("Plan non repris : le contrat est déjà validé.")
+        return self._proposer_pour_blocage(demande, outils)
+
+    def _proposer_pour_blocage(self, demande: dict, outils: dict | None) -> None:
+        """Offre d'un clic le réglage rendu par un diagnostic, lié à son blocage ; sauf s'il
+        permettrait un lanceur général (`lanceur_general`) : rien n'est alors offert, le fil dit
+        pourquoi, et la demande de blocage reste ouverte avec ses options."""
+        tache = demande.get("tache")
+        lanceurs = lanceurs_proposes(outils)
+        if lanceurs:
+            citees = ", ".join(f"« {m} »" for m in lanceurs)
+            phrase = (
+                f"Le diagnostic du blocage de la tâche {tache} propose de permettre aux agents "
+                f"{citees}, ce qui leur permettrait de tout lancer : je ne te le propose pas "
+                f"d'un clic, et {BLOCAGE_OUVERT}"
+            )
+            return self._finir_diagnostic(demande, "lanceur", phrase)
+        with self.moteur.verrou:  # le lien et son retour posés ensemble : aucun clic entre eux
+            reglage = self._proposer_outils(outils, blocage=demande) if outils else None
+            if reglage is not None:
+                demande["diagnostic"], demande["reglage"] = DIAGNOSTIC_PROPOSE, reglage["id"]
+                return None
+        phrase = (
+            f"Le diagnostic du blocage de la tâche {tache} ne propose aucun réglage d'outils "
+            f"utilisable : {BLOCAGE_OUVERT}"
+        )
+        return self._finir_diagnostic(demande, "sans_proposition", phrase)
+
+    def _finir_diagnostic(self, demande: dict, issue: str, phrase: str) -> None:
+        """Note l'issue d'un diagnostic qui ne propose rien, et dit au fil pourquoi."""
+        with self.moteur.verrou:
+            demande["diagnostic"] = issue
+            tache = str(demande.get("tache") or "")
+            self.moteur.chantier.noter(phrase, tache, auteur="orchestrateur")
+
+    def _signaler_diagnostics_interrompus(self) -> None:
+        """À l'ouverture : un diagnostic resté sans réponse quand l'Atelier s'est arrêté n'est
+        pas relancé seul (comme une tâche active, rien ne repart sans la personne) ; le fil le
+        dit, une fois."""
+        with self.moteur.verrou:
+            for demande in self.moteur.chantier.demandes:
+                if demande.get("nature") != "blocage" or demande.get("reponse") is not None:
+                    continue
+                if demande.get("diagnostic", DIAGNOSTIC_EN_ATTENTE) not in DIAGNOSTIC_INACHEVE:
+                    continue
+                demande["diagnostic"] = "interrompu"
+                tache = demande.get("tache")
+                self.moteur.chantier.noter(
+                    f"Le diagnostic du blocage de la tâche {tache} n'avait pas abouti quand "
+                    "l'Atelier s'est arrêté, et je ne le relance pas seul : sa demande reste "
+                    "ouverte, avec ses options. Écris-moi si tu veux que l'orchestrateur en "
+                    "cherche la cause.",
+                    str(tache or ""),
+                    auteur="orchestrateur",
+                )
+
     def _adopter(self, plan: dict, demande: str) -> None:
         """Transforme le plan rendu en tâches et en contrat à valider."""
         chantier, agent = self.moteur.chantier, self.moteur.agent
@@ -1242,9 +1645,12 @@ class Atelier:
                 return chantier.noter("Plan non repris : le contrat est déjà validé.")
             if not taches:
                 return chantier.noter("Le plan rendu ne contenait aucune tâche lisible.")
-            # Un réglage d'outils rendu avec le plan, ou avant lui, attend toujours sa réponse.
+            # Un réglage d'outils rendu avec le plan, ou avant lui, attend toujours sa réponse ;
+            # celui qui devait lever un blocage de l'ancien chantier n'est plus qu'un réglage.
             reglages = [
-                d for d in chantier.demandes if d.get("nature") == "outils" and d["reponse"] is None
+                delier_du_blocage(d)
+                for d in chantier.demandes
+                if d.get("nature") == "outils" and d["reponse"] is None
             ]
             chantier.taches, chantier.demandes, chantier.termine = taches, reglages, False
             chantier.agents_lances = chantier.montees = 0

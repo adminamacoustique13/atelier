@@ -1,10 +1,11 @@
+import json
 import subprocess
 import threading
 
 import pytest
 
 from atelier.agents import AgentSimule, Resultat
-from atelier.consignes import consigne_ouvrier, lire_verdict
+from atelier.consignes import consigne_ouvrier, dernier_json, lire_verdict
 from atelier.controles import ControlesGit, ControlesSimules, hors_perimetre, se_chevauchent
 from atelier.modele import Chantier, Contrat, Tache
 from atelier.moteur import (
@@ -28,8 +29,45 @@ def tache(identifiant, **champs):
     return Tache(id=identifiant, **{**reglages, **champs})
 
 
-def moteur(c, scenario=None):
-    agent = AgentSimule(scenario or {}, perimetres={t.id: t.perimetre for t in c.taches})
+# Des raisons de refus qui ne se ressemblent pas : deux à deux, `refus.meme_refus` les distingue.
+SUJETS = [
+    "La fonction ne gère pas la liste vide.",
+    "Le test ajouté compare la sortie à elle-même.",
+    "Le fichier de configuration n'est pas relu au démarrage.",
+    "La documentation contredit le comportement mesuré.",
+    "Les messages d'erreur restent en anglais.",
+    "Une division par zéro survient sur un tableau sans ligne.",
+    "Le cache garde une valeur périmée après une modification.",
+    "Les arrondis diffèrent du calcul de référence.",
+    "La sauvegarde écrase la version précédente sans copie.",
+    "Le journal ne note pas l'heure des événements.",
+    "La page se recharge deux fois au premier affichage.",
+    "Un import circulaire bloque le chargement du paquet.",
+]
+
+
+class AgentVarie(AgentSimule):
+    """L'agent simulé, dont chaque refus du vérificateur donne une raison différente.
+
+    L'agent simulé refuse toujours pour la même raison, mot pour mot : depuis V3b, une telle
+    suite bloque la tâche. Les tests de l'escalade (seconde chance, montée, plafond, relance
+    seule) la suivent avec des refus qui diffèrent, comme sur un vrai chantier qui avance.
+    """
+
+    def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                 copie_jetable=False, reprendre=None):  # fmt: skip
+        resultat = super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+        verdict = dernier_json(resultat.texte) if contexte["role"] == "verificateur" else None
+        if verdict and verdict.get("valide") is False:
+            rang = sum(a["role"] == "verificateur" for a in self.appels)
+            resultat.texte = json.dumps({**verdict, "resume": SUJETS[rang % len(SUJETS)]})
+        return resultat
+
+
+def moteur(c, scenario=None, varie=False):
+    perimetres = {t.id: t.perimetre for t in c.taches}
+    agent = (AgentVarie if varie else AgentSimule)(scenario or {}, perimetres=perimetres)
     return Moteur(c, agent, ControlesSimules()), agent
 
 
@@ -108,10 +146,16 @@ def test_chaque_agent_recoit_son_dosage_et_le_verificateur_est_au_dessus():
 
 
 def test_seconde_chance_puis_montee_d_un_cran():
-    """Une erreur d'agent ne se reprend pas : seconde chance au même niveau, puis un cran."""
+    """Un refus à l'enregistrement ne se reprend pas : seconde chance au même niveau, puis un cran.
+
+    (Une erreur d'agent, elle, ne fait plus monter : voir `test_une_erreur_d_agent_...`.)
+    """
     c = chantier([tache("A")])
-    m, agent = moteur(c, {"A": ["erreur", "erreur", "ok"]})
-    m.executer()
+    controles = ControlesReglables(enregistrements=[
+        "Conflit avec la branche principale.", "Les contrôles échouent une fois fusionné.",
+    ])  # fmt: skip
+    agent = AgentSimule(perimetres={"A": ["a.py"]})
+    Moteur(c, agent, controles).executer()
     a = c.tache("A")
     assert a.etat == "verifie"
     assert a.tentatives == 3
@@ -120,6 +164,7 @@ def test_seconde_chance_puis_montee_d_un_cran():
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
     assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low")]
     assert agent.reprises == []
+    assert any("Seconde chance au même niveau" in e["texte"] for e in c.evenements)
 
 
 def test_un_travail_bacle_monte_l_effort_pas_le_modele():
@@ -141,7 +186,7 @@ def test_au_plafond_la_tache_revient_avec_une_seule_decision():
 
 def test_relancer_au_meme_niveau_garde_le_dosage():
     c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
-    m, _ = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m, _ = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]}, varie=True)
     m.executer()
     avant = (c.tache("A").modele, c.tache("A").effort)
     m.repondre(c.demandes[0]["id"], RELANCER_TEL)
@@ -152,7 +197,7 @@ def test_relancer_au_meme_niveau_garde_le_dosage():
 
 def test_relancer_apres_decision_monte_d_un_cran_et_termine():
     c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
-    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]}, varie=True)
     m.executer()
     m.repondre(c.demandes[0]["id"], RELANCER)
     m.executer()
@@ -633,7 +678,7 @@ def test_l_accueil_resume_chaque_projet_sans_le_demarrer(tmp_path):
 
 def test_une_tache_epuisee_est_relancee_seule_un_cran_plus_haut():
     c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
-    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ne_sait_pas", "ok"]})
+    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ne_sait_pas", "ok"]}, varie=True)
     m.executer()
     a = c.tache("A")
     assert a.etat == "verifie" and c.demandes == [] and c.termine
@@ -648,9 +693,13 @@ def test_une_tache_epuisee_est_relancee_seule_un_cran_plus_haut():
 
 def test_la_relance_seule_n_a_lieu_qu_une_fois_puis_la_tache_revient():
     """Le plafond (Fable, effort max) laisse des crans libres : seule la borne des relances
-    seules rend la tâche, après ses tentatives et non au plafond."""
+    seules rend la tâche, après ses tentatives et non au plafond.
+
+    Les refus diffèrent (V3b) : trois « bâclé » mot pour mot bloqueraient la tâche au troisième,
+    avant toute relance seule.
+    """
     c = chantier([tache("A")], plafond_modele="fable", plafond_effort="max", max_tentatives=2)
-    m, agent = moteur(c, {"A": ["bacle"]})
+    m, agent = moteur(c, {"A": ["bacle"]}, varie=True)
     m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and len(c.demandes) == 1 and a.relances_auto == 1
@@ -664,7 +713,7 @@ def test_la_relance_seule_n_a_lieu_qu_une_fois_puis_la_tache_revient():
 
 def test_au_plafond_aucune_relance_seule():
     c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
-    m, _ = moteur(c, {"A": ["ne_sait_pas"]})
+    m, _ = moteur(c, {"A": ["ne_sait_pas"]}, varie=True)
     m.executer()
     assert c.tache("A").relances_auto == 0 and c.tache("A").etat == "revenu"
 
@@ -823,7 +872,7 @@ def test_une_panne_de_l_atelier_est_tracee_au_numero_de_la_tentative_en_cours():
 
 def test_tout_en_haut_de_l_echelle_la_tache_revient_au_plafond_sans_panne():
     c = chantier([tache("P", type="physique")], plafond_modele="fable", plafond_effort="max")
-    m, _ = moteur(c, {"P": ["ne_sait_pas"]})
+    m, _ = moteur(c, {"P": ["ne_sait_pas"]}, varie=True)
     m.executer()
     p = c.tache("P")
     assert p.etat == "revenu" and p.tentatives == 2
@@ -834,7 +883,7 @@ def test_tout_en_haut_de_l_echelle_la_tache_revient_au_plafond_sans_panne():
 
 def test_la_relance_seule_ne_depasse_jamais_le_plafond_du_contrat():
     c = chantier([tache("A")], plafond_modele="opus", plafond_effort="low", max_tentatives=2)
-    m, agent = moteur(c, {"A": ["ne_sait_pas"]})
+    m, agent = moteur(c, {"A": ["ne_sait_pas"]}, varie=True)
     m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and a.relances_auto == 0 and a.tentatives == 2
@@ -859,7 +908,7 @@ class Horloge:
         return self.t
 
 
-def moteur_chronometre(c, scenario=None, paralleles=3):
+def moteur_chronometre(c, scenario=None, paralleles=3, varie=False):
     """Un moteur dont chaque étape fait avancer l'horloge de test d'un pas connu (`PAS`)."""
     horloge = Horloge()
 
@@ -880,7 +929,7 @@ def moteur_chronometre(c, scenario=None, paralleles=3):
         def annuler(self, t, dossier):
             horloge.t += PAS["annuler"]
 
-    class Agent(AgentSimule):
+    class Agent(AgentVarie if varie else AgentSimule):
         def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
                      copie_jetable=False, reprendre=None):  # fmt: skip
             horloge.t += PAS[contexte["role"]]
@@ -954,7 +1003,7 @@ def test_une_tache_qui_attend_une_place_compte_le_temps_de_celle_qui_l_occupe():
 
 def test_une_relance_decidee_par_la_personne_compte_son_attente_depuis_la_decision():
     c = chantier([tache("A", type="physique")], plafond_modele="fable", plafond_effort="max")
-    m, horloge = moteur_chronometre(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m, horloge = moteur_chronometre(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]}, varie=True)
     m.executer()
     assert c.tache("A").etat == "revenu"
     horloge.t += 600  # la personne met dix minutes à répondre : ce n'est pas une file d'attente
@@ -1262,7 +1311,7 @@ def test_une_session_perdue_garde_la_suite_d_un_refus_sans_reprise(maniere):
 
 def test_au_plafond_la_reprise_refusee_d_un_premier_depart_repart_au_meme_niveau():
     c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
-    m, agent = moteur(c, {"A": ["bacle", "ok"]})
+    m, agent = moteur(c, {"A": ["bacle", "ok"]}, varie=True)
     m.executer()
     a = c.tache("A")
     assert a.etat == "verifie" and a.tentatives == 2 and c.montees == 0
@@ -1272,7 +1321,7 @@ def test_au_plafond_la_reprise_refusee_d_un_premier_depart_repart_au_meme_niveau
 
 def test_au_plafond_un_second_depart_refuse_apres_sa_reprise_revient():
     c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
-    m, agent = moteur(c, {"A": ["bacle"]})
+    m, agent = moteur(c, {"A": ["bacle"]}, varie=True)
     m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and a.tentatives == 2 and len(c.demandes) == 1
@@ -1435,12 +1484,16 @@ def test_un_ouvrier_repris_qui_finit_en_erreur_ou_au_delai_vaut_reprise_refusee(
     assert [e["origine"] for e in a.historique] == ["verdict", "agent", ""]
     assert (erreur or "Arrêt simulé de l'agent.") in a.historique[1]["detail"]
     assert controles.journal.count("verificateur") == 2  # aucun après la reprise en erreur
-    assert controles.annulees == ["A"] and departs(agent) == [("sonnet", "low"), ("opus", "low")]
+    # Une erreur d'agent ne fait pas monter d'un cran (V3b) : le départ neuf reste au même niveau.
+    assert controles.annulees == ["A"] and departs(agent) == [("sonnet", "low")] * 2
+    assert c.montees == 0
+    assert any(t.startswith("Refusée après sa reprise.") and "Seconde chance au même niveau" in t
+               for t in textes_du_fil(c))  # fmt: skip
 
 
 def test_jamais_deux_reprises_pour_un_meme_depart():
     c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
-    m, agent = moteur(c, {"A": ["ne_sait_pas"]})
+    m, agent = moteur(c, {"A": ["ne_sait_pas"]}, varie=True)
     m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and a.tentatives >= 4
@@ -1478,13 +1531,18 @@ def test_apres_un_redemarrage_en_pleine_reprise_la_tache_repart_d_une_copie_prop
 
 
 class AgentVerificateurEnErreur(AgentParRang):
-    """Le premier vérificateur s'arrête sur une erreur, même s'il a écrit un verdict."""
+    """Les `en_erreur` premiers vérificateurs s'arrêtent sur une erreur, même avec un verdict.
+
+    Deux par défaut : le premier, puis celui que le moteur relance une fois sur la même copie.
+    """
+
+    en_erreur = 2
 
     def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
                  copie_jetable=False, reprendre=None):  # fmt: skip
         resultat = super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
                                     copie_jetable, reprendre)  # fmt: skip
-        premier = sum(role == "verificateur" for role, _, _ in self.consignes) == 1
+        premier = sum(role == "verificateur" for role, _, _ in self.consignes) <= self.en_erreur
         if contexte["role"] == "verificateur" and premier:
             texte = '{"valide": false, "motif": "bacle", "resume": "Inachevé."}'
             return Resultat(ok=False, erreur="Panne du vérificateur.", texte=texte)
@@ -1503,8 +1561,8 @@ def test_ces_refus_ne_se_reprennent_pas(cas):
         issues = {("A", "ouvrier"): ["erreur", "ok"]}
     elif cas == "consigne":
         issues = {("A", "verificateur"): ["consigne"]}
-    elif cas == "verdict_illisible":
-        textes = {"A": ["J'ai relu, mais je n'ai pas eu le temps de conclure."]}
+    elif cas == "verdict_illisible":  # deux : le vérificateur illisible est relancé une fois
+        textes = {"A": ["J'ai relu, mais je n'ai pas eu le temps de conclure."] * 2}
     elif cas == "verificateur_en_erreur":
         agent_cls = AgentVerificateurEnErreur
     else:
@@ -1536,3 +1594,425 @@ def test_le_verdict_garde_et_transmis_est_borne_a_ses_8000_derniers_caracteres()
     assert long[-8000:].strip() in message and "DEBUT-COUPE" not in message
     seconde = consignes_de(agent, "verificateur")[1]
     assert long[-8000:].strip() in seconde and "DEBUT-COUPE" not in seconde
+
+
+# --- le blocage : une tâche que relancer ne ferait pas avancer (V3b) ------------------------
+
+UV = "Bash(uv sync)"
+EMPECHEMENT_UV = "uv sync — l'outil a été refusé : je ne peux pas aller plus loin."
+CLES_D_UNE_DEMANDE = {"id", "tache", "question", "options", "reponse"}
+
+
+def blocages(c):
+    return [d for d in c.demandes if d.get("nature") == "blocage"]
+
+
+def moteur_empeche(taches, scenario=None, empeches=None, agent_cls=AgentSimule):
+    c = chantier(taches)
+    perimetres = {t.id: t.perimetre for t in taches}
+    agent = agent_cls(scenario or {}, perimetres=perimetres, empeches=empeches or {"A": [UV]})
+    controles = ControlesComptes()
+    return c, Moteur(c, agent, controles), agent, controles
+
+
+def test_un_ouvrier_empeche_bloque_la_tache_sans_reprise_ni_depart_neuf():
+    c, m, agent, controles = moteur_empeche([tache("A")], {"A": ["ne_sait_pas"]})
+    assert m.sur_blocage is None
+    m.executer()
+    a = c.tache("A")
+    assert [x["role"] for x in agent.appels] == ["ouvrier", "verificateur"]  # un seul ouvrier
+    assert agent.reprises == [] and a.tentatives == 1 and a.montees == 0
+    assert a.etat == "revenu" and not c.termine
+    assert controles.preparees == ["A"] and controles.annulees == ["A"]
+    assert traces(a) == [(1, "ne_sait_pas", False)]  # le blocage n'ajoute pas d'entrée
+    (demande,) = c.demandes
+    assert set(demande) == CLES_D_UNE_DEMANDE | {"nature", "preuves", "empechements"}
+    assert (demande["nature"], demande["tache"], demande["reponse"]) == ("blocage", "A", None)
+    assert demande["id"] == "A-1"
+    assert demande["options"] == [RELANCER_TEL, RELANCER, ABANDONNER]
+    assert demande["empechements"] == [EMPECHEMENT_UV, UV]
+    assert demande["preuves"] == [
+        "Tentative 1, vérificateur : Le calcul est faux sur un cas de référence."
+    ]
+    question = demande["question"]
+    assert question.startswith(
+        "Tâche A, « Tâche A » : elle est bloquée parce qu'un agent a été empêché de travailler : "
+        f"« {EMPECHEMENT_UV[:-1]} » ; « Bash(uv sync) ». La relancer telle quelle buterait"
+    )
+    assert question.endswith("Le refus : « Le calcul est faux sur un cas de référence ».")
+    fil = textes_du_fil(c)
+    assert "Seconde chance" not in " ".join(fil) and "Je redonne la main" not in " ".join(fil)
+    assert f"J'ai besoin de toi : {question.split(' : ', 1)[1]}" in fil
+
+
+EMPECHE_PAR_LE_VERDICT = (
+    "Je n'ai pas pu lancer les tests.\n"
+    '{"valide": false, "motif": "ne_sait_pas", "resume": "Rien ne prouve que les tests '
+    'passent.", "empeche": ["uv run pytest -q — refusé"]}'
+)
+EMPECHE_SANS_VERDICT = "EMPÊCHÉ : uv run pytest -q — refusé\nJe ne peux pas conclure."
+
+
+@pytest.mark.parametrize("texte", [EMPECHE_PAR_LE_VERDICT, EMPECHE_SANS_VERDICT])
+def test_un_verificateur_empeche_bloque_la_tache_sans_etre_relance(texte):
+    c, m, agent, controles = moteur_a_reprises([tache("A")], textes={"A": [texte]})
+    m.executer()
+    a = c.tache("A")
+    assert controles.journal == ["ouvrier", "perimetre", "controles", "verificateur"]
+    assert agent.reprises == [] and a.tentatives == 1 and a.etat == "revenu"
+    (demande,) = blocages(c)
+    assert demande["empechements"] == ["uv run pytest -q — refusé"]
+    assert "relance un" not in " ".join(textes_du_fil(c))
+
+
+def test_trois_refus_identiques_de_suite_bloquent_meme_si_un_cran_reste():
+    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
+    m, agent = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    a = c.tache("A")
+    assert traces(a) == [(1, "ne_sait_pas", False), (1, "ne_sait_pas", True),
+                         (2, "ne_sait_pas", False)]  # fmt: skip
+    assert departs(agent) == [("sonnet", "low"), ("opus", "low")]  # le cran vers Fable restait
+    assert [r["tentative"] for r in agent.reprises] == [1]  # le troisième refus n'est pas repris
+    assert a.montees == 1 and a.etat == "revenu"
+    (demande,) = blocages(c)
+    assert "refusée trois fois de suite pour la même raison" in demande["question"]
+    assert demande["question"].count("« Le calcul est faux sur un cas de référence »") == 3
+    assert len(demande["preuves"]) == 3 and demande["empechements"] == []
+
+
+# Les trois vrais refus de la tâche B du chantier mesuré (2026-11-11) : A et B, B et C ne se
+# ressemblent que par leurs mots ; A et C ont la même forme.
+SONARQ = [
+    "uv.lock est absent du dépôt et les versions de ruff, pytest et pre-commit ne sont figées "
+    "nulle part, donc le critère 1 n'est pas tenu",
+    "uv.lock est absent et les dépendances de développement ne sont pas figées, et rien ne "
+    "montre que uv sync, ruff check et pytest passent",
+    "uv.lock est absent, donc les versions de ruff, pytest et pre-commit ne sont figées "
+    "nulle part et le critère 1 n'est pas tenu",
+]
+
+
+def verdict_refuse(resume, motif="ne_sait_pas"):
+    return json.dumps({"valide": False, "motif": motif, "resume": resume}, ensure_ascii=False)
+
+
+def test_trois_refus_qui_ne_se_ressemblent_que_par_les_mots_ne_bloquent_pas_si_un_cran_reste():
+    c, m, agent, _ = moteur_a_reprises(
+        [tache("A")], textes={"A": [verdict_refuse(r) for r in SONARQ]},
+        plafond_modele="fable", plafond_effort="high",
+    )  # fmt: skip
+    m.executer()
+    a = c.tache("A")
+    assert blocages(c) == [] and a.etat == "verifie"
+    assert traces(a) == [(1, "ne_sait_pas", False), (1, "ne_sait_pas", True),
+                         (2, "ne_sait_pas", False), (2, "valide", True)]  # fmt: skip
+    assert departs(agent) == [("sonnet", "low"), ("opus", "low")]
+
+
+@pytest.mark.parametrize(
+    "contrat", [{"plafond_modele": "sonnet", "plafond_effort": "low"}, {"max_montees": 0}]
+)
+def test_deux_refus_identiques_sans_cran_disponible_bloquent(contrat):
+    c = chantier([tache("A")], **contrat)
+    m, agent = moteur(c, {"A": ["bacle"]})
+    m.executer()
+    a = c.tache("A")
+    assert traces(a) == [(1, "bacle", False), (1, "bacle", True)]  # le départ et sa reprise
+    assert [x["role"] for x in agent.appels].count("ouvrier") == 2
+    assert a.tentatives == 1 and c.montees == 0 and a.etat == "revenu"
+    (demande,) = blocages(c)
+    question = demande["question"]
+    assert "refusée deux fois de suite pour la même raison" in question
+    assert "le contrat ne permet plus de monter d'un cran" in question
+    assert question.count("« Un critère de la consigne a été négligé »") == 2
+    assert question.endswith("relance-la au même niveau.")
+
+
+def test_un_refus_identique_laisse_partir_la_relance_seule_qui_monte_d_un_cran():
+    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high", max_tentatives=1)
+    m, agent = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.relances_auto == 1  # tentatives épuisées : le cran restant était la relance seule
+    assert departs(agent) == [("sonnet", "low"), ("opus", "low")]
+    assert [r["tentative"] for r in agent.reprises] == [1, 2]
+    (demande,) = blocages(c)
+    assert "deux fois de suite" in demande["question"] and len(demande["preuves"]) == 4
+
+
+SORTIE_UN = "....F\nFAILED tests/test_a.py::test_un - assert 1 == 2\n1 failed, 4 passed in 0.12s"
+SORTIE_DEUX = "....F\nFAILED tests/test_a.py::test_deux - assert 3 == 4\n1 failed, 4 passed in 0.3s"
+SORTIE_UN_AUTREMENT = (  # le même test échoue, avec une tout autre sortie
+    "tests/test_a.py:41: in test_un\n    resultat = calculer(donnees_de_reference())\n"
+    "coeur/calcul.py:12: in calculer\n    return table[cle]\nE   KeyError: 'pression'\n"
+    "FAILED tests/test_a.py::test_un - KeyError: 'pression'\n1 failed, 4 passed in 0.40s"
+)
+
+
+@pytest.mark.parametrize(("seconde", "bloquee"), [(SORTIE_DEUX, False),
+                                                  (SORTIE_UN_AUTREMENT, True)])  # fmt: skip
+def test_deux_refus_des_controles_se_comparent_par_les_tests_en_echec(seconde, bloquee):
+    c, m, _, _ = moteur_a_reprises([tache("A")], sorties=[(False, SORTIE_UN), (False, seconde)],
+                                   plafond_modele="sonnet", plafond_effort="low")  # fmt: skip
+    m.executer()
+    a = c.tache("A")
+    assert traces(a)[:2] == [(1, "ne_sait_pas", False), (1, "ne_sait_pas", True)]
+    assert [e["origine"] for e in a.historique[:2]] == ["controles"] * 2
+    if bloquee:
+        assert a.etat == "revenu" and a.tentatives == 1 and len(blocages(c)) == 1
+    else:  # au plafond, la reprise refusée d'un premier départ repart au même niveau
+        assert a.etat == "verifie" and a.tentatives == 2 and blocages(c) == []
+        assert any("je repars de zéro au même niveau" in t for t in textes_du_fil(c))
+
+
+def test_le_rappel_recoit_la_demande_hors_du_verrou_une_fois_qu_elle_est_sauvee():
+    sauvees, recues = [], []
+    c, m, _, _ = moteur_empeche([tache("A")], {"A": ["ne_sait_pas"]})
+    m.sur_changement = lambda: sauvees.append(len(c.demandes))
+    m.verrou = VerrouSuivi()
+    m.sur_blocage = lambda demande: recues.append((demande, m.verrou.tenu_ici(), list(sauvees)))
+    m.executer()
+    ((demande, sous_verrou, avant),) = recues
+    assert demande is c.demandes[-1] and demande["nature"] == "blocage"
+    assert not sous_verrou
+    assert avant and avant[-1] == 1  # sauvée avec sa demande avant que le rappel ne parte
+
+
+def test_un_rappel_qui_leve_est_note_au_fil_et_le_moteur_continue():
+    c, m, _, _ = moteur_empeche([tache("A"), tache("B"), tache("C", depend_de=["A"])],
+                                {"A": ["ne_sait_pas", "ok"]})  # fmt: skip
+
+    def rappel(demande):
+        raise RuntimeError("diagnostic   impossible")
+
+    m.sur_blocage = rappel
+    m.executer()
+    assert [t.etat for t in c.taches] == ["revenu", "verifie", "a_lancer"]
+    note = ("La suite donnée au blocage a échoué (RuntimeError : diagnostic impossible). La "
+            "demande reste ouverte : tu peux y répondre comme d'habitude.")  # fmt: skip
+    assert note in textes_du_fil(c)
+    assert all(e["issue"] != "panne" for e in c.tache("A").historique)
+    (demande,) = c.demandes
+    assert demande["reponse"] is None
+    m.repondre(demande["id"], RELANCER_TEL)
+    m.executer()
+    assert [t.etat for t in c.taches] == ["verifie"] * 3 and c.termine
+
+
+def test_une_tache_independante_va_au_bout_pendant_le_blocage():
+    bloquee = threading.Event()
+
+    class Agent(AgentSimule):
+        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                     copie_jetable=False, reprendre=None):  # fmt: skip
+            if (contexte["tache"], contexte["role"]) == ("B", "ouvrier"):
+                bloquee.wait(5)  # B travaille encore quand A est bloquée
+            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+
+    c, m, _, _ = moteur_empeche([tache("A"), tache("B"), tache("C", depend_de=["A"])],
+                                {"A": ["ne_sait_pas"]}, agent_cls=Agent)  # fmt: skip
+    m.sur_blocage = lambda demande: bloquee.set()
+    m.executer()
+    assert bloquee.is_set()
+    assert [t.etat for t in c.taches] == ["revenu", "verifie", "a_lancer"]
+    fil = [(e["tache"], e["texte"]) for e in c.evenements]
+    rendue = next(i for i, (t, x) in enumerate(fil) if t == "A" and x.startswith("J'ai besoin"))
+    assert fil.index(("B", "Vérifiée et enregistrée.")) > rendue
+
+
+@pytest.mark.parametrize("choix", [RELANCER_TEL, RELANCER, ABANDONNER])
+def test_repondre_a_un_blocage_fait_ce_que_fait_l_option_d_aujourd_hui(choix):
+    from dataclasses import asdict
+
+    c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
+    m, _ = moteur(c, {"A": ["bacle"]})
+    m.executer()
+    (demande,) = blocages(c)
+    ordinaire = Chantier.depuis_dict(c.en_dict())  # le même état, avec une demande d'avant V3b
+    for cle in ("nature", "preuves", "empechements"):
+        del ordinaire.demandes[-1][cle]
+    autre, _ = moteur(ordinaire)
+    m.repondre(demande["id"], choix)
+    autre.repondre(demande["id"], choix)
+    assert asdict(c.tache("A")) == asdict(ordinaire.tache("A"))
+    assert demande["reponse"] == choix and textes_du_fil(c)[-1] == textes_du_fil(ordinaire)[-1]
+
+
+def test_relancer_au_meme_niveau_apres_un_blocage_repart_avec_sa_reprise_a_chaud():
+    issues = {("A", "verificateur"): ["bacle", "bacle", "bacle", "ok"]}
+    c, m, agent, controles = moteur_a_reprises([tache("A")], issues, plafond_modele="sonnet",
+                                               plafond_effort="low")  # fmt: skip
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and traces(a) == [(1, "bacle", False), (1, "bacle", True)]
+    m.repondre(blocages(c)[0]["id"], RELANCER_TEL)
+    m.executer()
+    assert a.etat == "verifie" and a.tentatives == 2 and c.termine
+    # Le premier refus après la relance est le même qu'avant : il ne prive pas de la reprise.
+    assert traces(a)[2:] == [(2, "bacle", False), (2, "valide", True)]
+    assert [r["tentative"] for r in agent.reprises] == [1, 2]
+    assert controles.preparees == ["A", "A"] and departs(agent) == [("sonnet", "low")] * 2
+
+
+def test_deux_erreurs_d_agent_identiques_bloquent_sans_monter():
+    c = chantier([tache("A")])
+    m, agent = moteur(c, {"A": ["erreur", "erreur", "ok"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.tentatives == 2 and c.montees == 0
+    assert departs(agent) == [("sonnet", "low")] * 2 and agent.reprises == []
+    assert [e["origine"] for e in a.historique] == ["agent", "agent"]
+    assert any("Seconde chance au même niveau" in t for t in textes_du_fil(c))
+    (demande,) = blocages(c)
+    assert "les agents se sont arrêtés deux fois de suite sur la même erreur" in demande["question"]
+
+
+@pytest.mark.parametrize(("limites", "nature"), [(["surcharge", "refus"], None),
+                                                 (["refus", "refus"], "blocage")])  # fmt: skip
+def test_une_limite_ou_une_surcharge_sont_des_erreurs_d_agent_sans_montee(limites, nature):
+    from atelier.agents import LIMITE_ATTEINTE, SURCHARGE
+
+    c = chantier([tache("A")])
+    agent = AgentSimule(perimetres={"A": ["a.py"]}, limites={"A": limites})
+    Moteur(c, agent, ControlesSimules()).executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.tentatives == 2 and c.montees == 0
+    assert departs(agent) == [("sonnet", "low")] * 2
+    assert [e["origine"] for e in a.historique] == ["agent"] * 2
+    erreurs = {"surcharge": SURCHARGE, "refus": LIMITE_ATTEINTE}
+    assert [erreurs[x] in e["detail"] for x, e in zip(limites, a.historique, strict=True)] == [
+        True, True,
+    ]  # fmt: skip
+    (demande,) = c.demandes
+    assert demande.get("nature") == nature
+    if nature is None:
+        assert "deux erreurs d'agent de suite" in demande["question"]
+
+
+def test_une_erreur_d_agent_apres_un_refus_repart_au_meme_niveau():
+    issues = {("A", "verificateur"): ["bacle", "bacle", "ok"],
+              ("A", "ouvrier"): ["ok", "ok", "erreur", "ok"]}  # fmt: skip
+    c, m, agent, _ = moteur_a_reprises([tache("A")], issues)
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 3
+    assert departs(agent) == [("sonnet", "low"), ("sonnet", "medium"), ("sonnet", "medium")]
+    assert c.montees == 1  # la seule montée suit le refus du vérificateur, pas l'erreur
+
+
+def test_une_erreur_d_agent_au_bout_des_tentatives_ne_relance_pas_seule_plus_haut():
+    c = chantier([tache("A")], max_tentatives=1)
+    m, agent = moteur(c, {"A": ["erreur", "ok"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.relances_auto == 0 and c.montees == 0
+    assert departs(agent) == [("sonnet", "low")]
+    assert "1 tentatives sans succès" in c.demandes[-1]["question"]
+
+
+@pytest.mark.parametrize("en_erreur", [1, 2])
+def test_un_verificateur_en_erreur_est_relance_une_fois_sur_la_meme_copie(en_erreur):
+    c, m, agent, controles = moteur_a_reprises([tache("A")], agent_cls=AgentVerificateurEnErreur)
+    agent.en_erreur = en_erreur
+    m.executer()
+    a = c.tache("A")
+    assert controles.journal[:5] == ["ouvrier", "perimetre", "controles", "verificateur",
+                                     "verificateur"]  # fmt: skip
+    assert controles.preparees[0] == "A" and agent.reprises == []
+    relance = ("Le vérificateur s'est arrêté sur une erreur (Panne du vérificateur) : j'en "
+               "relance un, une seule fois, sur la même copie.")  # fmt: skip
+    assert textes_du_fil(c).count(relance) == 1
+    if en_erreur == 1:  # le second vérificateur accepte : le livrable entre, rien n'est jeté
+        assert traces(a) == [(1, "valide", False)] and controles.annulees == []
+        assert c.agents_lances == 3
+    else:  # deux erreurs : une erreur d'agent, sans montée
+        assert traces(a) == [(1, "ne_sait_pas", False), (2, "valide", False)]
+        assert a.historique[0]["origine"] == "agent"
+        assert a.historique[0]["detail"] == (
+            "Le vérificateur s'est arrêté sur une erreur : Panne du vérificateur."
+        )
+        assert departs(agent) == [("sonnet", "low")] * 2 and controles.annulees == ["A"]
+
+
+def test_un_verdict_illisible_est_relance_une_fois_sur_la_meme_copie():
+    texte = "J'ai relu, mais je n'ai pas eu le temps de conclure."
+    c, m, agent, controles = moteur_a_reprises([tache("A")], textes={"A": [texte]})
+    m.executer()
+    assert controles.journal == ["ouvrier", "perimetre", "controles", "verificateur",
+                                 "verificateur"]  # fmt: skip
+    assert traces(c.tache("A")) == [(1, "valide", False)] and controles.annulees == []
+    assert ("Le vérificateur n'a pas rendu de verdict lisible : j'en relance un, une seule fois, "
+            "sur la même copie.") in textes_du_fil(c)  # fmt: skip
+
+
+def test_un_empechement_sur_un_livrable_accepte_n_empeche_pas_l_enregistrement():
+    c = chantier([tache("A")])
+    controles = ControlesReglables()
+    agent = AgentSimule(perimetres={"A": ["a.py"]}, empeches={"A": [UV]})
+    Moteur(c, agent, controles).executer()
+    assert c.tache("A").etat == "verifie" and controles.enregistrees == ["A"] and c.termine
+    assert c.demandes == []
+    fil = textes_du_fil(c)
+    note = fil[fil.index("Vérifiée et enregistrée.") + 1]
+    assert note == (
+        f"Un agent a signalé un empêchement pendant cette tâche : « {EMPECHEMENT_UV[:-1]} » ; "
+        "« Bash(uv sync) ». Le livrable a quand même été accepté et enregistré. Si cette "
+        "commande doit servir aux agents, tu peux la leur permettre dans les outils du projet."
+    )
+
+
+def test_un_arret_l_emporte_sur_un_empechement():
+    class Controles(ControlesComptes):
+        def mecaniques(self, t, dossier):
+            assert m.arreter(t.id)  # aucun agent ne tourne : le drapeau retient le vérificateur
+            return super().mecaniques(t, dossier)
+
+    c = chantier([tache("A")])
+    agent = AgentSimule(perimetres={"A": ["a.py"]}, empeches={"A": [UV]})
+    m = Moteur(c, agent, Controles())
+    m.sur_blocage = rappels = []  # ne doit jamais servir
+    m.executer()
+    a = c.tache("A")
+    assert blocages(c) == [] and rappels == []
+    assert traces(a) == [(1, "arretee", False)] and a.etat == "revenu"
+    assert c.demandes[-1]["question"].endswith("arrêtée par toi.")
+
+
+def test_une_demande_de_blocage_reste_ouverte_apres_un_redemarrage_sans_rappel(tmp_path):
+    c, m, _, _ = moteur_empeche([tache("A")], {"A": ["ne_sait_pas"]})
+    m.executer()
+    c.sauver(tmp_path / "etat.json")
+    relu = Chantier.charger(tmp_path / "etat.json")
+    rappels, neuf = [], AgentSimule(perimetres={"A": ["a.py"]})
+    redemarre = Moteur(relu, neuf, ControlesSimules())
+    redemarre.sur_blocage = rappels.append
+    redemarre.executer()
+    assert rappels == [] and neuf.appels == []
+    assert relu.demandes == c.demandes and relu.demandes[0]["reponse"] is None
+    assert relu.demandes[0]["nature"] == "blocage" and relu.tache("A").etat == "revenu"
+
+
+def test_les_preuves_sont_les_cinq_derniers_refus_et_chacune_est_bornee():
+    from atelier.moteur import REPETE, Jugement
+
+    t = tache("A")
+    long = "DEBUT-COUPE " + "x" * 3000 + " FAILED fin"
+    issues = ["ne_sait_pas", "valide", "panne", "arretee", "bacle", "deborde", "bacle",
+              "ne_sait_pas", "ne_sait_pas"]  # fmt: skip
+    t.historique = [
+        {"tentative": i + 1, "issue": issue, "detail": f"refus {i + 1}", "origine": "verdict"}
+        for i, issue in enumerate(issues)
+    ]
+    t.historique[-1]["detail"] = long
+    c = chantier([t])
+    m, _ = moteur(c)
+    m._bloquer(t, Jugement("ne_sait_pas", long, "verdict", blocage=REPETE))
+    (demande,) = c.demandes
+    assert [p.split(" : ")[0] for p in demande["preuves"]] == [
+        f"Tentative {i}, vérificateur" for i in (5, 6, 7, 8, 9)
+    ]
+    assert demande["preuves"][-1] == "Tentative 9, vérificateur : […] " + long[-2000:]
+    assert "DEBUT-COUPE" not in demande["question"]
+    assert "« […] " + "x" * 289 + " FAILED fin »" in demande["question"]  # 300 caractères

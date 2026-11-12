@@ -3,6 +3,12 @@
 Module pur : aucun effet de bord, aucun import d'un autre module d'Atelier. Le moteur s'en sert
 pour ne pas relancer une tâche refusée plusieurs fois pour la même raison, et pour lire ce que
 les agents disent de ce qui les empêche de travailler (une commande interdite, par exemple).
+
+Deux degrés de ressemblance, mesurés sur de vrais refus (voir le cahier, « V3-refus ») :
+`meme_refus` accepte aussi deux détails qui partagent assez de mots, ce qui reconnaît un refus
+reformulé mais se trompe parfois sur deux refus voisins ; `meme_forme` exige des détails de
+forme quasi identique. Un refus des contrôles automatiques se compare d'abord par les tests en
+échec et les codes du contrôle de forme lus dans sa sortie, pas par son texte.
 """
 
 from __future__ import annotations
@@ -35,10 +41,36 @@ MOTS_VIDES = frozenset(
 )
 """Mots trop courants dans les refus pour prouver qu'ils parlent du même sujet."""
 
+ORIGINES_CONTROLEES = ("controles", "integration")
+"""Les origines dont le détail porte la sortie des contrôles automatiques du projet."""
+
+ORIGINES_SANS_MOTS = ("agent",)
+"""Les origines dont le détail est écrit par le code, jamais reformulé par un modèle : la
+ressemblance de mots n'y reconnaîtrait rien de plus que la forme, et confondrait deux erreurs
+voisines (une surcharge et une limite de l'abonnement partagent presque tous leurs mots)."""
+
 _CHIFFRES = re.compile(r"\d+")
 _ESPACES = re.compile(r"\s+")
 _MOT = re.compile(r"[\w./:-]+")
 _FICHIER = re.compile(r"[\w/-]+(?:\.[a-z]\w*)+")
+# Dans la sortie des contrôles : un test en échec de pytest (« FAILED chemin::test - ... »,
+# « ERROR chemin »), et un code de ruff en tête de ligne, seul (« E501 Line too long », format
+# actuel) ou après sa position (« a.py:12:5: E501 ... », format court).
+_TEST_EN_ECHEC = re.compile(r"^(?:FAILED|ERROR) +(\S+)", re.MULTILINE)
+_CODE_DE_FORME = re.compile(r"^(?:\S+:\d+:\d+: +)?([A-Z]{1,4}\d{2,4})\b", re.MULTILINE)
+# Les identifiants qu'un détail cite : deux refus qui en citent de différents ne sont pas le même
+# refus, même s'ils se ressemblent (deux tests d'un même fichier, deux critères écrits sur le même
+# modèle, deux codes ruff). Lus avant que les chiffres soient remplacés ; seuls les codes ruff
+# se lisent dans la casse d'origine, le reste en minuscules.
+_IDENTIFIANTS = (
+    (re.compile(r"\btest_\w+"), False),
+    (re.compile(r"\bcrit[eè]res? *(?:n° *)?(\d+)"), False),
+    (re.compile(r"\b[A-Z]{1,4}\d{2,4}\b"), True),
+)
+
+
+def _texte(detail: object) -> str:
+    return detail if isinstance(detail, str) else ""
 
 
 def _normaliser(detail: object) -> str:
@@ -46,9 +78,32 @@ def _normaliser(detail: object) -> str:
 
     Seuls les `CARACTERES_COMPARES` derniers caractères du texte ainsi réduit sont gardés.
     """
-    texte = detail if isinstance(detail, str) else ""
-    texte = _CHIFFRES.sub("#", texte.lower())
+    texte = _CHIFFRES.sub("#", _texte(detail).lower())
     return _ESPACES.sub(" ", texte).strip()[-CARACTERES_COMPARES:]
+
+
+def signature_des_controles(sortie: object) -> frozenset[str]:
+    """Les tests en échec et les codes du contrôle de forme lus dans une sortie de contrôles.
+
+    Un test est rendu « test:chemin::nom », un code « forme:E501 ». Un ensemble vide veut dire
+    qu'on n'a rien pu y lire : il faut alors comparer le texte.
+    """
+    texte = _texte(sortie)
+    tests = {f"test:{t}" for t in _TEST_EN_ECHEC.findall(texte)}
+    return frozenset(tests | {f"forme:{c}" for c in _CODE_DE_FORME.findall(texte)})
+
+
+def _identifiants_differents(brut_a: str, brut_b: str) -> bool:
+    """Dit si les deux détails citent, pour une même sorte d'identifiant, deux ensembles différents.
+
+    Une sorte que l'un des deux ne cite pas ne départage rien.
+    """
+    for motif, sensible in _IDENTIFIANTS:
+        trouves_a = set(motif.findall(brut_a if sensible else brut_a.lower()))
+        trouves_b = set(motif.findall(brut_b if sensible else brut_b.lower()))
+        if trouves_a and trouves_b and trouves_a != trouves_b:
+            return True
+    return False
 
 
 def _fichiers(texte: str) -> set[str]:
@@ -62,12 +117,13 @@ def _mots(texte: str) -> set[str]:
     return {m for m in mots if len(m) >= LETTRES_MIN_D_UN_MOT and m not in MOTS_VIDES}
 
 
-def _details_proches(detail_a: str, detail_b: str) -> bool:
+def _details_proches(detail_a: str, detail_b: str, mots: bool = True) -> bool:
     """Dit si deux détails normalisés parlent du même sujet.
 
     Si les deux citent des fichiers, ce doivent être les mêmes (deux débords sur des fichiers
-    différents ne sont pas le même refus). Ensuite, soit la forme est quasi identique, soit les
-    mots significatifs se recouvrent assez : un même refus reformulé garde ses identifiants.
+    différents ne sont pas le même refus). Ensuite, soit la forme est quasi identique, soit
+    (avec `mots`) les mots significatifs se recouvrent assez : un même refus reformulé garde ses
+    identifiants.
     """
     fichiers_a, fichiers_b = _fichiers(detail_a), _fichiers(detail_b)
     if fichiers_a and fichiers_b and fichiers_a != fichiers_b:
@@ -75,26 +131,68 @@ def _details_proches(detail_a: str, detail_b: str) -> bool:
     if SequenceMatcher(None, detail_a, detail_b).ratio() >= SEUIL_RESSEMBLANCE:
         return True
     mots_a, mots_b = _mots(detail_a), _mots(detail_b)
-    if min(len(mots_a), len(mots_b)) < MOTS_SIGNIFICATIFS_MIN:
+    if not mots or min(len(mots_a), len(mots_b)) < MOTS_SIGNIFICATIFS_MIN:
         return False
     return len(mots_a & mots_b) / len(mots_a | mots_b) >= SEUIL_MOTS_COMMUNS
+
+
+def _meme(a: object, b: object, mots: bool) -> bool:
+    """Le cœur de `meme_refus` et de `meme_forme` ; `mots` permet la ressemblance de mots."""
+    if not isinstance(a, dict) or not isinstance(b, dict):
+        return False
+    if a.get("origine") != b.get("origine") or a.get("issue") != b.get("issue"):
+        return False
+    brut_a, brut_b = _texte(a.get("detail")), _texte(b.get("detail"))
+    if a.get("origine") in ORIGINES_CONTROLEES:
+        signature_a, signature_b = signature_des_controles(brut_a), signature_des_controles(brut_b)
+        if signature_a or signature_b:
+            return signature_a == signature_b
+    detail_a, detail_b = _normaliser(brut_a), _normaliser(brut_b)
+    if not detail_a and not detail_b:
+        return False
+    if _identifiants_differents(brut_a, brut_b):
+        return False
+    return _details_proches(detail_a, detail_b, mots and a.get("origine") not in ORIGINES_SANS_MOTS)
 
 
 def meme_refus(a: dict, b: dict) -> bool:
     """Dit si deux entrées d'historique décrivent le même refus.
 
     Il faut la même origine (absente des deux compte comme égale), la même issue et un détail
-    proche (voir `_details_proches`). Un détail vide des deux côtés ne prouve rien : le résultat
-    est alors faux, comme pour toute entrée qui n'est pas un dictionnaire.
+    proche (voir `_details_proches`), sans identifiant cité de part et d'autre qui diffère (nom
+    de test, numéro de critère, code ruff). Un refus des contrôles automatiques dont la sortie
+    laisse lire des tests en échec ou des codes de forme se compare par ces seuls ensembles ;
+    une erreur d'agent, par sa seule forme (`ORIGINES_SANS_MOTS`). Un détail vide des deux côtés
+    ne prouve rien : le résultat est alors faux, comme pour toute entrée qui n'est pas un
+    dictionnaire.
     """
-    if not isinstance(a, dict) or not isinstance(b, dict):
-        return False
-    if a.get("origine") != b.get("origine") or a.get("issue") != b.get("issue"):
-        return False
-    detail_a, detail_b = _normaliser(a.get("detail")), _normaliser(b.get("detail"))
-    if not detail_a and not detail_b:
-        return False
-    return _details_proches(detail_a, detail_b)
+    return _meme(a, b, mots=True)
+
+
+def meme_forme(a: dict, b: dict) -> bool:
+    """Comme `meme_refus`, sans la ressemblance de mots : les détails doivent avoir quasiment la
+    même forme (ou, pour les contrôles, les mêmes tests en échec et les mêmes codes de forme).
+
+    C'est la seule ressemblance qui suffit à bloquer une tâche à qui un cran reste : celle des
+    mots se trompe trop souvent sur deux refus voisins (cahier, « V3-refus »).
+    """
+    return _meme(a, b, mots=False)
+
+
+def _suite(historique: object, comparer) -> int:
+    """Compte, à la fin de l'historique, la dernière entrée et celles qui la précèdent sans
+    interruption en étant le même refus qu'elle selon `comparer`."""
+    if not isinstance(historique, list) or not historique:
+        return 0
+    dernier = historique[-1]
+    if not isinstance(dernier, dict) or dernier.get("issue") == "valide":
+        return 0
+    nombre = 1
+    for entree in reversed(historique[:-1]):
+        if not comparer(entree, dernier) or entree.get("issue") == "valide":
+            break
+        nombre += 1
+    return nombre
 
 
 def refus_identiques_de_suite(historique: list[dict]) -> int:
@@ -103,17 +201,12 @@ def refus_identiques_de_suite(historique: list[dict]) -> int:
     Une entrée d'issue `valide` coupe la suite : si la dernière entrée est valide, le résultat
     est zéro ; sinon on remonte tant que l'entrée précédente est le même refus que la dernière.
     """
-    if not isinstance(historique, list) or not historique:
-        return 0
-    dernier = historique[-1]
-    if not isinstance(dernier, dict) or dernier.get("issue") == "valide":
-        return 0
-    nombre = 1
-    for entree in reversed(historique[:-1]):
-        if not meme_refus(entree, dernier) or entree.get("issue") == "valide":
-            break
-        nombre += 1
-    return nombre
+    return _suite(historique, meme_refus)
+
+
+def refus_de_meme_forme_de_suite(historique: list[dict]) -> int:
+    """Comme `refus_identiques_de_suite`, avec `meme_forme` : sans la ressemblance de mots."""
+    return _suite(historique, meme_forme)
 
 
 def _lignes_d_empechement(compte_rendu: object) -> list[str]:

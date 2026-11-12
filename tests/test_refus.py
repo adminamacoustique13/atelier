@@ -1,7 +1,14 @@
 """Tests de `atelier.refus` : refus qui se répète et empêchements signalés."""
 
 from atelier import refus
-from atelier.refus import empechements, meme_refus, refus_identiques_de_suite
+from atelier.refus import (
+    empechements,
+    meme_forme,
+    meme_refus,
+    refus_de_meme_forme_de_suite,
+    refus_identiques_de_suite,
+    signature_des_controles,
+)
 
 
 def _refus(detail, issue="refuse", origine=None):
@@ -172,3 +179,105 @@ def test_entrees_mal_formees_ne_levent_pas():
     assert empechements(None, "pas une liste", "pas un dict") == []
     assert empechements(42, [None, 3, "x"], {"empeche": [1, None, "y"]}) == ["x", "y"]
     assert empechements("EMPÊCHÉ :", [""], {"empeche": ""}) == []
+
+
+# --- V3b : la forme, les contrôles, les identifiants, les erreurs d'agent --------------------
+
+T = "Les contrôles automatiques échouent :\n"
+SORTIE_UN = "....F\nFAILED tests/test_a.py::test_un - assert 1 == 2\n1 failed, 4 passed in 0.12s"
+SORTIE_DEUX = "....F\nFAILED tests/test_a.py::test_deux - assert 3 == 4\n1 failed, 4 passed in 0.3s"
+SORTIE_UN_AUTREMENT = (  # le même test échoue, avec une tout autre sortie
+    "tests/test_a.py:41: in test_un\n    resultat = calculer(donnees_de_reference())\n"
+    "coeur/calcul.py:12: in calculer\n    return table[cle]\nE   KeyError: 'pression'\n"
+    "FAILED tests/test_a.py::test_un - KeyError: 'pression'\n1 failed, 4 passed in 0.40s"
+)
+
+
+def _controles(sortie, origine="controles"):
+    return _refus(T + sortie, issue="ne_sait_pas", origine=origine)
+
+
+def test_la_signature_lit_les_tests_en_echec_et_les_codes_de_forme():
+    sortie = (
+        "....F\nFAILED tests/test_a.py::test_un[1-2] - assert 1 == 2\n"
+        "ERROR tests/test_b.py - ImportError: rien\n"
+        "a.py:3:1: E501 Line too long (120 > 100)\n"  # format court de ruff
+        "F401 [*] `os` imported but unused\n --> b.py:1:8\n"  # format actuel de ruff
+    )
+    assert signature_des_controles(sortie) == {
+        "test:tests/test_a.py::test_un[1-2]", "test:tests/test_b.py", "forme:E501", "forme:F401",
+    }  # fmt: skip
+    # Une ligne d'assertion de pytest, un « FAILED » qui n'ouvre pas la ligne : rien.
+    assert signature_des_controles("E       assert 3 == 4\n  FAILED ici\nTout va.") == set()
+    assert signature_des_controles(None) == set()
+
+
+def test_un_refus_des_controles_se_compare_par_ses_tests_en_echec():
+    assert meme_refus(_controles(SORTIE_UN), _controles(SORTIE_UN_AUTREMENT))
+    assert meme_forme(_controles(SORTIE_UN), _controles(SORTIE_UN_AUTREMENT))
+    # Par le seul texte, ce même refus aurait été manqué.
+    assert not meme_refus(_refus(T + SORTIE_UN), _refus(T + SORTIE_UN_AUTREMENT))
+    assert not meme_refus(_controles(SORTIE_UN), _controles(SORTIE_DEUX))
+    # Une sortie lisible et une illisible diffèrent ; deux illisibles se comparent par le texte.
+    assert not meme_refus(_controles(SORTIE_UN), _controles("uv : commande introuvable"))
+    assert meme_refus(_controles("uv : commande introuvable (127)"),
+                      _controles("uv : commande introuvable (128)"))  # fmt: skip
+    # Un refus à l'enregistrement rejoue les contrôles : même règle.
+    assert meme_refus(_controles(SORTIE_UN, "integration"),
+                      _controles(SORTIE_UN_AUTREMENT, "integration"))  # fmt: skip
+
+
+def test_deux_codes_de_forme_differents_ne_sont_pas_le_meme_refus():
+    e501 = "a.py:3:1: E501 Line too long (120 > 100)\nFound 1 error."
+    f401 = "a.py:3:1: F401 `os` imported but unused\nFound 1 error."
+    assert not meme_refus(_controles(e501), _controles(f401))
+    assert not meme_refus(_refus(T + e501), _refus(T + f401))  # par le texte aussi
+
+
+IDENTIFIANTS_DIFFERENTS = [
+    (
+        "Le critère 2 n'est pas tenu : la fonction rend une valeur fausse sur le cas limite",
+        "Le critère 3 n'est pas tenu : la fonction rend une valeur fausse sur le cas limite",
+    ),
+    (
+        "Le test test_vue ne peut pas échouer : il compare la sortie à elle-même",
+        "Le test test_boucle ne peut pas échouer : il compare la sortie à elle-même",
+    ),
+    (
+        "Une ligne du module de calcul viole E501 et reste à corriger",
+        "Une ligne du module de calcul viole W291 et reste à corriger",
+    ),
+]
+
+
+def test_des_identifiants_differents_ecartent_des_refus_qui_se_ressemblent():
+    for x, y in IDENTIFIANTS_DIFFERENTS:
+        assert not meme_refus(_refus(x), _refus(y)), (x, y)
+    # Un identifiant cité d'un seul côté ne départage rien.
+    un_seul = "Le critère 2 n'est pas tenu : uv.lock est absent du dépôt"
+    assert meme_refus(_refus(un_seul), _refus(un_seul.replace(" 2", "")))
+
+
+def test_meme_forme_ne_reconnait_pas_une_reformulation():
+    # Les vrais refus du chantier : A et B ne se ressemblent que par leurs mots.
+    assert meme_refus(_refus(A), _refus(B)) and not meme_forme(_refus(A), _refus(B))
+    assert meme_forme(_refus(A), _refus(C))
+    assert meme_forme(_refus("valeur 1234 sur 9 cas"), _refus("valeur 77 sur 120 cas"))
+    assert refus_identiques_de_suite([_refus(A), _refus(B), _refus(C)]) == 3
+    assert refus_de_meme_forme_de_suite([_refus(A), _refus(B), _refus(C)]) == 1
+    assert refus_de_meme_forme_de_suite([_refus(B), _refus(A), _refus(C)]) == 2
+    assert refus_de_meme_forme_de_suite([_refus(UV)] * 3) == 3
+    assert refus_de_meme_forme_de_suite([_refus(UV), {"issue": "valide", "detail": UV}]) == 0
+    assert refus_de_meme_forme_de_suite(None) == 0
+
+
+def test_une_erreur_d_agent_se_compare_par_sa_seule_forme():
+    from atelier.agents import LIMITE_ATTEINTE, SURCHARGE
+
+    def erreur(texte, origine="agent"):
+        return _refus(f"L'agent s'est arrêté sur une erreur : {texte}", "ne_sait_pas", origine)
+
+    assert not meme_refus(erreur(SURCHARGE), erreur(LIMITE_ATTEINTE))
+    assert meme_refus(erreur(SURCHARGE, "verdict"), erreur(LIMITE_ATTEINTE, "verdict"))  # mots
+    delai = "Claude Code n'a pas répondu dans le délai de {} s."
+    assert meme_refus(erreur(delai.format(3600)), erreur(delai.format(1800)))
