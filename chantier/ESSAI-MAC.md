@@ -4,6 +4,17 @@ Aucune machine du chantier n'était connectée à un compte Claude. Cet essai es
 
 La branche contient tout le chantier : le pont vers le SDK, les cartes d'autorisation, l'activité en direct, les boutons « Arrêter », la nouvelle installation, l'annonce de ce qui est facturé, le menu « Mode des ouvriers » et le bouton « Mettre à jour ».
 
+## D'abord : l'essai automatique (cinq minutes)
+
+Depuis le 2026-11-12, une commande joue d'elle-même la plus grande partie de cet essai (connexion, ce qui est facturé, un ouvrier, les contrôles, le vérificateur, la fusion, une carte d'autorisation, l'arrêt d'un agent), sur un dépôt jetable :
+
+```
+cd ~/Atelier-appli
+uv run python -m atelier essai
+```
+
+Elle affiche une ligne par étape (« ok », « ÉCHEC » ou « info ») et écrit son rapport dans `ESSAI.md`, dans le dossier qu'elle indique au départ. Envoie-moi ce rapport. Elle a déjà tourné dans le cloud, sur Linux : tout y est passé. Les sections ci-dessous restent utiles pour ce qu'elle ne couvre pas : l'installation, le redémarrage, le menu des modes, « Toujours pour ce projet », l'arrêt de l'orchestrateur et la mise à jour.
+
 ## Avant de commencer
 
 1. Vérifie que tu es connecté à ton abonnement : ouvre le Terminal, lance `claude`, tape `/status`, puis quitte.
@@ -92,7 +103,7 @@ Dans l'onglet Chantier, la carte « Mode des ouvriers » montre cinq choix. Le m
 - **Un changement en cours de route.** Pendant qu'un ouvrier travaille, change de mode : le fil doit le dire en une phrase, et l'ouvrier doit continuer.
 - Reviens ensuite à « Accepter les modifications », le mode d'avant ce menu.
 
-Ce qui ne doit jamais arriver : un vérificateur ou l'orchestrateur qui modifie un fichier, quel que soit le mode.
+Ce qui ne doit jamais arriver : l'orchestrateur qui modifie un fichier, ou un vérificateur qui modifie le travail de l'ouvrier (il fait ses essais dans une copie jetable), quel que soit le mode.
 
 ## 8. Le bouton « Mettre à jour »
 
@@ -117,7 +128,7 @@ Rien de ce qui suit n'a pu être essayé pendant le chantier. Tu n'as pas à tou
 - **La connexion.** Le Claude Code embarqué par la bibliothèque reprend bien ta connexion faite avec `claude` ; ce que le SDK annonce comme source (abonnement ou clé) dans ton cas.
 - **L'installation.** `uv sync` installe la version verrouillée de la bibliothèque sur ton Mac ; Atelier redémarre à l'ouverture de session, y compris sans réseau.
 - **L'arrêt.** Après « Arrêter », le programme Claude Code de l'agent meurt bien, même s'il avait lancé des tâches de fond ; la conversation reprend après une réponse arrêtée, y compris si c'était la toute première.
-- **Les autorisations.** Un outil interdit au vérificateur n'arrive jamais sur une carte ; « Toujours pour ce projet » sur un outil entier est accepté par Claude Code ; tes réglages personnels de `~/.claude` peuvent permettre des outils sans carte, quel que soit le mode.
+- **Les autorisations.** Un outil interdit à l'orchestrateur n'arrive jamais sur une carte ; « Toujours pour ce projet » sur un outil entier est accepté par Claude Code ; tes réglages personnels de `~/.claude` peuvent permettre des outils sans carte, quel que soit le mode.
 - **L'arbitre.** La forme exacte de ses refus ; son retour aux cartes après trois refus de suite ; le message quand il n'est pas disponible.
 - **La répétition.** Les cartes pour les modifications, la carte de passage à l'exécution, et le mode appliqué ensuite.
 - **La mise à jour.** Le délai réel du redémarrage par macOS, et l'installation d'une dépendance nouvelle au redémarrage.

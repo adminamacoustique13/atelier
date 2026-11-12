@@ -38,16 +38,36 @@ def lire_profil(depot: Path) -> dict:
     return profil
 
 
+# Tenus hors de git sur cet ordinateur seulement : l'état de l'Atelier, et ce que les outils
+# fabriquent en lançant les tests (un ouvrier ou un vérificateur qui lance pytest crée un
+# __pycache__). Sans cela, ces fichiers sortaient du périmètre de la tâche et entraient dans
+# ses enregistrements : constaté au premier essai réel.
+EXCLUSIONS = (
+    ".atelier/",
+    "__pycache__/",
+    "*.py[cod]",
+    ".pytest_cache/",
+    ".ruff_cache/",
+    ".mypy_cache/",
+    ".venv/",
+    "node_modules/",
+    ".DS_Store",
+)
+
+
 def exclure_etat(depot: Path) -> None:
-    """Tient l'état de l'Atelier (.atelier/) hors de l'historique git, sans toucher au dépôt."""
+    """Tient l'état de l'Atelier et les fichiers fabriqués par les outils hors de l'historique
+    git, par .git/info/exclude : le dépôt lui-même n'est pas touché, et ses copies de travail
+    (git worktree) lisent le même fichier. Un fichier déjà suivi par git le reste."""
     exclusions = depot / ".git" / "info" / "exclude"
-    if not exclusions.parent.is_dir():
+    if not (depot / ".git").is_dir():
         return
+    exclusions.parent.mkdir(exist_ok=True)
     actuel = exclusions.read_text("utf-8") if exclusions.exists() else ""
-    if ".atelier/" not in actuel.split():
-        exclusions.write_text(
-            actuel.rstrip("\n") + ("\n" if actuel.strip() else "") + ".atelier/\n"
-        )
+    manquent = [motif for motif in EXCLUSIONS if motif not in actuel.split()]
+    if manquent:
+        debut = actuel.rstrip("\n") + ("\n" if actuel.strip() else "")
+        exclusions.write_text(debut + "\n".join(manquent) + "\n", "utf-8")
 
 
 def lire_etat(depot: Path, nom: str) -> Chantier:

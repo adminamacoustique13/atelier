@@ -4,8 +4,10 @@ Les deux offrent la même interface au moteur et au serveur : `executer`, `conve
 `arreter(tache)`, `changer_mode(mode)`, `modes_appliques()`, et les attributs `guichet`,
 `sur_evenement`, `source_connexion` et `mode_ouvriers`.
 
-Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers : le
-vérificateur et l'orchestrateur restent en lecture seule, en mode « default », quoi qu'il arrive.
+Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers.
+L'orchestrateur reste en lecture seule, en mode « default », quoi qu'il arrive. Le vérificateur
+ne peut jamais écrire dans la copie de l'ouvrier : il travaille dans une copie jetable du
+livrable, où ses essais passent sans carte (« acceptEdits »), ou à défaut en lecture seule.
 """
 
 from __future__ import annotations
@@ -313,16 +315,28 @@ class AgentClaude(_ModeDesOuvriers):
         dossier: Path | None,
         lecture_seule: bool = False,
         contexte: dict | None = None,
+        copie_jetable: bool = False,
     ) -> Resultat:
-        """Exécute une consigne et rend le résultat de l'agent."""
+        """Exécute une consigne et rend le résultat de l'agent.
+
+        `copie_jetable` : le vérificateur travaille dans une copie du livrable que l'atelier
+        jette après son avis. Il peut y écrire sans carte (ses essais : un fichier modifié pour
+        voir un test échouer, un script), puisque rien de ce qu'il y fait n'est enregistré ; il
+        n'a toujours aucun accès en écriture à la copie de l'ouvrier, ni aux modes des ouvriers.
+        """
         tache, nom = _poste(contexte)
+        bac_a_sable = lecture_seule and copie_jetable
+        ecrit = not lecture_seule or bac_a_sable
+        if bac_a_sable:
+            mode = "acceptEdits"
+        else:  # le mode d'un ouvrier est relu sous le verrou des postes, à son inscription
+            mode = "default" if lecture_seule else self._postes.mode
         return self._travailler(
             tache, nom, consigne, ouvrier=not lecture_seule,
             modele=self._alias(modele), effort=effort, dossier=dossier,
-            outils_permis=self._outils(lecture_seule) + self._autorisations(lecture_seule),
-            outils_interdits=list(ECRITURE) if lecture_seule else [],
-            # Le mode d'un ouvrier est relu sous le verrou des postes, à son inscription.
-            mode_permission="default" if lecture_seule else self._postes.mode,
+            outils_permis=self._outils(not ecrit) + self._autorisations(not ecrit),
+            outils_interdits=[] if ecrit else list(ECRITURE),
+            mode_permission=mode,
         )  # fmt: skip
 
     def converser(
@@ -422,14 +436,39 @@ GESTES = {
     "Read": ("Lit", "file_path"),
     "Grep": ("Cherche", "pattern"),
     "Glob": ("Parcourt", "pattern"),
+    "Edit": ("Modifie", "file_path"),
+    "MultiEdit": ("Modifie", "file_path"),
+    "Write": ("Écrit", "file_path"),
+    "NotebookEdit": ("Modifie", "notebook_path"),
+    "WebFetch": ("Lit la page", "url"),
+    "WebSearch": ("Cherche sur le web", "query"),
+    "Task": ("Confie à un sous-agent :", "description"),
+    "Agent": ("Confie à un sous-agent :", "description"),
+    "ToolSearch": ("Cherche un outil", "query"),
 }
 GESTES |= {"Bash": ("Lance", "command"), "Skill": ("Utilise le skill", "skill")}
+CHEMINS = ("file_path", "notebook_path", "path")
 
 
-def decrire_outil(bloc: dict) -> str:
-    """Dit en quelques mots ce que Claude Code est en train de faire."""
+def decrire_outil(bloc: dict, racine=None) -> str:
+    """Dit en quelques mots ce que Claude Code est en train de faire.
+
+    Un chemin dans la copie de travail (`racine`) est écrit à partir d'elle : « Modifie
+    calcul.py » plutôt que tout le chemin. Une commande accompagnée de sa description (Claude
+    Code en donne une, en clair) commence par elle.
+    """
+    entree = bloc.get("input") or {}
+    entree = entree if isinstance(entree, dict) else {}
     verbe, cle = GESTES.get(bloc.get("name", ""), (bloc.get("name", "Outil"), ""))
-    objet = str((bloc.get("input") or {}).get(cle, ""))
+    objet = " ".join(str(entree.get(cle, "")).split()) if cle != "command" else ""
+    if cle in CHEMINS and racine and objet:
+        prefixe = str(racine).rstrip("/") + "/"
+        objet = objet[len(prefixe):] if objet.startswith(prefixe) else objet
+    if cle == "command":
+        objet = str(entree.get("command", "")).replace("\n", " ; ").strip()
+        description = " ".join(str(entree.get("description") or "").split())
+        if description:
+            return f"{description} — {objet}".strip(" —")[:120]
     return f"{verbe} {objet}".strip()[:120]
 
 
@@ -438,6 +477,7 @@ GESTES_SIMULES = (
     "Lit le périmètre", "Cherche les appels", "Lit les tests", "Écrit le code", "Écrit le code",
     "Lance les contrôles", "Relit le changement", "Écrit les tests", "Lance les tests",
 )
+ETAPES_SIMULEES = ("lire le périmètre", "écrire le code", "écrire les tests", "relire")
 RYTHME_GESTES = (0.4, 0.3, 1.6, 0.5, 0.2, 0.3, 2.2, 0.6, 0.4, 1.1, 0.3, 0.8)
 
 
@@ -503,6 +543,7 @@ class AgentSimule(_ModeDesOuvriers):
         dossier: Path | None,
         lecture_seule: bool = False,
         contexte: dict | None = None,
+        copie_jetable: bool = False,
     ) -> Resultat:
         """Rend le résultat prévu par le scénario pour cette tâche et cette tentative."""
         contexte = contexte or {}
@@ -532,6 +573,10 @@ class AgentSimule(_ModeDesOuvriers):
                 return False
             if self.gestes_s and maintenant - debut >= self._prochain_geste(geste):
                 texte = GESTES_SIMULES[geste % len(GESTES_SIMULES)]
+                if geste % 3 == 0:  # l'étape annoncée, comme le demande la consigne
+                    rang = geste // 3 % len(ETAPES_SIMULEES)
+                    etape = f"Étape {rang + 1}/{len(ETAPES_SIMULEES)} : {ETAPES_SIMULEES[rang]}\n"
+                    _emettre(self.sur_evenement, marche.nom, "texte", etape)
                 _emettre(self.sur_evenement, marche.nom, "outil", texte)
                 geste += 1
             if marche.change.wait(min(reste, 0.02)):

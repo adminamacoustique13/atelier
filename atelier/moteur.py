@@ -8,6 +8,7 @@ elles se déroulent de la même façon à chaque fois.
 from __future__ import annotations
 
 import threading
+import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import suppress
@@ -81,6 +82,17 @@ def taches_du_plan(plan: dict, profil: dict) -> list[Tache]:
     return taches
 
 
+# Les phases d'une tâche active, telles que le tableau de bord les écrit.
+PHASES = {
+    "preparation": "Préparation de sa copie de travail",
+    "ouvrier": "L'ouvrier travaille (tentative {})",
+    "perimetre": "Contrôle du périmètre",
+    "controles": "Contrôles automatiques : ",
+    "verificateur": "Le vérificateur relit ({})",
+    "enregistrement": "Enregistrement et fusion",
+}
+
+
 class Moteur:
     """Conduit un chantier du contrat validé jusqu'à la dernière tâche vérifiée."""
 
@@ -100,6 +112,9 @@ class Moteur:
         self.verrou = threading.RLock()
         self._arretees: set[str] = set()  # les tâches dont l'arrêt est demandé, pas encore pris
         self._enregistrement: set[str] = set()  # acceptées : l'arrêt vient trop tard
+        # Où en est chaque tâche active, en mémoire seulement : (phrase, depuis). Le tableau de
+        # bord le montre même quand aucun agent ne tourne (copie, contrôles, fusion).
+        self.phases: dict[str, tuple[str, float]] = {}
         self._principale_rouge = False  # les réparations n'ont pas suffi : chantier pas fini
         for tache in chantier.taches:
             if not tache.modele:
@@ -112,6 +127,19 @@ class Moteur:
         with self.verrou:
             self.chantier.noter(texte, tache.id if tache else "")
         self.sur_changement()
+
+    def _phase(self, tache: Tache, phrase: str) -> None:
+        """Note la phase : en mémoire seulement, le tableau de bord la relit à chaque passage."""
+        with self.verrou:
+            self.phases[tache.id] = (phrase, time.monotonic())
+
+    def phase(self, identifiant: str) -> dict | None:
+        """La phase en cours d'une tâche active et depuis combien de secondes, ou None."""
+        with self.verrou:
+            trouvee = self.phases.get(identifiant)
+        if trouvee is None:
+            return None
+        return {"texte": trouvee[0], "depuis_s": round(time.monotonic() - trouvee[1])}
 
     def _prendre_agent(self) -> None:
         """Compte un lancement d'agent. Il n'y a pas de plafond : le compte sert au bilan."""
@@ -288,6 +316,7 @@ class Moteur:
             with self.verrou:
                 self._arretees.discard(tache.id)
                 self._enregistrement.discard(tache.id)
+                self.phases.pop(tache.id, None)
 
     def _boucle(self, tache: Tache) -> None:
         remarques = ""
@@ -307,6 +336,7 @@ class Moteur:
                     else:
                         self._enregistrement.add(tache.id)
             if motif is None:
+                self._phase(tache, PHASES["enregistrement"])
                 probleme = self.controles.enregistrer(tache, dossier)
                 if probleme:  # conflit, ou contrôles rouges une fois mêlé à la branche principale
                     with self.verrou:
@@ -345,12 +375,14 @@ class Moteur:
             f"tentative {tache.tentatives}.",
             tache,
         )
+        self._phase(tache, PHASES["preparation"])
         dossier = self.controles.preparer(tache)
         if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
             with self.verrou:
                 tache.tentatives -= 1
                 self.chantier.agents_lances -= 1
             return dossier, None
+        self._phase(tache, PHASES["ouvrier"].format(tache.tentatives))
         resultat = self.agent.executer(
             consigne_ouvrier(tache, self.chantier.contrat, self.profil, remarques),
             tache.modele,
@@ -381,10 +413,14 @@ class Moteur:
             return ARRETEE, DETAIL_ARRET
         if not resultat.ok:
             return "ne_sait_pas", f"L'agent s'est arrêté sur une erreur : {resultat.erreur}"
+        self._phase(tache, PHASES["perimetre"])
         modifies = self.controles.fichiers_modifies(tache, dossier, resultat)
         dehors = hors_perimetre(modifies, tache.perimetre)
         if dehors:
             return "deborde", "Fichiers modifiés hors périmètre : " + ", ".join(dehors) + "."
+        commandes = getattr(self.controles, "commandes", None) or []
+        if commandes:
+            self._phase(tache, PHASES["controles"] + " ; ".join(commandes))
         passe, sortie = self.controles.mecaniques(tache, dossier)
         if not passe:
             return "ne_sait_pas", "Les contrôles automatiques échouent :\n" + sortie[-1500:]
@@ -414,16 +450,36 @@ class Moteur:
             with self.verrou:
                 self.chantier.agents_lances -= 1
             return None
-        avis = self.agent.executer(
-            consigne_verificateur(tache, self.chantier.contrat, self.profil),
-            modele,
-            effort,
-            dossier,
-            lecture_seule=True,
-            contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
-        )
+        self._phase(tache, PHASES["verificateur"].format(dosage.libelle(modele, effort)))
+        copie = self._copie_de_verification(tache, dossier)
+        en_plus = {"copie_jetable": True} if copie else {}
+        try:
+            avis = self.agent.executer(
+                consigne_verificateur(tache, self.chantier.contrat, self.profil, bool(copie)),
+                modele,
+                effort,
+                copie or dossier,
+                lecture_seule=True,
+                contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
+                **en_plus,
+            )
+        finally:
+            if copie:
+                self.controles.jeter_copie(copie)
         self._compter(tache, avis)
         return avis
+
+    def _copie_de_verification(self, tache: Tache, dossier):
+        """La copie jetable où le vérificateur fait ses essais, ou None : il relit alors la
+        copie de l'ouvrier, sans rien y écrire, comme avant (contrôles simulés, échec de git)."""
+        copier = getattr(self.controles, "copie_de_verification", None)
+        if copier is None or dossier is None:
+            return None
+        try:
+            return copier(tache, dossier)
+        except Exception as erreur:  # le vérificateur part quand même, en relecture seule
+            self._noter(f"Copie du vérificateur impossible, il relit seulement : {erreur}", tache)
+            return None
 
     def _apres_echec(self, tache: Tache, motif: str, detail: str) -> bool:
         """Décide de la suite après un refus. Rend False si la tâche s'arrête là."""

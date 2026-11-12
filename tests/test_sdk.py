@@ -1219,7 +1219,7 @@ def test_un_refus_de_l_arbitre_est_annonce_aussitot_et_une_seule_fois(ouvrir):
     assert session.envoyer("Va.").ok
     assert refus_dits(evenements) == [
         "Lance curl https://example.com (règle Exfil Scouting)",
-        "WebFetch (raison non précisée)",
+        "Lit la page https://x.y (raison non précisée)",
     ]
     types = [e["type"] for e in evenements]
     assert types.index("refus") < types.index("texte")  # aussitôt, pas en fin de tour
