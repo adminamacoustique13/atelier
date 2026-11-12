@@ -893,7 +893,9 @@ let armee = "", armeeLe = 0, minuteArmee = null, avisTexte = "", minuteAvis = nu
 const propre = (texte) => String(texte ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const nombre = (n) => Number(n || 0).toLocaleString("fr-FR");
-const euros = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " $";
+/* Un coût sans son unité, toujours avec deux décimales : « 1 234,50 ». */
+const montant = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const euros = (n) => montant(n) + " $";
 const DELAI_CONFIRMATION = 400; // ms : un clic de confirmation plus rapproché est pris pour un double-clic
 const dernierHtml = new Map();
 /* Ne touche au DOM que si le contenu change : une saisie en cours, le défilement et le focus restent en place. */
@@ -925,6 +927,10 @@ const agentsDe = (vue) => vue.agents || [];
 const ilFautRepondre = (vue) => contratEnAttente(vue) || ouvertes(vue).length > 0 || autorisationsDe(vue).length > 0;
 const arretee = (t) => t.etat === "revenu" && (t.historique || []).slice(-1)[0]?.issue === "arretee";
 const libelleEtat = (t) => (arretee(t) ? "Arrêtée par toi" : t.etat_fr);
+/* Une tâche active : un agent y travaille ou la vérifie. */
+const tacheActive = (t) => t.etat === "en_cours" || t.etat === "en_verification";
+/* Le nombre de tâches du chantier déjà vérifiées. */
+const nombreVerifiees = (vue) => vue.taches.filter((t) => t.etat === "verifie").length;
 /* Une durée en secondes, dite comme on la lit : « 12 s », « 2 min 05 », « 1 h 10 ». */
 const duree = (s) => {
   s = Math.max(0, Math.round(Number(s) || 0));
@@ -1166,7 +1172,7 @@ function afficherConversation(vue) {
   }
   const c = vue.contrat;
   document.getElementById("rail-point").textContent = vue.point_d_etape;
-  poser("rail-anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue), 74) : "");
+  poser("rail-anneau", vue.taches.length ? anneauPoints(nombreVerifiees(vue), vue.taches.length, ilFautRepondre(vue), 74) : "");
   poser("rail-jauges", vue.taches.length
     ? compte("Agents lancés", vue.agents_lances) + jauge("Montées en gamme", vue.montees, c.max_montees)
     : `<p class="calme">Pas encore de contrat.</p>`);
@@ -1189,17 +1195,27 @@ function afficherConversation(vue) {
 }
 
 /* Le bouton « Arrêter » : un premier clic l'arme quelques secondes (« Confirmer l'arrêt »), le second agit. */
-function habillerArret(bouton, cle) {
+/* Ce que montre le bouton d'arrêt de la clé donnée : arrêt déjà demandé, armé ou au repos, son libellé et son titre. */
+function habitArret(cle) {
   const demande = arretes.has(cle), arme = armee === cle;
-  bouton.textContent = demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter";
-  bouton.disabled = demande;
-  bouton.classList.toggle("confirme", arme && !demande);
-  bouton.title = arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.";
+  return {
+    demande,
+    confirme: arme && !demande,
+    libelle: demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter",
+    titre: arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.",
+  };
+}
+function habillerArret(bouton, cle) {
+  const habit = habitArret(cle);
+  bouton.textContent = habit.libelle;
+  bouton.disabled = habit.demande;
+  bouton.classList.toggle("confirme", habit.confirme);
+  bouton.title = habit.titre;
 }
 function boutonArret(cle, tache) {
-  const demande = arretes.has(cle), arme = armee === cle;
-  return `<button class="discret${arme && !demande ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${demande ? " disabled" : ""}
-    title="${arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu."}">${demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter"}</button>`;
+  const habit = habitArret(cle);
+  return `<button class="discret${habit.confirme ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${habit.demande ? " disabled" : ""}
+    title="${habit.titre}">${habit.libelle}</button>`;
 }
 
 /* ---------- Chantier ---------- */
@@ -1216,7 +1232,7 @@ function attenteHtml(vue) {
    déroule son journal, juste dessous. */
 const POSTE = { l: 180, h: 196, ecart: 10, parRang: 6 };
 function poste(t, x, y, agent, rythme, etat) {
-  const actif = t.etat === "en_cours" || t.etat === "en_verification", controle = t.etat === "en_verification";
+  const actif = tacheActive(t), controle = t.etat === "en_verification";
   const couleur = etat === "attend" ? COULEURS.attend : actif ? COULEURS.en_cours : etat === "verifie" ? COULEURS.verifie : "rgba(220,220,220,0.52)";
   const sous = actif && agent && agent.etape ? `Étape ${agent.etape}`
     : actif && t.phase ? `${t.phase.texte} · ${duree(t.phase.depuis_s)}`
@@ -1242,7 +1258,7 @@ function salle(vue) {
   }
   const attend = attendDe(vue), rangs = Math.ceil(vue.taches.length / POSTE.parRang);
   const hauteur = rangs * POSTE.h + (rangs - 1) * POSTE.ecart;
-  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
+  const actifs = vue.taches.filter(tacheActive).length;
   const postes = vue.taches.map((t, i) => {
     const x = (i % POSTE.parRang) * (POSTE.l + POSTE.ecart), y = Math.floor(i / POSTE.parRang) * (POSTE.h + POSTE.ecart);
     return poste(t, x, y, agentsDe(vue).filter((a) => a.tache === t.id).pop(), rythmeDe(vue, t), etatVu(t, attend));
@@ -1280,7 +1296,7 @@ function aFaire(vue) {
 /* Sous la salle : un agent par ligne, sa dernière activité, un clic pour dérouler ses 30 dernières lignes, et son bouton d'arrêt. */
 const ROLES = { ouvrier: "ouvrier", verificateur: "vérificateur", orchestrateur: "orchestrateur" };
 function agentsHtml(vue) {
-  const enMarche = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification");
+  const enMarche = vue.taches.filter(tacheActive);
   const actives = new Set(enMarche.map((t) => t.id)), avecAgent = new Set(agentsDe(vue).map((a) => a.tache));
   // Une tâche active sans agent en marche : l'atelier prépare sa copie, lance les contrôles ou fusionne.
   const sansAgent = enMarche.filter((t) => !avecAgent.has(t.id) && t.phase).map((t) => `<div class="agent"><div class="agent-tete">
@@ -1358,7 +1374,7 @@ async function choisirMode(mode) {
 
 function afficherChantier(vue) {
   const c = vue.contrat;
-  poser("anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue)) : "");
+  poser("anneau", vue.taches.length ? anneauPoints(nombreVerifiees(vue), vue.taches.length, ilFautRepondre(vue)) : "");
   poser("compteurs", vue.taches.length ? compteursHtml(vue) : "");
   poser("salle", salle(vue));
   document.getElementById("salle-note").textContent = agentsTexte(auTravail(vue));
@@ -1374,7 +1390,7 @@ function afficherChantier(vue) {
   poser("tuiles", dosageHtml(vue));
   poser("jauges", compte("Agents lancés", vue.agents_lances)
     + jauge("Montées en gamme", vue.montees, c.max_montees)
-    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${euros(vue.cout_usd).replace(" $", "$")}</b></div>
+    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${montant(vue.cout_usd)}$</b></div>
        <div><span>Tokens</span><b>${vue.tokens >= 1e6 ? (vue.tokens / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + "M" : vue.tokens >= 1e3 ? Math.round(vue.tokens / 1e3) + "k" : nombre(vue.tokens)}</b></div></div>`);
   poser("lignes", vue.taches.map((t) => `<tr>
     <td><span class="puce">${propre(t.id)}</span></td>
@@ -1496,7 +1512,7 @@ function graphe(vue) {
       <div class="d"><span>${propre(doseCourte(t))}</span><span class="etat-mot ${etat}">${propre(motEtat(t, etat))}</span></div></div>
       <i class="port h"></i><i class="port b"></i></div>`;
   }).join("");
-  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  const verifiees = nombreVerifiees(vue);
   const fixe = (classe, x, y, icone, titre, detail, couleur, ports) => `<div class="noeud fixe ${classe}" style="left: ${x}px; top: ${y}px">
     <span class="ic">${icone}</span><div><div class="t">${titre}</div><div class="d"><span class="etat-mot ${couleur}">${detail}</span></div></div>${ports}</div>`;
   const tete = fixe("racine", racine.x, racine.y, vue.contrat.valide ? ICONES.en_cours : ICONES.a_lancer, "Orchestrateur", vue.contrat.valide ? "Contrat validé" : "Contrat à valider", vue.contrat.valide ? "en_cours" : contratEnAttente(vue) ? "attend" : "", '<i class="port b"></i>');
@@ -1597,8 +1613,8 @@ function stationsDe(vue) {
     return { u, v, x, y, rangee: r };
   };
   const stations = [], embranchements = [];
-  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
-  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  const actifs = vue.taches.filter(tacheActive).length;
+  const verifiees = nombreVerifiees(vue);
   arrets.forEach((a, k) => {
     const l = lieu(k);
     if (a.etape < 0) {
@@ -1709,14 +1725,14 @@ function solHtml(vue, largeur, hauteur) {
 }
 function afficherSalle(vue) {
   if (location.hash !== "#salle" || !vue || vue.aucun_projet) return;
-  const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length, attendue = ilFautRepondre(vue);
+  const c = vue.contrat, verifiees = nombreVerifiees(vue), attendue = ilFautRepondre(vue);
   poser("salle-orch", `<div class="rail-tete">${anneauPoints(verifiees, vue.taches.length, attendue, 64)}<div><span class="etiquette">Orchestrateur · Fable élevé</span><p>${propre(vue.point_d_etape)}</p></div></div>
     ${c.objectif ? `<p class="calme">${propre(c.objectif)}</p>` : ""}
     <div class="boutons"><button type="button" data-action="vers-conversation">Écrire à l'orchestrateur</button><button type="button" data-action="voir-plan">Plan</button></div>`);
   const millions = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}<small> M</small>` : n >= 1e3 ? `${Math.round(n / 1e3)}<small> k</small>` : nombre(n));
   poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}</b></div>
     <div><span>Montées</span><b>${vue.montees}<small> / ${c.max_montees}</small></b></div>
-    <div><span>Coût équiv.</span><b>${Number(vue.cout_usd || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small> $</small></b></div>
+    <div><span>Coût équiv.</span><b>${montant(vue.cout_usd)}<small> $</small></b></div>
     <div><span>Tokens</span><b>${millions(vue.tokens || 0)}</b></div>` : "");
   const attente = document.getElementById("salle-attente");
   attente.classList.toggle("attend", attendue);
@@ -1754,7 +1770,7 @@ function afficher(vue) {
   afficherMaj(vue);
   document.querySelector(".app").classList.toggle("sans-projet", Boolean(vue.aucun_projet));
   if (vue.aucun_projet) return afficherSansProjet();
-  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  const verifiees = nombreVerifiees(vue);
   const choix = document.getElementById("projet"), liste = vue.projets || [{ id: "", nom: vue.projet, courant: true }];
   const empreinte = liste.map((p) => `${p.id}/${p.nom}/${p.courant}`).join("|");
   if (choix.dataset.empreinte !== empreinte) {
@@ -2185,7 +2201,7 @@ function afficherCode(vue) {
   poser("explorateur", arbreHtml(arbreDe(m.fichiers), 0, enCours));
   poser("code-ariane", arianeHtml());
   poser("code-resultats", resultatsHtml());
-  poser("code-page", codeChemin && !codeChemin.endsWith("/") ? pageFichierHtml(codeChemin, enCours) : pageDossierHtml(codeChemin, enCours));
+  poser("code-page", pageCodeHtml(enCours));
 }
 function allerCode(chemin) {
   codeChemin = chemin || "";
@@ -2469,6 +2485,10 @@ function dedansHtml(pref) {
   return `<div class="cd-sec">Ce qu'il y a dedans <i>${enfants.size}</i></div><div class="cd-dedans">${lignes}</div>`;
 }
 const next = (map) => map.keys().next().value;
+/* La page du chemin choisi : celle d'un fichier, ou celle d'un dossier (la racine du projet quand rien n'est choisi). */
+function pageCodeHtml(enCours) {
+  return codeChemin && !codeChemin.endsWith("/") ? pageFichierHtml(codeChemin, enCours) : pageDossierHtml(codeChemin, enCours);
+}
 function pageDossierHtml(pref, enCours) {
   const m = carteFusionnee(), dedans = m.fichiers.filter((f) => f.chemin.startsWith(pref));
   const lignes = dedans.reduce((s, f) => s + f.lignes, 0), vifs = dedans.filter((f) => enCours.has(f.chemin)).length;
@@ -2550,7 +2570,7 @@ function pageFichierHtml(c, enCours) {
     <div class="cd-prudence"><span class="g" aria-hidden="true">!</span><ul>${faits.join("")}${claude}</ul></div>
     ${publiques.length ? `<div class="cd-sec">Ses parties <i>${publiques.length}${internes ? ` · et ${pluriel(internes, "partie")} interne${internes > 1 ? "s" : ""}` : ""}</i></div><div class="cd-parties">${parties}</div>` : ""}`;
 }
-new ResizeObserver(() => { if (derniere && location.hash === "#code" && carteComplete) poser("code-page", codeChemin && !codeChemin.endsWith("/") ? pageFichierHtml(codeChemin, enCoursDe(derniere)) : pageDossierHtml(codeChemin, enCoursDe(derniere))); }).observe(document.getElementById("vue-code"));
+new ResizeObserver(() => { if (derniere && location.hash === "#code" && carteComplete) poser("code-page", pageCodeHtml(enCoursDe(derniere))); }).observe(document.getElementById("vue-code"));
 
 async function analyserCode() {
   if (rejoue) return;

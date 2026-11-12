@@ -15,7 +15,8 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M3. Python : petits doublons | à lancer | Sonnet | bornée, Opus | | |
 | M4. Serveur : une seule écriture du profil | à lancer | Opus | complète, Fable | | |
 | M5. Une seule fonction pour appeler git | à lancer, attend une décision | Opus | complète, Fable | | |
-| M6. Page : doublons | à lancer, après M2 | Opus | bornée, Opus | | |
+| M6a. Page : les petits calculs écrits plusieurs fois | vérifié | Opus | bornée, Opus : accepté | 1 | 758 tests, 365 vérifications dans le navigateur ; égalité avant/après prouvée par deux scripts indépendants (ouvrier, vérificateur) |
+| M6b. Page : envois au serveur, minuteries, tracés de fil | à lancer | Opus | bornée, Fable | | |
 | M7. Moteur et carte : doublons internes | à lancer, après M1 | Opus | complète, Fable | | |
 
 ### Restes mineurs relevés par le vérificateur de M1, non corrigés
@@ -25,6 +26,11 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 ### Restes mineurs relevés par le vérificateur de M2, non corrigés
 - L'en-tête des styles parle encore de « bleu nuit » alors que la variable `--nuit` a disparu ; la phrase reste juste comme description de la palette.
 - Relevés par l'ouvrier : dans `stationsDe`, le commentaire « Coordonnées écran » précède `parallele` alors qu'il décrit `sol` et `lieu` ; la ligne de tête sur le refus (« jamais par une couleur de plus ») est en tension avec `.mode-refus`, en ambre.
+
+### M6a : deux réunions refusées, à trancher par la personne responsable
+- Un nombre de tokens s'affiche « 1,2M » dans les jauges du Chantier et « 1,23 M » dans la Salle : deux formats, donc pas de fonction commune sans changer l'écran.
+- L'orchestrateur est écrit « Fable · élevé » à deux endroits et « Fable élevé », sans point médian, dans la Salle ; l'une des écritures est dans le HTML statique.
+- Restes mineurs du vérificateur, repris dans la consigne de M6b : le nom `habitArret`, peu parlant, et deux commentaires empilés au-dessus de lui.
 
 ## Contrôles communs
 
@@ -68,7 +74,7 @@ Les essais réécrivent des images de `chantier/captures/` : l'orchestrateur les
 - **M3** : `archives.EFFORTS` reprend `dosage.EFFORTS_FR` ; `ARRET` et `ARRETE`, même texte sous deux noms, deviennent une seule constante ; le repli d'identité git écrit deux fois.
 - **M4** : les trois « lire, modifier, réécrire `chantier/profil.json` » de `serveur.py` passent par une seule fonction, avec une seule gestion d'erreur.
 - **M5** : les cinq fonctions `_git` deviennent une seule. Elle toucherait `atelier/controles.py`, un garde-fou : zone rouge, donc décision de la personne responsable avant de lancer.
-- **M6** : dans la page, une seule façon d'envoyer une requête, un seul tracé de fil, une seule minuterie de message, un seul format de coût et de tokens.
+- **M6a** (faite) : les petits calculs de la page écrits une fois. **M6b** : une seule façon d'envoyer une requête, un seul tracé de fil, une seule minuterie de message, là où les versions font vraiment la même chose.
 - **M7** : dans `moteur.py`, l'historique d'une tentative et le calcul « monter puis vérifier le plafond » écrits une fois ; dans `carte.py`, le tronc commun de `_analyser` et `_mettre_a_jour`.
 
 ## Ce qui attend la personne responsable
