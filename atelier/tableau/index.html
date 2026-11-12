@@ -28,7 +28,7 @@
   --verre-fort: rgba(255, 255, 255, 0.17); --creux: rgba(0, 0, 0, 0.14);
   --bord: rgba(255, 255, 255, 0.12); --reflet: rgba(255, 255, 255, 0.2); --trait: rgba(255, 255, 255, 0.12);
   --texte: #ffffff; --discret: rgba(255, 255, 255, 0.8); --faible: rgba(255, 255, 255, 0.66);
-  --reussite: #72ebdc; --refus: #ffa76e; --plein: #ffffff; --sur-plein: #2a2a2e;
+  --reussite: #72ebdc; --refus: #ffa76e; --change: #ffd76e; --plein: #ffffff; --sur-plein: #2a2a2e;
   --ombre: 0 14px 34px -22px rgba(0, 0, 0, 0.5);
   --rayon: 22px; --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -377,7 +377,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
 .mode-reel, .mode-refus { color: var(--refus); }
 @media (prefers-reduced-motion: reduce) { button.mode-btn.envoi { animation: none; } }
 
-/* Code : l'explorateur, la constellation et la fiche d'un fichier */
+/* Code : l'explorateur, le plan, la vue d'un fichier et la fiche */
 .code-cadre { flex: 1 1 0; min-width: 0; min-height: 0; border-radius: var(--rayon); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .code-barre { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
 .segments { display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid var(--bord); background: var(--creux); }
@@ -393,7 +393,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
 .code-vide h2 { font-size: 15px; font-weight: 600; }
 .code-vide p { color: var(--discret); font-size: 13px; line-height: 1.5; }
 .explorateur { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; font-size: 13px; }
-.explorateur[hidden], .constellation[hidden] { display: none; }
+.explorateur[hidden], .plan[hidden], .voisinage[hidden] { display: none; }
 button.ligne-arbre { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; width: 100%; height: 28px;
   padding: 0 8px 0 calc(6px + var(--p, 0) * 16px); border: 0; border-radius: 8px; background: transparent; color: var(--texte); font-weight: 400; text-align: left; }
 button.ligne-arbre:hover { background: var(--creux); }
@@ -404,8 +404,8 @@ button.ligne-arbre.dossier { grid-template-columns: 14px minmax(0, 1fr) auto aut
 .ligne-arbre .petit { font-family: var(--mono); font-size: 10.5px; }
 .ligne-arbre .marques { display: flex; gap: 4px; }
 .ligne-arbre .badge { margin-left: 0; }
-.badge.change { color: var(--reussite); border-color: color-mix(in srgb, var(--reussite) 55%, transparent); }
-.point-change { width: 6px; height: 6px; border-radius: 50%; background: var(--reussite); }
+.badge.change { color: var(--change); border-color: color-mix(in srgb, var(--change) 55%, transparent); }
+.point-change { width: 7px; height: 7px; border-radius: 50%; background: var(--change); }
 .pastille-genre { width: 7px; height: 7px; border-radius: 50%; background: var(--couleur, var(--texte)); }
 .g-code { --couleur: #ffffff; } .g-tests { --couleur: var(--reussite); } .g-page { --couleur: #a9c1ff; }
 .g-reglages { --couleur: #d4c4ff; } .g-documentation { --couleur: rgba(255, 255, 255, 0.5); } .g-autre { --couleur: rgba(255, 255, 255, 0.35); }
@@ -419,34 +419,62 @@ ul.pieces .vide { color: var(--faible); }
 @keyframes clignoter-fond { 50% { background: color-mix(in srgb, var(--refus) 22%, transparent); } }
 button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinite; }
 .badge.en-cours-badge { animation: clignoter 1.2s ease-in-out infinite; }
-.constellation { flex: 1 1 0; min-height: 0; position: relative; border-radius: 14px; background: var(--creux); overflow: hidden; touch-action: none; cursor: grab; }
-.constellation.glisse { cursor: grabbing; }
-.constellation svg { display: block; width: 100%; height: 100%; }
-.constellation .lien { stroke: rgba(255, 255, 255, 0.16); stroke-width: 1; vector-effect: non-scaling-stroke; }
-.constellation .lien.actif { stroke: rgba(255, 255, 255, 0.75); }
-.constellation .amas { fill: var(--faible); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; text-anchor: middle; pointer-events: none; }
-.etoile { cursor: pointer; }
-.etoile circle.zone { fill: transparent; stroke: none; animation: none; }
-.etoile circle:not(.zone) { fill: var(--couleur); stroke: transparent; stroke-width: 2; vector-effect: non-scaling-stroke; }
-.etoile text { fill: var(--texte); font-size: 11px; text-anchor: middle; opacity: 0; pointer-events: none; paint-order: stroke; stroke: rgba(30, 30, 34, 0.8); stroke-width: 3px; }
-.etoile:hover text, .etoile:focus text, .etoile.nomme text, .etoile.choisi text, .etoile.voisin text, .etoile.en-cours text { opacity: 1; }
-.etoile.nouveau circle:not(.zone), .etoile.modifie circle:not(.zone) { stroke: var(--reussite); }
-.etoile.choisi circle:not(.zone) { stroke: #ffffff; stroke-width: 3; }
-.etoile.en-cours circle:not(.zone) { stroke: var(--refus); stroke-width: 3; animation: clignoter 1s ease-in-out infinite; }
-.constellation.focus .etoile:not(.choisi):not(.voisin) { opacity: 0.35; }
-.constellation-outils { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.plan, .voisinage { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.plan-tete { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
+.ariane { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--faible); font-size: 13px; }
+.ariane button { height: 26px; padding: 0 8px; border: 0; background: transparent; color: var(--discret); font-weight: 400; }
+.ariane button:last-child { color: var(--texte); font-weight: 600; }
+.ariane button:hover { background: var(--creux); }
+.plan-aide { line-height: 1.45; }
+.plan-aide .souci { color: var(--refus); }
+.plan-toile, .voisins-toile { flex: 1 1 0; min-height: 0; position: relative; overflow: auto; border-radius: 14px; background: var(--creux); }
+.plan-toile { display: flex; flex-direction: column; gap: 44px; padding: 40px 18px 24px; }
+.etage { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 22px; }
+.etage.sans-lien { padding-top: 18px; border-top: 1px dashed var(--trait); }
+.etage.sans-lien > .petit { flex-basis: 100%; text-align: center; }
+svg.fleches { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
+svg.fleches marker path { fill: rgba(255, 255, 255, 0.55); }
+.fleche { fill: none; stroke: rgba(255, 255, 255, 0.32); pointer-events: stroke; }
+.fleche.mutuel { stroke: var(--refus); stroke-dasharray: 5 4; }
+.fleche.actif { stroke: rgba(255, 255, 255, 0.9); }
+.fleche.long { stroke: rgba(255, 255, 255, 0.13); }
+.fleche.pale { stroke: rgba(255, 255, 255, 0.07); }
+button.bloc, button.voisin-carte { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 190px; height: auto; min-height: 58px;
+  padding: 9px 11px; border-radius: 12px; border: 1px solid var(--bord); background: rgb(68 68 74 / 0.96); color: var(--texte); font-weight: 400; text-align: left; }
+button.bloc:hover, button.voisin-carte:hover { border-color: rgba(255, 255, 255, 0.45); }
+button.bloc.dossier { background: rgb(80 80 88 / 0.97); }
+button.bloc.choisi, button.voisin-carte.centre { border-color: #ffffff; box-shadow: 0 0 0 1px #ffffff; }
+button.bloc.pale { opacity: 0.4; }
+button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus); animation: clignoter-bord 1.2s ease-in-out infinite; }
+.bloc-nom { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; font-size: 13px; }
+.bloc-nom b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bloc-nom .badge { margin-left: auto; }
+.bloc-nom .point-change { flex: none; }
+.bloc-texte { color: var(--discret); font-size: 11.5px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
+.voisin-carte .chemin { font-family: var(--mono); font-size: 10.5px; overflow-wrap: anywhere; }
+.icone-dossier { flex: none; width: 12px; height: 9px; border-radius: 2px; border: 1.5px solid var(--discret); border-top-width: 3px; }
+@keyframes clignoter-bord { 50% { border-color: transparent; box-shadow: 0 0 0 3px color-mix(in srgb, var(--refus) 35%, transparent); } }
+.voisins-toile { display: grid; grid-template-columns: repeat(var(--colonnes, 5), minmax(170px, 1fr)); gap: 0 44px; padding: 16px 18px; align-items: start; }
+.colonne-voisins { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 10px; min-height: 100%; justify-content: center; }
+.colonne-voisins h3 { color: var(--faible); font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; }
+.colonne-voisins > .petit { text-align: center; }
+.colonne-voisins button.voisin-carte { width: 100%; }
+.colonne-voisins.milieu button.voisin-carte { min-height: 110px; }
+.voisinage-vide { margin: auto; max-width: 420px; text-align: center; line-height: 1.5; }
 .legende-code { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--faible); }
 .legende-code span { display: inline-flex; align-items: center; gap: 6px; }
 .fiche .en-cours-texte { color: var(--refus); }
 .fiche button.lien-fichier { height: auto; padding: 2px 0; border: 0; background: transparent; color: var(--discret); font-family: var(--mono); font-size: 11.5px; font-weight: 400; text-align: left; overflow-wrap: anywhere; }
 .fiche button.lien-fichier:hover { color: var(--texte); text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
-  button.ligne-arbre.en-cours, .badge.en-cours-badge, .etoile.en-cours circle:not(.zone) { animation: none; }
+  button.ligne-arbre.en-cours, .badge.en-cours-badge, button.bloc.en-cours, button.voisin-carte.en-cours { animation: none; }
   button.ligne-arbre.en-cours { background: color-mix(in srgb, var(--refus) 18%, transparent); }
 }
 @media (max-width: 900px) {
   #vue-code.active { flex-direction: column; overflow-y: auto; }
   .code-cadre { flex: none; min-height: 70vh; }
+  .voisins-toile { grid-template-columns: minmax(0, 1fr); gap: 18px; }
+  .voisins-toile svg.fleches { display: none; }
   .journal { padding-left: 0; }
   button.agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
   button.agent-ligne .role { display: none; }
@@ -543,7 +571,8 @@ button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinit
       <div class="code-barre">
         <div class="segments" role="group" aria-label="Affichage du code">
           <button type="button" data-action="code-vue" data-vue="explorateur" aria-pressed="true">Explorateur</button>
-          <button type="button" data-action="code-vue" data-vue="constellation" aria-pressed="false">Constellation</button>
+          <button type="button" data-action="code-vue" data-vue="plan" aria-pressed="false">Plan</button>
+          <button type="button" data-action="code-vue" data-vue="voisinage" aria-pressed="false">Fichier</button>
         </div>
         <p class="petit code-etat" id="code-etat" aria-live="polite"></p>
         <div class="code-actions" id="code-actions"></div>
@@ -551,7 +580,8 @@ button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinit
       <div class="code-corps">
         <div class="code-vide" id="code-vide"></div>
         <div class="explorateur" id="explorateur" hidden></div>
-        <div class="constellation" id="constellation" hidden></div>
+        <div class="plan" id="plan" hidden></div>
+        <div class="voisinage" id="voisinage" hidden></div>
       </div>
     </div>
     <aside class="fiche" id="fiche-code" aria-label="Détail du fichier"></aside>
@@ -1446,12 +1476,13 @@ async function envoyerSansAfficher(adresse, corps) {
 }
 document.getElementById("fermer-archive").addEventListener("click", () => document.getElementById("archive").close());
 
-/* ---------- Code : l'explorateur, la constellation et la fiche d'un fichier ----------
+/* ---------- Code : l'explorateur, le plan, la vue d'un fichier et la fiche ----------
    Le serveur garde la carte du code (vue.carte en donne l'état ; /api/carte/lire la carte complète, relue quand sa
    version change). Les fichiers qu'un agent modifie en ce moment arrivent avec chaque vue et clignotent. */
 let carteComplete = null, carteVersion = -1, carteChargement = false, vueCode = "explorateur", fichierChoisi = "";
-let estimationCarte = null, codePhrase = "", disposition = null, zoomCiel = { x: 0, y: 0, k: 1 }, glisseCiel = null;
-const dossiersOuverts = new Set(), fichiersOuverts = new Set(), positionsCiel = new Map();
+let estimationCarte = null, codePhrase = "";
+const dossiersOuverts = new Set(), fichiersOuverts = new Set();
+const VUES_CODE = ["explorateur", "plan", "voisinage"];
 const GENRES_FR = { code: "Code", tests: "Tests", page: "Interface", "réglages": "Réglages", documentation: "Documentation", autre: "Autre" };
 const genreClasse = (g) => "g-" + (g === "réglages" ? "reglages" : g);
 const carteDe = (vue) => (vue && vue.carte) || { etat: "absente", en_cours: [] };
@@ -1475,7 +1506,6 @@ async function chargerCarte(force) {
   carteComplete = donnees.carte_complete;
   carteVersion = carteComplete.version;
   if (premiere) ouvrirDossiersDeDepart();
-  disposition = disposerCiel(carteComplete.fichiers, carteComplete.liens);
   afficherCode(derniere);
 }
 function ouvrirDossiersDeDepart() {
@@ -1531,10 +1561,10 @@ function afficherCode(vue) {
   poser("code-vide", videCodeHtml(resume));
   const pret = Boolean(carteComplete) && resume.etat === "prete";
   document.querySelectorAll('[data-action="code-vue"]').forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.vue === vueCode)));
-  document.getElementById("explorateur").hidden = !pret || vueCode !== "explorateur";
-  document.getElementById("constellation").hidden = !pret || vueCode !== "constellation";
+  for (const v of VUES_CODE) document.getElementById(v).hidden = !pret || vueCode !== v;
   if (pret && vueCode === "explorateur") poser("explorateur", arbreHtml(arbreDe(carteComplete.fichiers), 0, enCours));
-  if (pret && vueCode === "constellation") dessinerCiel(enCours);
+  if (pret && vueCode === "plan") { poser("plan", planHtml(enCours)); flechesPlan(); }
+  if (pret && vueCode === "voisinage") { poser("voisinage", voisinageHtml(enCours)); flechesVoisinage(); }
   poser("fiche-code", pret ? ficheCodeHtml(enCours) : "");
 }
 
@@ -1587,116 +1617,240 @@ function piecesHtml(f) {
   return (lignes ? `<ul class="pieces">${lignes}</ul>` : "") + reste;
 }
 
-/* La constellation : une étoile par fichier, rangées en amas par dossier, reliées quand l'une se sert de l'autre. */
-const groupeDe = (f) => (f.chemin.includes("/") ? f.chemin.split("/")[0] : "racine");
-function graine(texte) { let h = 2166136261; for (const c of texte) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return ((h >>> 0) % 10000) / 10000; }
-function rayonDe(f) { return Math.max(3.5, Math.min(14, 3 + Math.sqrt(f.lignes) / 3)); }
-function disposerCiel(fichiers, liens) {
-  const visibles = fichiers.length > 600 ? [...fichiers].sort((a, b) => b.lignes - a.lignes).slice(0, 600) : fichiers;
-  const groupes = [...new Set(visibles.map(groupeDe))].sort();
-  const rayon = groupes.length > 1 ? 120 + 30 * groupes.length : 0;
-  const centres = new Map(groupes.map((g, i) => { const a = (2 * Math.PI * i) / groupes.length - Math.PI / 2; return [g, { x: Math.cos(a) * rayon, y: Math.sin(a) * rayon }]; }));
-  const noeuds = visibles.map((f) => {
-    const ancien = positionsCiel.get(f.chemin), c = centres.get(groupeDe(f));
-    return { f, x: ancien ? ancien.x : c.x + (graine(f.chemin) - 0.5) * 90, y: ancien ? ancien.y : c.y + (graine(`${f.chemin}#`) - 0.5) * 90, vx: 0, vy: 0, fixe: Boolean(ancien) };
-  });
-  const index = new Map(noeuds.map((n, i) => [n.f.chemin, i]));
-  const aretes = liens.map(([a, b]) => [index.get(a), index.get(b)]).filter(([a, b]) => a !== undefined && b !== undefined);
-  const tours = noeuds.every((n) => n.fixe) ? 0 : noeuds.some((n) => n.fixe) ? 90 : 320;
-  for (let t = 0; t < tours; t++) {
-    const chaleur = 1 - t / tours;
-    for (let i = 0; i < noeuds.length; i++) for (let j = i + 1; j < noeuds.length; j++) {
-      const a = noeuds[i], b = noeuds[j], dx = a.x - b.x, dy = a.y - b.y, d2 = Math.max(dx * dx + dy * dy, 30), force = 2600 / d2;
-      a.vx += dx * force / Math.sqrt(d2); a.vy += dy * force / Math.sqrt(d2); b.vx -= dx * force / Math.sqrt(d2); b.vy -= dy * force / Math.sqrt(d2);
-    }
-    for (const [i, j] of aretes) {
-      const a = noeuds[i], b = noeuds[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.max(Math.hypot(dx, dy), 1), force = (d - 85) * 0.012;
-      a.vx += dx / d * force; a.vy += dy / d * force; b.vx -= dx / d * force; b.vy -= dy / d * force;
-    }
-    for (const n of noeuds) {
-      const c = centres.get(groupeDe(n.f));
-      n.vx += (c.x - n.x) * 0.007 - n.x * 0.001; n.vy += (c.y - n.y) * 0.007 - n.y * 0.001;
-      const pas = Math.hypot(n.vx, n.vy), borne = (12 * chaleur + 1) * (n.fixe ? 0.25 : 1);
-      if (pas > borne) { n.vx *= borne / pas; n.vy *= borne / pas; }
-      n.x += n.vx; n.y += n.vy; n.vx *= 0.6; n.vy *= 0.6;
-    }
+/* Le plan en étages : un bloc par dossier ou fichier du niveau ouvert. Les flèches vont de celui qui se sert vers
+   celui qui sert : en haut ce qui se sert des autres, en bas les fondations. Un clic sur un dossier l'ouvre. */
+let planChemin = "", planTout = false, indexLiens = { carte: null, sert: new Map(), utilise: new Map() };
+const SEP = "\u0000";
+function liensDe() {
+  if (indexLiens.carte === carteComplete) return indexLiens;
+  const sert = new Map(), utilise = new Map();
+  for (const [a, b] of carteComplete.liens) {
+    if (!sert.has(a)) sert.set(a, []); sert.get(a).push(b);
+    if (!utilise.has(b)) utilise.set(b, []); utilise.get(b).push(a);
   }
-  for (const n of noeuds) positionsCiel.set(n.f.chemin, { x: n.x, y: n.y });
-  const grands = new Set([...visibles].sort((a, b) => b.lignes - a.lignes).slice(0, 10).map((f) => f.chemin));
-  return { noeuds, aretes, groupes, grands, coupe: fichiers.length - visibles.length };
+  indexLiens = { carte: carteComplete, sert, utilise };
+  return indexLiens;
 }
-function voisinsDe(chemin) {
-  const voisins = new Set();
-  for (const [a, b] of carteComplete.liens) { if (a === chemin) voisins.add(b); if (b === chemin) voisins.add(a); }
-  return voisins;
+function blocDe(chemin) {
+  const prefixe = planChemin ? `${planChemin}/` : "";
+  if (!chemin.startsWith(prefixe)) return null;
+  const reste = chemin.slice(prefixe.length), i = reste.indexOf("/");
+  return prefixe + (i < 0 ? reste : reste.slice(0, i));
 }
-function dessinerCiel(enCours) {
-  if (!disposition) disposition = disposerCiel(carteComplete.fichiers, carteComplete.liens);
-  const { noeuds, aretes, groupes, grands } = disposition;
-  if (!noeuds.length) return poser("constellation", `<p class="calme" style="margin: auto; padding: 40px; text-align: center">Aucun fichier à montrer.</p>`);
-  const xs = noeuds.map((n) => n.x), ys = noeuds.map((n) => n.y), marge = 60;
-  const x0 = Math.min(...xs) - marge, y0 = Math.min(...ys) - marge, l = Math.max(...xs) - x0 + marge, h = Math.max(...ys) - y0 + marge;
-  const voisins = fichierChoisi ? voisinsDe(fichierChoisi) : new Set();
-  const traits = aretes.map(([i, j]) => {
-    const a = noeuds[i], b = noeuds[j], actif = fichierChoisi && (a.f.chemin === fichierChoisi || b.f.chemin === fichierChoisi);
-    return `<line class="lien${actif ? " actif" : ""}" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
+function niveauPlan() {
+  const blocs = new Map();
+  for (const f of carteComplete.fichiers) {
+    const id = blocDe(f.chemin);
+    if (!id) continue;
+    if (!blocs.has(id)) blocs.set(id, { id, nom: nomCourt(id), dossier: id !== f.chemin, fichiers: [] });
+    blocs.get(id).fichiers.push(f);
+  }
+  const aretes = new Map(), dehors = new Set(), venus = new Set();
+  for (const [a, b] of carteComplete.liens) {
+    const ba = blocDe(a), bb = blocDe(b);
+    if (ba && bb && ba !== bb) aretes.set(ba + SEP + bb, (aretes.get(ba + SEP + bb) || 0) + 1);
+    else if (ba && !bb) dehors.add(b);
+    else if (!ba && bb) venus.add(a);
+  }
+  const relies = new Set([...aretes.keys()].flatMap((k) => k.split(SEP)));
+  const isoles = [...blocs.values()].filter((b) => !relies.has(b.id));
+  const caches = relies.size && !planTout ? isoles : [];
+  const visibles = [...blocs.values()].filter((b) => !caches.includes(b));
+  return { blocs: visibles, aretes, isoles: relies.size ? isoles : [], caches: caches.length, dehors: dehors.size, venus: venus.size };
+}
+/* Les groupes qui dépendent l'un de l'autre (Tarjan), puis la hauteur de chacun : 0 pour ce qui ne se sert de rien. */
+function etagesDe(blocs, aretes) {
+  const ids = blocs.map((b) => b.id), suivants = new Map(ids.map((id) => [id, []]));
+  for (const k of aretes.keys()) { const [a, b] = k.split(SEP); if (suivants.has(a) && suivants.has(b)) suivants.get(a).push(b); }
+  const rang = new Map(), bas = new Map(), pile = [], dansPile = new Set(), groupeDe = new Map(), groupes = [];
+  let compteur = 0;
+  const visiter = (v) => {
+    rang.set(v, compteur); bas.set(v, compteur); compteur++; pile.push(v); dansPile.add(v);
+    for (const w of suivants.get(v)) {
+      if (!rang.has(w)) { visiter(w); bas.set(v, Math.min(bas.get(v), bas.get(w))); }
+      else if (dansPile.has(w)) bas.set(v, Math.min(bas.get(v), rang.get(w)));
+    }
+    if (bas.get(v) === rang.get(v)) {
+      const groupe = [];
+      let w;
+      do { w = pile.pop(); dansPile.delete(w); groupeDe.set(w, groupes.length); groupe.push(w); } while (w !== v);
+      groupes.push(groupe);
+    }
+  };
+  for (const id of ids) if (!rang.has(id)) visiter(id);
+  const hauteur = new Map();
+  const mesurer = (g) => {
+    if (hauteur.has(g)) return hauteur.get(g);
+    hauteur.set(g, 0);
+    let h = 0;
+    for (const v of groupes[g]) for (const w of suivants.get(v)) if (groupeDe.get(w) !== g) h = Math.max(h, mesurer(groupeDe.get(w)) + 1);
+    hauteur.set(g, h);
+    return h;
+  };
+  groupes.forEach((_, g) => mesurer(g));
+  const haut = Math.max(0, ...hauteur.values());
+  const etages = Array.from({ length: haut + 1 }, () => []);
+  for (const b of blocs) etages[haut - hauteur.get(groupeDe.get(b.id))].push(b);
+  // Ordre dans chaque étage : près de ce à quoi un bloc est relié, pour croiser le moins de flèches possible.
+  const place = new Map();
+  etages.forEach((e) => { e.sort((a, b) => Number(b.dossier) - Number(a.dossier) || a.nom.localeCompare(b.nom)); e.forEach((b, i) => place.set(b.id, i / Math.max(1, e.length - 1))); });
+  const voisins = new Map(ids.map((id) => [id, []]));
+  for (const k of aretes.keys()) { const [a, b] = k.split(SEP); if (voisins.has(a) && voisins.has(b)) { voisins.get(a).push(b); voisins.get(b).push(a); } }
+  for (let tour = 0; tour < 4; tour++) for (const e of etages) {
+    const centre = (b) => { const v = voisins.get(b.id); return v.length ? v.reduce((s, x) => s + place.get(x), 0) / v.length : place.get(b.id); };
+    const cles = new Map(e.map((b) => [b.id, centre(b)]));
+    e.sort((a, b) => cles.get(a.id) - cles.get(b.id));
+    e.forEach((b, i) => place.set(b.id, i / Math.max(1, e.length - 1)));
+  }
+  return { etages, mutuels: groupes.filter((g) => g.length > 1), groupeDe };
+}
+const raccourci = (texte, n) => (texte.length > n ? `${texte.slice(0, n - 1).trimEnd()}…` : texte);
+function blocHtml(b, enCours, choisi, proches) {
+  const actif = b.fichiers.some((f) => enCours.has(f.chemin)), change = b.fichiers.some((f) => f.statut);
+  const lignes = b.fichiers.reduce((s, f) => s + f.lignes, 0);
+  const f = b.fichiers[0];
+  const texte = b.dossier ? `${pluriel(b.fichiers.length, "fichier")} · ${nombre(lignes)} lignes` : raccourci(f.resume, 90);
+  const classes = ["bloc", b.dossier ? "dossier" : `fichier ${genreClasse(f.genre)}`, actif ? "en-cours" : "", change ? "change" : "",
+    b.id === choisi ? "choisi" : "", choisi && !proches.has(b.id) && b.id !== choisi ? "pale" : ""].filter(Boolean).join(" ");
+  const titre = b.dossier ? `Ouvrir le dossier ${b.id}` : `${b.id} : ${f.resume}`;
+  return `<button type="button" class="${classes}" data-action="bloc" data-chemin="${propre(b.id)}" data-dossier="${b.dossier ? 1 : ""}" title="${propre(titre)}">
+    <span class="bloc-nom">${b.dossier ? `<i class="icone-dossier" aria-hidden="true"></i>` : `<i class="pastille-genre" aria-hidden="true"></i>`}<b>${propre(b.nom)}</b>${actif ? `<span class="badge en-cours-badge">En cours</span>` : ""}${change ? `<i class="point-change" title="Changé dans la dernière version"></i>` : ""}</span>
+    <span class="bloc-texte">${propre(texte)}</span></button>`;
+}
+function planHtml(enCours) {
+  const niveau = niveauPlan(), { etages, mutuels } = etagesDe(niveau.blocs, niveau.aretes);
+  const choisi = fichierChoisi ? blocDe(fichierChoisi) : null, proches = new Set();
+  if (choisi) for (const k of niveau.aretes.keys()) { const [a, b] = k.split(SEP); if (a === choisi) proches.add(b); if (b === choisi) proches.add(a); }
+  const parties = planChemin ? planChemin.split("/") : [];
+  const ariane = [`<button type="button" data-action="plan-aller" data-chemin="">Projet</button>`]
+    .concat(parties.map((p, i) => `<button type="button" data-action="plan-aller" data-chemin="${propre(parties.slice(0, i + 1).join("/"))}">${propre(p)}</button>`))
+    .join(`<span aria-hidden="true">›</span>`);
+  const notes = [];
+  if (planChemin && (niveau.dehors || niveau.venus)) notes.push(`Hors de ce dossier : il se sert de ${pluriel(niveau.dehors, "fichier")}, et ${pluriel(niveau.venus, "fichier")} se ${niveau.venus > 1 ? "servent" : "sert"} de lui.`);
+  for (const g of mutuels.slice(0, 3)) notes.push(`<span class="souci">${propre(g.map(nomCourt).sort().join(" et "))} dépendent l'un de l'autre (flèches orange) : les modifier séparément est délicat.</span>`);
+  const bascule = niveau.isoles.length
+    ? `<button type="button" class="discret" data-action="plan-tout">${planTout ? "Cacher" : "Montrer"} ${pluriel(niveau.isoles.length, "élément")} sans lien</button>` : "";
+  const corps = etages.filter((e) => e.length).map((e) => `<div class="etage">${e.map((b) => blocHtml(b, enCours, choisi, proches)).join("")}</div>`).join("");
+  const sansLien = planTout && niveau.isoles.length
+    ? `<div class="etage sans-lien"><p class="petit">Sans lien avec le reste de ce niveau</p>${niveau.isoles.map((b) => blocHtml(b, enCours, choisi, proches)).join("")}</div>` : "";
+  return `<div class="plan-tete"><nav class="ariane" aria-label="Dossier ouvert">${ariane}</nav>${bascule}</div>
+    <p class="petit plan-aide">En haut, ce qui se sert des autres ; en bas, ce dont les autres se servent. Une flèche va de celui qui se sert vers celui qui sert ; plus elle est épaisse, plus il y a de liens.${notes.length ? " " : ""}${notes.map((n) => (n.startsWith("<span") ? n : propre(n))).join(" ")}</p>
+    <div class="plan-toile">${corps || `<p class="calme">Rien à montrer à ce niveau.</p>`}${sansLien}<svg class="fleches" aria-hidden="true"></svg></div>`;
+}
+function flechesPlan() {
+  const toile = document.querySelector("#plan .plan-toile");
+  if (!toile) return;
+  const niveau = niveauPlan(), { groupeDe, etages } = etagesDe(niveau.blocs, niveau.aretes);
+  const choisi = fichierChoisi ? blocDe(fichierChoisi) : null, traits = [], etageDe = new Map();
+  etages.forEach((e, i) => e.forEach((b) => etageDe.set(b.id, i)));
+  for (const [k, n] of niveau.aretes) {
+    const [a, b] = k.split(SEP), mutuel = groupeDe.get(a) !== undefined && groupeDe.get(a) === groupeDe.get(b);
+    const long = etageDe.get(b) - etageDe.get(a) > 1 ? " long" : "";
+    traits.push({ de: a, vers: b, n, classe: `${mutuel ? "mutuel" : ""}${choisi ? (a === choisi || b === choisi ? " actif" : " pale") : long}`,
+      titre: `${nomCourt(a)} se sert de ${nomCourt(b)} (${pluriel(n, "lien")})` });
+  }
+  tracer(toile, "#plan .bloc", traits, "vertical");
+}
+/* Trace les flèches d'une toile : chaque trait relie deux éléments repérés par leur data-chemin. */
+function tracer(toile, selecteur, traits, sens) {
+  const svg = toile.querySelector("svg.fleches");
+  const boite = toile.getBoundingClientRect(), elements = new Map();
+  document.querySelectorAll(selecteur).forEach((el) => { if (el.dataset.chemin && !elements.has(el.dataset.chemin)) elements.set(el.dataset.chemin, el); });
+  const rect = (el) => { const r = el.getBoundingClientRect(); return { x: r.left - boite.left + toile.scrollLeft, y: r.top - boite.top + toile.scrollTop, l: r.width, h: r.height }; };
+  const utiles = traits.filter((t) => elements.has(t.de) && elements.has(t.vers)).map((t) => ({ ...t, a: rect(elements.get(t.de)), b: rect(elements.get(t.vers)) }));
+  // Les départs et les arrivées d'un même élément s'étalent sur son bord, dans l'ordre de ce qu'ils relient.
+  const etaler = (cle, autre, bord) => {
+    const paquets = new Map();
+    for (const t of utiles) { if (!paquets.has(t[cle])) paquets.set(t[cle], []); paquets.get(t[cle]).push(t); }
+    for (const liste of paquets.values()) {
+      liste.sort((p, q) => (sens === "vertical" ? p[autre].x - q[autre].x : p[autre].y - q[autre].y));
+      liste.forEach((t, i) => { t[bord] = (i + 1) / (liste.length + 1); });
+    }
+  };
+  etaler("de", "b", "fa"); etaler("vers", "a", "fb");
+  let html = `<defs><marker id="pointe-${sens}" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto"><path d="M0,0 L8,4 L0,8 z"/></marker></defs>`;
+  for (const t of utiles) {
+    const epaisseur = Math.min(6, 1.2 + Math.log2(t.n || 1) * 1.1);
+    let d;
+    if (sens === "vertical" && Math.abs(t.a.y - t.b.y) < 4) { // même étage : un arc au-dessus
+      const x1 = t.a.x + t.a.l * t.fa, x2 = t.b.x + t.b.l * t.fb, y = t.a.y;
+      d = `M${x1},${y} C${x1},${y - 34} ${x2},${y - 34} ${x2},${y}`;
+    } else if (sens === "vertical") {
+      const x1 = t.a.x + t.a.l * t.fa, y1 = t.a.y + t.a.h, x2 = t.b.x + t.b.l * t.fb, y2 = t.b.y, m = (y2 - y1) / 2;
+      d = `M${x1},${y1} C${x1},${y1 + m} ${x2},${y2 - m} ${x2},${y2 - 2}`;
+    } else {
+      const x1 = t.a.x + t.a.l, y1 = t.a.y + t.a.h * t.fa, x2 = t.b.x, y2 = t.b.y + t.b.h * t.fb, m = (x2 - x1) / 2;
+      d = `M${x1},${y1} C${x1 + m},${y1} ${x2 - m},${y2} ${x2 - 2},${y2}`;
+    }
+    html += `<path class="fleche ${t.classe || ""}" d="${d}" stroke-width="${epaisseur.toFixed(1)}" marker-end="url(#pointe-${sens})"><title>${propre(t.titre || "")}</title></path>`;
+  }
+  svg.setAttribute("width", toile.scrollWidth); svg.setAttribute("height", toile.scrollHeight);
+  if (svg.innerHTML !== html) svg.innerHTML = html;
+}
+
+/* La vue d'un fichier : au milieu le fichier, à gauche ceux qui se servent de lui, à droite ceux dont il se sert,
+   sur deux niveaux. Elle répond à « si je touche à ce fichier, qu'est-ce qui peut être touché ? ». */
+let historiqueFichiers = [];
+const MAX_COLONNE = 12;
+function colonnesDe(chemin) {
+  const { sert, utilise } = liensDe(), vus = new Set([chemin]);
+  const autour = (liste, index) => {
+    const suite = [...new Set(liste.flatMap((c) => index.get(c) || []))].filter((c) => !vus.has(c)).sort();
+    suite.forEach((c) => vus.add(c));
+    return suite;
+  };
+  const g1 = autour([chemin], utilise), d1 = autour([chemin], sert);
+  const g2 = autour(g1, utilise), d2 = autour(d1, sert);
+  return [g2, g1, [chemin], d1, d2];
+}
+function touches(chemin) {
+  const { utilise } = liensDe(), vus = new Set(), file = [chemin];
+  while (file.length) for (const c of utilise.get(file.shift()) || []) if (!vus.has(c) && c !== chemin) { vus.add(c); file.push(c); }
+  return vus.size;
+}
+function carteVoisinHtml(chemin, enCours, centre) {
+  const f = carteComplete.fichiers.find((x) => x.chemin === chemin);
+  if (!f) return "";
+  const dossier = chemin.includes("/") ? chemin.slice(0, chemin.lastIndexOf("/")) : "";
+  const classes = ["voisin-carte", genreClasse(f.genre), centre ? "centre" : "", enCours.has(chemin) ? "en-cours" : "", f.statut ? "change" : ""].filter(Boolean).join(" ");
+  return `<button type="button" class="${classes}" data-action="centrer" data-chemin="${propre(chemin)}" title="${propre(`${chemin} : ${f.resume}`)}">
+    <span class="bloc-nom"><i class="pastille-genre" aria-hidden="true"></i><b>${propre(nomCourt(chemin))}</b>${enCours.has(chemin) ? `<span class="badge en-cours-badge">En cours</span>` : ""}${f.statut ? `<i class="point-change" title="Changé dans la dernière version"></i>` : ""}</span>
+    ${dossier ? `<span class="petit chemin">${propre(dossier)}</span>` : ""}<span class="bloc-texte">${propre(centre ? f.resume : raccourci(f.resume, 80))}</span></button>`;
+}
+function voisinageHtml(enCours) {
+  const f = carteComplete.fichiers.find((x) => x.chemin === fichierChoisi);
+  if (!f) return `<p class="calme voisinage-vide">Choisis un fichier dans l'explorateur ou le plan : il s'affichera ici, au milieu de ceux qui se servent de lui et de ceux dont il se sert.</p>`;
+  const colonnes = colonnesDe(f.chemin), directs = colonnes[1].length, tous = touches(f.chemin);
+  const impact = !directs ? `Aucun fichier ne se sert de ${f.chemin} : le modifier ne touche que lui.`
+    : `Si tu modifies ${nomCourt(f.chemin)}, ${pluriel(directs, "fichier")} ${directs > 1 ? "s'en servent" : "s'en sert"} directement${tous > directs ? `, et ${tous} en tout en comptant ceux qui passent par eux` : ""}.`;
+  const titres = ["Ils se servent d'eux", "Ils se servent de lui", "Le fichier", "Il se sert de", "Dont ceux-là se servent"];
+  const garder = colonnes.map((liste, i) => i > 0 && i < 4 || liste.length > 0);
+  const cols = colonnes.map((liste, i) => {
+    if (!garder[i]) return "";
+    const montres = liste.slice(0, MAX_COLONNE), reste = liste.length - montres.length;
+    const contenu = montres.map((c) => carteVoisinHtml(c, enCours, i === 2)).join("") + (reste ? `<p class="petit">Et ${reste} autre${reste > 1 ? "s" : ""}.</p>` : "");
+    return `<div class="colonne-voisins${i === 2 ? " milieu" : ""}"><h3>${titres[i]}</h3>${contenu || `<p class="petit">Aucun.</p>`}</div>`;
   }).join("");
-  const amas = groupes.map((g) => {
-    const membres = noeuds.filter((n) => groupeDe(n.f) === g), cx = membres.reduce((s, n) => s + n.x, 0) / membres.length;
-    return `<text class="amas" x="${cx.toFixed(1)}" y="${(Math.min(...membres.map((n) => n.y - rayonDe(n.f))) - 30).toFixed(1)}">${propre(g)}</text>`;
-  }).join("");
-  const etoiles = noeuds.map((n) => {
-    const f = n.f, r = rayonDe(f);
-    const classes = ["etoile", genreClasse(f.genre), f.statut, enCours.has(f.chemin) ? "en-cours" : "", grands.has(f.chemin) ? "nomme" : "",
-      f.chemin === fichierChoisi ? "choisi" : "", voisins.has(f.chemin) ? "voisin" : ""].filter(Boolean).join(" ");
-    return `<g class="${classes}" transform="translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})" data-action="etoile" data-chemin="${propre(f.chemin)}" tabindex="0" role="button" aria-label="${propre(f.chemin)}">
-      <circle class="zone" r="${(r + 8).toFixed(1)}"/><circle r="${r.toFixed(1)}"/><text y="${(-r - 5).toFixed(1)}">${propre(nomCourt(f.chemin))}</text></g>`;
-  }).join("");
-  const z = zoomCiel, coupe = disposition.coupe ? `<p class="petit" style="position: absolute; left: 12px; bottom: 10px">Les ${disposition.coupe} plus petits fichiers ne sont pas montrés.</p>` : "";
-  poser("constellation", `<svg viewBox="${x0.toFixed(0)} ${y0.toFixed(0)} ${l.toFixed(0)} ${h.toFixed(0)}" role="img" aria-label="Constellation des fichiers du projet">
-    <g id="ciel" transform="translate(${z.x} ${z.y}) scale(${z.k})">${traits}${amas}${etoiles}</g></svg>${coupe}
-    <div class="constellation-outils"><button type="button" class="discret" data-action="recentrer">Recentrer</button></div>`);
-  document.getElementById("constellation").classList.toggle("focus", Boolean(fichierChoisi));
+  return `<div class="plan-tete">${historiqueFichiers.length ? `<button type="button" class="discret" data-action="precedent">‹ Précédent</button>` : ""}<p class="petit">${propre(impact)}</p></div>
+    <div class="voisins-toile" style="--colonnes: ${garder.filter(Boolean).length}">${cols}<svg class="fleches" aria-hidden="true"></svg></div>`;
 }
-function appliquerZoom() {
-  const ciel = document.getElementById("ciel");
-  if (ciel) ciel.setAttribute("transform", `translate(${zoomCiel.x} ${zoomCiel.y}) scale(${zoomCiel.k})`);
+function flechesVoisinage() {
+  const toile = document.querySelector("#voisinage .voisins-toile");
+  if (!toile || !fichierChoisi) return;
+  const { sert } = liensDe(), colonnes = colonnesDe(fichierChoisi).map((l, i) => (i === 2 ? l : l.slice(0, MAX_COLONNE)));
+  const traits = [];
+  for (let i = 0; i < 4; i++) for (const a of colonnes[i]) for (const b of colonnes[i + 1]) {
+    if ((sert.get(a) || []).includes(b)) traits.push({ de: a, vers: b, n: 1, titre: `${nomCourt(a)} se sert de ${nomCourt(b)}` });
+  }
+  tracer(toile, "#voisinage .voisin-carte", traits, "horizontal");
 }
-function pointSvg(e) {
-  const svg = document.querySelector("#constellation svg"), matrice = svg.getScreenCTM().inverse();
-  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(matrice);
-  return { x: p.x, y: p.y };
-}
-const ciel = document.getElementById("constellation");
-ciel.addEventListener("wheel", (e) => {
-  if (!ciel.querySelector("svg")) return;
-  e.preventDefault();
-  const p = pointSvg(e), k = Math.min(6, Math.max(0.3, zoomCiel.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
-  zoomCiel = { x: p.x - (p.x - zoomCiel.x) * (k / zoomCiel.k), y: p.y - (p.y - zoomCiel.y) * (k / zoomCiel.k), k };
-  appliquerZoom();
-}, { passive: false });
-ciel.addEventListener("pointerdown", (e) => {
-  if (!ciel.querySelector("svg") || e.target.closest("button")) return;
-  glisseCiel = { depart: pointSvg(e), zoom: { ...zoomCiel }, bouge: false, id: e.pointerId };
-});
-ciel.addEventListener("pointermove", (e) => {
-  if (!glisseCiel) return;
-  const p = pointSvg(e), dx = p.x - glisseCiel.depart.x, dy = p.y - glisseCiel.depart.y;
-  if (!glisseCiel.bouge && Math.hypot(dx, dy) < 4) return;
-  if (!glisseCiel.bouge) { glisseCiel.bouge = true; ciel.classList.add("glisse"); ciel.setPointerCapture(glisseCiel.id); }
-  zoomCiel = { ...glisseCiel.zoom, x: glisseCiel.zoom.x + dx, y: glisseCiel.zoom.y + dy };
-  appliquerZoom();
-});
-function finGlisse() { if (glisseCiel && glisseCiel.bouge) { ciel.classList.remove("glisse"); ciel.dataset.vientDeGlisser = "1"; setTimeout(() => delete ciel.dataset.vientDeGlisser, 0); } glisseCiel = null; }
-ciel.addEventListener("pointerup", finGlisse);
-ciel.addEventListener("pointercancel", finGlisse);
-ciel.addEventListener("keydown", (e) => { const etoile = e.target.closest(".etoile"); if (etoile && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choisirFichier(etoile.dataset.chemin); } });
+new ResizeObserver(() => { if (vueCode === "plan") flechesPlan(); if (vueCode === "fichier") flechesVoisinage(); }).observe(document.getElementById("vue-code"));
 
 /* La fiche d'un fichier : à quoi il sert, ses parties, de qui il se sert et qui se sert de lui. */
 function legendeCodeHtml() {
   const genres = ["code", "tests", "page", "réglages", "documentation"].map((g) => `<span class="${genreClasse(g)}"><i class="pastille-genre"></i>${GENRES_FR[g]}</span>`).join("");
   return `<div class="legende-code">${genres}</div>
-    <p class="petit">Contour turquoise : nouveau ou modifié dans la dernière version. Orange qui clignote : un agent y travaille en ce moment. Taille : la longueur du fichier.</p>`;
+    <p class="petit">Point jaune : nouveau ou modifié dans la dernière version. Orange qui clignote : un agent y travaille en ce moment.</p>`;
 }
 function listeFichiersHtml(titre, chemins) {
   if (!chemins.length) return "";
@@ -1707,7 +1861,7 @@ function ficheCodeHtml(enCours) {
   if (!f) {
     const supprimes = carteComplete.supprimes.length ? `<section><h3>Supprimés dans la dernière version</h3><ul class="fichiers">${carteComplete.supprimes.map((c) => `<li>${propre(c)}</li>`).join("")}</ul></section>` : "";
     const naissants = carteComplete.nouveaux_absents.length ? `<section><h3>En préparation par un agent</h3><ul class="fichiers">${carteComplete.nouveaux_absents.map((c) => `<li>${propre(c)}</li>`).join("")}</ul></section>` : "";
-    return `<header><h2>Aucun fichier choisi</h2><p class="petit">Clique un fichier dans l'explorateur ou une étoile de la constellation : son rôle s'affiche ici.</p></header>${naissants}${supprimes}<section>${legendeCodeHtml()}</section>`;
+    return `<header><h2>Aucun fichier choisi</h2><p class="petit">Clique un fichier dans l'explorateur ou dans le plan : son rôle s'affiche ici.</p></header>${naissants}${supprimes}<section>${legendeCodeHtml()}</section>`;
   }
   const agents = enCours.get(f.chemin) || [];
   const sert = carteComplete.liens.filter(([a]) => a === f.chemin).map(([, b]) => b);
@@ -1716,7 +1870,8 @@ function ficheCodeHtml(enCours) {
   const provisoire = f.attente && !carteDe(derniere).auto ? `<p class="petit">Explication provisoire, tirée du code lui-même : celle de Claude arrive.</p>` : "";
   return `<header><h2>${propre(nomCourt(f.chemin))}</h2><p class="petit">${propre(f.chemin)}</p>
       <p class="petit">${GENRES_FR[f.genre] || f.genre} · ${f.lignes} lignes${statut}</p>
-      ${agents.length ? `<p class="en-cours-texte">En cours de modification par ${propre(agents.join(", "))}.</p>` : ""}</header>
+      ${agents.length ? `<p class="en-cours-texte">En cours de modification par ${propre(agents.join(", "))}.</p>` : ""}
+      ${vueCode !== "voisinage" ? `<button type="button" class="discret" data-action="vue-fichier">Voir ses dépendances</button>` : ""}</header>
     <section><h3>À quoi il sert</h3><p>${propre(f.resume)}</p>${f.detail ? `<p class="calme">${propre(f.detail)}</p>` : ""}${provisoire}</section>
     ${f.pieces.length ? `<section><h3>Ses parties</h3>${piecesHtml(f)}</section>` : ""}
     ${listeFichiersHtml("Il se sert de", sert)}${listeFichiersHtml("Ils se servent de lui", utilise)}`;
@@ -1725,7 +1880,12 @@ function choisirFichier(chemin) {
   fichierChoisi = chemin;
   const parties = chemin.split("/");
   for (let i = 1; i < parties.length; i++) dossiersOuverts.add(parties.slice(0, i).join("/"));
+  if (chemin && vueCode === "plan" && !blocDe(chemin)) planChemin = parties.slice(0, -1).join("/");
   afficherCode(derniere);
+  if (vueCode === "plan") {
+    const bloc = [...document.querySelectorAll("#plan .bloc")].find((b) => b.dataset.chemin === chemin);
+    if (bloc) bloc.scrollIntoView({ block: "nearest" });
+  }
   if (vueCode === "explorateur") {
     const ligne = [...document.querySelectorAll("#explorateur .ligne-arbre.fichier")].find((b) => b.dataset.chemin === chemin);
     if (ligne) ligne.scrollIntoView({ block: "nearest" });
@@ -1765,9 +1925,14 @@ function agir(cible) {
   if (action === "code-vue") { vueCode = cible.dataset.vue; afficherCode(derniere); }
   if (action === "dossier") { const c = cible.dataset.chemin; if (dossiersOuverts.has(c)) dossiersOuverts.delete(c); else dossiersOuverts.add(c); afficherCode(derniere); }
   if (action === "fichier") { const c = cible.dataset.chemin; if (fichiersOuverts.has(c)) fichiersOuverts.delete(c); else fichiersOuverts.add(c); choisirFichier(c); }
-  if (action === "etoile" && !document.getElementById("constellation").dataset.vientDeGlisser) choisirFichier(fichierChoisi === cible.dataset.chemin ? "" : cible.dataset.chemin);
+  if (action === "bloc" && cible.dataset.dossier) { planChemin = cible.dataset.chemin; afficherCode(derniere); }
+  if (action === "bloc" && !cible.dataset.dossier) choisirFichier(fichierChoisi === cible.dataset.chemin ? "" : cible.dataset.chemin);
+  if (action === "plan-aller") { planChemin = cible.dataset.chemin; afficherCode(derniere); }
+  if (action === "plan-tout") { planTout = !planTout; afficherCode(derniere); }
+  if (action === "vue-fichier") { vueCode = "voisinage"; afficherCode(derniere); }
+  if (action === "centrer" && cible.dataset.chemin !== fichierChoisi) { historiqueFichiers.push(fichierChoisi); choisirFichier(cible.dataset.chemin); }
+  if (action === "precedent" && historiqueFichiers.length) choisirFichier(historiqueFichiers.pop());
   if (action === "choisir-fichier") choisirFichier(cible.dataset.chemin);
-  if (action === "recentrer") { zoomCiel = { x: 0, y: 0, k: 1 }; appliquerZoom(); }
   if (action === "analyser-code") analyserCode();
   if (action === "lancer-analyse") lancerAnalyse();
   if (action === "annuler-analyse") { estimationCarte = null; afficherCode(derniere); }

@@ -195,18 +195,19 @@ L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en l
 
 ## La carte du code
 
-L'onglet Code montre le code du projet de deux façons :
+L'onglet Code montre le code du projet de trois façons :
 
 - **L'explorateur**, comme dans un éditeur de code : les dossiers et les fichiers. Un clic déroule un fichier et dit, en français, à quoi il sert et à quoi servent ses parties (fonctions, classes).
-- **La constellation** : une étoile par fichier, rangées en amas par dossier, reliées quand l'une se sert de l'autre. La taille d'une étoile suit la longueur du fichier. Un clic met en avant ses voisines ; la molette zoome, un glisser déplace.
+- **Le plan**, rangé en étages : en haut ce qui se sert des autres, en bas les fondations dont les autres se servent. Une flèche va de celui qui se sert vers celui qui sert ; plus elle est épaisse, plus il y a de liens. Le plan s'ouvre sur un bloc par dossier ; un clic sur un dossier montre ses fichiers, rangés de la même façon, et le fil d'Ariane remonte. Les éléments sans lien sont cachés, un bouton les montre. Deux fichiers qui dépendent l'un de l'autre sont reliés en orange et signalés : c'est un point fragile du code.
+- **La vue d'un fichier** (« Fichier », ou « Voir ses dépendances » dans la fiche) : le fichier au milieu, à gauche ceux qui se servent de lui, à droite ceux dont il se sert, sur deux niveaux. Elle répond à la question « si je touche à ce fichier, qu'est-ce qui peut être touché ? », et le dit en une phrase. Un clic sur un voisin le met au milieu ; « Précédent » revient.
 
-Dans les deux vues, la fiche à droite dit à quoi sert le fichier choisi, de quels fichiers il se sert et lesquels se servent de lui.
+Dans toutes les vues, la fiche à droite dit à quoi sert le fichier choisi, de quels fichiers il se sert et lesquels se servent de lui.
 
 **Construire la carte.** Le bouton « Analyser le code » estime d'abord le travail : combien de fichiers, combien d'appels à Claude (Sonnet, effort faible, sur ton abonnement). Rien ne part avant « Lancer l'analyse ». Les dépendances et les parties sont lues dans le code lui-même, sans Claude ; seules les explications en français demandent Claude, par lots de huit fichiers. Pendant qu'elles arrivent, chaque fichier montre une explication provisoire tirée de ses commentaires. La carte est gardée dans `.atelier/carte.json`.
 
-**La carte suit le code.** Elle ne repart jamais de zéro : chaque fichier est reconnu à son empreinte git. Quand une nouvelle version arrive sur la branche du projet (une tâche fusionnée par l'Atelier, ou un commit fait ailleurs), un fil de fond la compare à la précédente en quinze secondes au plus, et seuls les fichiers nouveaux ou modifiés sont réexpliqués. Ils portent un contour turquoise et un badge « Nouveau » ou « Modifié » ; les fichiers supprimés sont listés dans la fiche.
+**La carte suit le code.** Elle ne repart jamais de zéro : chaque fichier est reconnu à son empreinte git. Quand une nouvelle version arrive sur la branche du projet (une tâche fusionnée par l'Atelier, ou un commit fait ailleurs), un fil de fond la compare à la précédente en quinze secondes au plus, et seuls les fichiers nouveaux ou modifiés sont réexpliqués. Ils portent un point jaune et un badge « Nouveau » ou « Modifié » ; les fichiers supprimés sont listés dans la fiche.
 
-**Ce qui est en train de changer clignote.** Les fichiers qu'un agent modifie dans sa copie de travail clignotent en orange, dans l'explorateur comme dans la constellation, et la fiche dit quel agent y travaille. Le point orange de l'onglet Code s'allume tant qu'un agent travaille.
+**Ce qui est en train de changer clignote.** Les fichiers qu'un agent modifie dans sa copie de travail clignotent en orange, dans l'explorateur, le plan (le dossier qui les contient aussi) et la vue d'un fichier, et la fiche dit quel agent y travaille. Le point orange de l'onglet Code s'allume tant qu'un agent travaille.
 
 Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqué par ses seuls commentaires : aucun appel à Claude. Les explications de Claude n'ont pas encore été essayées pour de vrai.
 
