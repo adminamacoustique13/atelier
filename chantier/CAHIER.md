@@ -6,9 +6,9 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 |---|---|---|---|---|---|
 | F1. Fichiers partagés et leur fusion | en seconde vérification (même vérificateur, à chaud) | Opus | complète, Opus : refusé une fois | 1 + 1 reprise | suite 1 697 dans sa copie, 25 tests de fusion |
 | F2. V3f : six places, vérificateur hors place, réveil, régulateur | en vérification | Opus | complète, Opus | 1 | suite 1 686 dans sa copie (2 tests de mesure réécrits et 1 retiré-remplacé, à juger par le vérificateur), 8 essais verts |
-| F3.1. Un outil refusé ne bloque que si un contrôle du projet en a besoin ; même règle pour le vérificateur | en cours (même ouvrier, à chaud) | Opus | bornée, Opus | 1 | |
+| F3.1. Un outil refusé ne bloque que si un contrôle du projet en a besoin ; même règle pour le vérificateur | en vérification (même vérificateur que F3, à chaud) | Opus | bornée, Opus | 1 + 1 retouche de mots | 16 tests nouveaux qui échouaient sur F3 ; 3 tests de F3 réécrits (critères changés) ; suite 1 707 |
 | F5. Un plan trop étroit est élargi avant d'être proposé (la forme du plan, écrite en V1, n'était branchée nulle part) | reportée à un prochain chantier (arrêtée sur décision de la personne responsable) | Opus | | | |
-| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | à refaire sur la seconde version de F1 (même ouvrier) | Sonnet | mécanique : 3 tests qui échouaient avant | 1 | 4 tests ; suite F1+F3+F4 réunies : 1 712 verts, ruff propre |
+| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | prête, entre derrière F1 (refaite sur sa seconde version) | Sonnet | mécanique : 3 tests qui échouaient avant | 1 | 4 tests ; suite F1+F3+F4 réunies : 1 712 verts, ruff propre |
 | F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | vérifié | Opus | bornée, Opus : accepté | 1 + 1 reprise | 19 tests nouveaux, 16 mutations sur 18 attrapées (les 2 autres sans effet réel) ; suite 1 691, 8 essais verts |
 
 ## F1. Fichiers partagés et leur fusion
