@@ -305,8 +305,11 @@ class AgentClaude(_ModeDesOuvriers):
         return self._travailler(
             None, "orchestrateur", message, sur_texte, sur_outil,
             modele=self._alias("fable"), effort="high", dossier=dossier,
-            # En conversation : lecture seule, sans les commandes du projet (qui exécutent du code).
-            outils_permis=OUTILS_LECTURE + GIT_LECTURE, outils_interdits=list(ECRITURE),
+            # En conversation : lecture seule, sans les commandes permises d'office aux ouvriers ;
+            # mais les règles que la personne a retenues (« Toujours pour ce projet ») valent aussi
+            # ici, sauf celles qui écrivent : sinon la même carte reviendrait à chaque message.
+            outils_permis=OUTILS_LECTURE + GIT_LECTURE + self._autorisations(lecture_seule=True),
+            outils_interdits=list(ECRITURE),
             mode_permission="default", role_ajoute=ROLE_ORCHESTRATEUR,
             session=session, reprise=reprise,
         )  # fmt: skip
