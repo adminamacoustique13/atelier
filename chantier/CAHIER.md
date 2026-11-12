@@ -18,7 +18,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M6b. Page : envois au serveur, minuteries de message, tracés de fil | vérifié | Opus | bornée, Fable : accepté | 1 | 365 vérifications dans le navigateur ; 211 comparaisons avant/après par le vérificateur, pannes du serveur comprises, sans différence |
 | M5a. Une base commune pour appeler git, adoptée par `projets`, `essai`, `carte` | en cours | Opus | complète, Fable | 1 | |
 | M5b. La base git adoptée par `controles` et `mise_a_jour` | à lancer, après M5a | Opus | complète, Fable | | |
-| M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | en cours | Sonnet | bornée, Opus | 1 | |
+| M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 765 tests (1 nouveau, rouge sur le code de départ) ; le texte de l'arrêt n'est plus écrit qu'une fois dans `atelier/` |
 | M9. Profil : écriture d'un seul geste, réglage d'outils qu'on peut réessayer, valeur mal formée refusée | en cours | Opus | complète, Fable | 1 | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | en cours | Opus | bornée, Fable (par casses) | 1 | |
 | M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | à lancer, après M6b | Opus | bornée, Fable | | |
@@ -60,6 +60,9 @@ Ils changeraient un comportement : ils attendent la décision de la personne res
 - Trois commentaires à préciser : celui de `trace` et `arrondi` (« ne rendent pas la même chaîne » est trop absolu), celui d'`envoyer` (elle ne sert pas qu'à la conversation), celui du bouton « Arrêter », qui décrit le mécanisme à deux clics de `arreter()` ; le titre « Projets » et la doc de `demander` sont fondus en un bloc.
 - Une quatrième minuterie du même genre reste (`minuteMode`).
 - Les essais du dépôt ne couvrent les pannes du serveur que pour deux adresses : la preuve de M6b sur ce point vit dans des scripts hors dépôt.
+
+### M9 : un arbitrage de l'orchestrateur
+L'ouvrier s'est arrêté avant d'écrire : un test né de M4 simulait un profil non écrit en bloquant l'écriture en place, ce que l'écriture d'un seul geste contourne. Arbitrage : ce cas de test, et lui seul, change sa façon de simuler l'échec ; ses vérifications restent. La phrase du fil reste celle que le test exige, et l'invitation à réessayer va dans une deuxième ligne.
 
 ## Contrôles communs
 

@@ -1364,3 +1364,12 @@ def test_la_phrase_du_refus_au_milieu_d_une_sortie_ou_hors_du_mode_auto_n_est_pa
     )  # fmt: skip
     assert session.envoyer("Va.").ok
     assert refus_dits(evenements) == ["Lance curl https://example.com (règle Exfil Scouting)"]
+
+
+def test_l_arret_rendu_par_le_pont_est_celui_que_le_moteur_reconnait():
+    # Le moteur et le serveur reconnaissent un arrêt en comparant l'erreur à guichet.ARRETE :
+    # le pont doit en rendre la même constante, pas seulement un texte égal.
+    import atelier.sdk as pont
+    from atelier import guichet
+
+    assert pont.ARRETE is guichet.ARRETE

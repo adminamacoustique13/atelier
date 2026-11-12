@@ -37,6 +37,7 @@ from contextlib import suppress
 from pathlib import Path
 
 from atelier.agents import Resultat, decrire_outil, mode_valide
+from atelier.guichet import ARRETE
 
 # Le SDK avertit, à chaque agent, que le guichet n'est pas consulté pour les outils permis
 # d'avance (lecture, modifications dans la copie de travail). C'est voulu (voir DECISIONS.md,
@@ -44,8 +45,7 @@ from atelier.agents import Resultat, decrire_outil, mode_valide
 # qu'encombrer le journal de l'Atelier.
 warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
 
-ARRET = "Arrêté par la personne responsable."
-SANS_REPONSE = "Claude Code s'est arrêté sans répondre."
+CLAUDE_SANS_REPONSE = "Claude Code s'est arrêté sans répondre."
 SANS_GUICHET = "Aucun guichet n'est branché : l'autorisation est refusée."
 REFUS = "La personne responsable a refusé cet outil."
 INCOMPRIS = "Le guichet a rendu une réponse incomprise : l'outil est refusé."
@@ -73,7 +73,7 @@ def lire_source(api_key_source) -> str:
 def lire_resultat(final, morceaux: list[str]) -> Resultat:
     """Traduit le message de fin du SDK en résultat : texte, coût et tokens, ou échec."""
     if final is None:
-        return Resultat(ok=False, erreur=SANS_REPONSE)
+        return Resultat(ok=False, erreur=CLAUDE_SANS_REPONSE)
     usage = getattr(final, "usage", None) or {}
     tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
     texte = str(getattr(final, "result", None) or "")
@@ -399,7 +399,7 @@ class SessionSDK:
             _oublier(travail)
             self._couper()
             if arret.pose.is_set():
-                return Resultat(ok=False, erreur=ARRET)
+                return Resultat(ok=False, erreur=ARRETE)
             delai = f"{self.delai_max_s} secondes"
             return Resultat(ok=False, erreur=f"L'agent n'a pas fini dans le délai de {delai}.")
         return self._issue(travail)
@@ -558,13 +558,13 @@ class SessionSDK:
         # Une demande passée par ici n'est jamais un refus de l'arbitre, même refusée ensuite.
         self._refus.retenir(getattr(contexte, "tool_use_id", None) or id(contexte))
         if coupure.pose.is_set():  # l'ancien Claude Code, en train de s'interrompre
-            return PermissionResultDeny(message=ARRET, interrupt=True)
+            return PermissionResultDeny(message=ARRETE, interrupt=True)
         arret = self._arret
         self._emettre("attente", decrire_outil({"name": outil, "input": entree}, self.dossier))
         if self.guichet is None:
             return PermissionResultDeny(message=SANS_GUICHET)
         if arret is None or arret.pose.is_set():
-            return PermissionResultDeny(message=ARRET, interrupt=True)
+            return PermissionResultDeny(message=ARRETE, interrupt=True)
         demande = _dans_un_fil(self.guichet.demander, self.agent, outil, entree)
         veilles = {asyncio.ensure_future(a.evenement.wait()) for a in (arret, coupure)}
         try:
@@ -576,7 +576,7 @@ class SessionSDK:
                 demande.cancel()
         if arret.pose.is_set() or coupure.pose.is_set() or demande.cancelled():
             threading.Thread(target=self._annuler_au_guichet, daemon=True).start()
-            return PermissionResultDeny(message=ARRET, interrupt=True)
+            return PermissionResultDeny(message=ARRETE, interrupt=True)
         if demande.exception() is not None:
             return PermissionResultDeny(
                 message=f"Le guichet n'a pas pu répondre : {demande.exception()}"
