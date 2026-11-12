@@ -10,6 +10,8 @@ Amendé le 2026-11-12 par la personne responsable (« gère les 4 points ») : l
 
 Le reste du contrat ne change pas : rien n'entre dans `main` sans sa décision, aucune bibliothèque ajoutée, aucun secret touché.
 
+Amendé le 2026-11-12 par la personne responsable (« Il faut qu'on améliore considérablement la vitesse. Mais alors CONSIDÉRABLEMENT. », puis « tu dois optimiser le temps en permanence ») : un second objectif entre dans le chantier, et il passe avant les deux découpages. Rendre l'Atelier beaucoup plus rapide sur un chantier de dix tâches, en gardant ce qui fait sa valeur : du travail vérifié, une branche principale jamais cassée, un Atelier qui tourne seul. Les leviers retenus, dans l'ordre : mesurer le temps de chaque phase ; un plan large plutôt que profond ; une vérification proportionnée au risque (complète, bornée, mécanique seule), comme la leçon validée le 2026-11-11 ; la reprise à chaud après un refus ; plus de tâches en même temps, avec un régulateur qui suit les limites de l'abonnement. Ces tâches changent le comportement du moteur, du dosage, des consignes et du garde-fou : chacune naît avec ses tests et passe devant un vérificateur. Rien n'entre dans `main` sans sa décision.
+
 ## Objectif
 Retirer le code mort prouvé, corriger les commentaires qui ne disent plus la vérité et réunir les doublons, sans changer aucun comportement, pour un code d'une clarté absolue.
 

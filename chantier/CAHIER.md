@@ -19,7 +19,15 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M5a. Une base commune pour appeler git, adoptée par `projets`, `essai`, `carte` | vérifié | Opus | complète, Fable : accepté | 1 | 772 tests (7 nouveaux) ; 82 cas comparés avant/après, 78 identiques et 4 écarts attendus ou sans effet ; 20 casses de la base sur 21 vues par ses tests |
 | M5b. La base git adoptée par `controles` et `mise_a_jour` | à lancer, après M5a | Opus | complète, Fable | | |
 | M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 765 tests (1 nouveau, rouge sur le code de départ) ; le texte de l'arrêt n'est plus écrit qu'une fois dans `atelier/` |
-| M9. Profil : écriture d'un seul geste, réglage d'outils qu'on peut réessayer, valeur mal formée refusée | en cours | Opus | complète, Fable | 1 | |
+| M9. Profil : écriture d'un seul geste, réglage d'outils qu'on peut réessayer, valeur mal formée refusée | vérifié | Opus | complète, Fable : recalé puis corrigé | 2 | 795 tests dans sa copie ; 1 513 scénarios comparés ; 29 casses sur 32 vues ; recalé sur la valeur restée en mémoire, que la consigne n'avait pas vue |
+| M9.1. La carte du code écrite par la fonction commune | vérifié | Sonnet | mécanique, diff relu | 1 | 820 tests (1 nouveau, rouge avant) |
+| M11a. Le guichet simulé sort du produit et rejoint les tests | vérifié | Sonnet | mécanique, diff relu | 1 | déplacement à l'identique ; seules les lignes d'import des tests changent |
+| M11b. Les clés envoyées à la page que personne ne lit | en cours | Opus | bornée, Opus | 1 | |
+| V0. Vitesse : mesurer le temps de chaque phase d'une tâche | en cours | Opus | bornée, Fable | 1 | |
+| V1. Vitesse : un plan large, et sa largeur calculée | en cours | Opus | complète, Fable | 1 | |
+| V2. Vitesse : les niveaux de vérification et le dosage de départ | en cours | Opus | bornée, Fable | 1 | |
+| V5. Vitesse : le pont lit les limites de l'abonnement et sait reprendre une session | en cours | Opus | complète, Fable | 1 | |
+| V3. Vitesse, moteur : vérification proportionnée, reprise à chaud, places et régulateur | à lancer, après V0, V2, V5 | Opus | complète, Fable | | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | vérifié | Opus | bornée, Opus, par casses : accepté | 1 | 786 tests (14 nouveaux) ; les 12 casses de la consigne et 6 des 7 casses du vérificateur font échouer un test nouveau |
 | M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
 | M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | à lancer, après M6b | Opus | bornée, Fable | | |
@@ -75,6 +83,9 @@ L'ouvrier s'est arrêté avant d'écrire : un test né de M4 simulait un profil 
 - Défaut : `SuiviCarte._mettre_a_jour` ne vide pas `probleme` ; après une mise à jour en erreur, la suivante réussit mais l'ancien message reste affiché jusqu'à la prochaine analyse complète. Tâche M10.1, ajoutée par l'orchestrateur.
 - Casse non vue (7b) : une erreur sur un seul lot d'explications, avalée alors que la synthèse réussit. Test à ajouter, dans M10.1.
 - Mineur : quelques `assert a and b and c` donnent des messages d'échec confus.
+
+### Objectif vitesse (amendement du 2026-11-12)
+Le diagnostic complet est dans le fichier de travail de la session (`diagnostic-vitesse.md`) ; ses trois causes : le plan sort en file indienne ; la vérification complète part pour toute tâche ; un refus jette tout le travail. Décisions de l'orchestrateur, que la personne responsable peut revoir : la propriété « agent `mode_ouvriers` » lue par les seuls tests est gardée (c'est la lecture naturelle du mode choisi) ; les deux découpages (M12, M13) passent après la vitesse, leurs plans étant prêts.
 
 ## Contrôles communs
 
