@@ -40,7 +40,7 @@ RELANCER_TEL = "Relancer au même niveau"
 ARRETEE = "arretee"
 MOTIF_ARRET = "arrêtée par toi."
 DETAIL_ARRET = "Arrêtée par la personne responsable."
-# Sans intervention : une tâche épuisée est relancée seule, un cran plus haut, autant de fois ;
+# Sans intervention : une tâche épuisée est relancée seule, un cran plus haut, une seule fois ;
 # des contrôles rouges sur la branche principale lancent seuls une tâche de réparation.
 RELANCES_AUTO = 1
 MAX_REPARATIONS = 2
@@ -142,7 +142,7 @@ class Moteur:
         return {"texte": trouvee[0], "depuis_s": round(time.monotonic() - trouvee[1])}
 
     def _prendre_agent(self) -> None:
-        """Compte un lancement d'agent. Il n'y a pas de plafond : le compte sert au bilan."""
+        """Compte un lancement d'agent, pour le bilan."""
         with self.verrou:
             self.chantier.agents_lances += 1
 

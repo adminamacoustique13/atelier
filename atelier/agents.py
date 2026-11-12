@@ -2,7 +2,8 @@
 
 Les deux offrent la même interface au moteur et au serveur : `executer`, `converser`,
 `arreter(tache)`, `changer_mode(mode)`, `modes_appliques()`, et les attributs `guichet`,
-`sur_evenement`, `source_connexion` et `mode_ouvriers`.
+`sur_evenement` et `source_connexion`. La propriété `mode_ouvriers` existe aussi sur les deux, mais
+seuls les tests la lisent : le serveur garde son propre `mode_ouvriers`.
 
 Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers.
 L'orchestrateur reste en lecture seule, en mode « default », quoi qu'il arrive. Le vérificateur
@@ -155,8 +156,13 @@ def _regles_simples(regles) -> list[str]:
 class _Marche:
     """Un agent en marche : son nom, et le drapeau que pose une demande d'arrêt.
 
-    Pour un ouvrier : le mode choisi (`mode`), et sa session du pont (`session`) ou, pour l'agent
-    simulé, le mode qu'il joue (`applique`) et le drapeau que pose un changement (`change`).
+    Pour un ouvrier, `mode` est le mode choisi : posé à l'inscription, puis à chaque changement de
+    mode ; seul l'agent simulé le relit (la session du pont reçoit le mode par `changer_mode`).
+    `change` est le drapeau que pose chaque changement de mode ; seul l'agent simulé l'attend.
+    `session` est la session du pont de l'agent réel (None pour l'agent simulé) : `appliques` lui
+    demande le mode appliqué. Pour l'agent simulé seulement, `joue` est le dernier mode joué, afin
+    de ne jouer qu'une fois chaque changement, et `applique` le mode que `appliques` rend, qui
+    peut retomber à « default ».
     """
 
     def __init__(self, nom: str, couper=None, session=None, ouvrier: bool = False):

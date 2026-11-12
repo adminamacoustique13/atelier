@@ -389,11 +389,6 @@ def liens_et_noms(depot: Path, fiches: dict) -> tuple[list[list[str]], dict[str,
     return sorted([a, b] for a, b in paires), noms
 
 
-def liens(depot: Path, fiches: dict) -> list[list[str]]:
-    """Les liens « se sert de » entre fichiers du projet : [fichier, fichier dont il se sert]."""
-    return liens_et_noms(depot, fiches)[0]
-
-
 BROUILLON_MAX = 40  # fichiers lus au plus dans la copie de travail d'une tâche
 
 
@@ -771,7 +766,6 @@ def vue(carte: dict, en_cours: dict[str, list[str]] | None = None, depot=None) -
         "liens": carte["liens"],
         "noms": carte.get("noms", {}),
         "portrait": synthese.get("portrait", "") if synthese else "",
-        "portrait_claude": bool(synthese.get("portrait")),
         "portrait_a_jour": a_jour_synthese,
         "lisezmoi": premier_paragraphe(depot, carte) if depot else "",
         "dossiers": synthese.get("dossiers", {}),

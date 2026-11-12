@@ -334,7 +334,7 @@ class Guichet:
 
 
 class GuichetSimule(Guichet):
-    """Pour la démonstration : répond tout de suite, selon un scénario écrit d'avance.
+    """Pour les tests : répond tout de suite, selon un scénario écrit d'avance.
 
     Le scénario est une liste de choix (« une_fois », « toujours », « chantier », « non ») ou de
     Reponse,
