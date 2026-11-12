@@ -22,6 +22,7 @@ from pathlib import Path
 from atelier.archives import cout_fr, date_fr
 from atelier.consignes import dernier_json
 from atelier.git import lancer_git
+from atelier.modele import ecrire_d_un_seul_geste
 
 FICHIER = Path(".atelier") / "carte.json"
 DOSSIERS_IGNORES = set(
@@ -698,11 +699,7 @@ def charger(depot: Path) -> dict | None:
 
 
 def sauver(depot: Path, carte: dict) -> None:
-    chemin = Path(depot) / FICHIER
-    chemin.parent.mkdir(parents=True, exist_ok=True)
-    provisoire = chemin.with_suffix(".tmp")
-    provisoire.write_text(json.dumps(carte, ensure_ascii=False), "utf-8")
-    provisoire.replace(chemin)
+    ecrire_d_un_seul_geste(Path(depot) / FICHIER, json.dumps(carte, ensure_ascii=False))
 
 
 # --- ce que voit le tableau de bord -----------------------------------------------------------

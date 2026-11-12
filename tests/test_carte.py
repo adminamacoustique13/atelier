@@ -530,3 +530,22 @@ def test_une_erreur_sur_un_lot_est_dite_meme_si_la_synthese_reussit(tmp_path):
     suivi._analyser()
     assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
     assert suivi.travail == "" and suivi.restants == 0
+
+
+def test_une_ecriture_de_la_carte_interrompue_laisse_la_carte_d_avant(tmp_path, monkeypatch):
+    carte.sauver(tmp_path, {"version": 1, "fichiers": {"a.py": "é"}})
+    chemin = tmp_path / carte.FICHIER
+    avant = chemin.read_bytes()
+
+    def refuser(*_):
+        raise OSError("disque plein")
+
+    monkeypatch.setattr("os.replace", refuser)
+    try:
+        carte.sauver(tmp_path, {"version": 2, "fichiers": {}})
+    except OSError as erreur:
+        assert str(erreur) == "disque plein"
+    else:
+        raise AssertionError("l'erreur de mise en place aurait dû remonter")
+    assert chemin.read_bytes() == avant
+    assert [p.name for p in chemin.parent.iterdir()] == [chemin.name]
