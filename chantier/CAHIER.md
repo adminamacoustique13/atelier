@@ -13,7 +13,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M1. Python : code mort et commentaires faux | vérifié | Sonnet | bornée, Opus : accepté | 1 | 758 tests et contrôle de forme verts ; recherches refaites par le vérificateur |
 | M2. Page : code mort et commentaires faux | vérifié | Sonnet | bornée, Opus : accepté | 1 | 758 tests, contrôle de forme et 365 vérifications dans le navigateur verts ; chaque retrait recherché à nouveau par le vérificateur |
 | M3. Python : petits doublons | à lancer | Sonnet | bornée, Opus | | |
-| M4. Serveur : une seule écriture du profil | à lancer | Opus | complète, Fable | | |
+| M4. Serveur : une seule lecture et une seule écriture du profil | vérifié | Opus | complète, Fable : accepté | 1 | 761 tests (3 nouveaux, rouges sur le code de départ) ; 1 104 scénarios comparés avant/après sans différence ; 13 casses sur 14 vues par les tests |
 | M5. Une seule fonction pour appeler git | à lancer, attend une décision | Opus | complète, Fable | | |
 | M6a. Page : les petits calculs écrits plusieurs fois | vérifié | Opus | bornée, Opus : accepté | 1 | 758 tests, 365 vérifications dans le navigateur ; égalité avant/après prouvée par deux scripts indépendants (ouvrier, vérificateur) |
 | M6b. Page : envois au serveur, minuteries, tracés de fil | à lancer | Opus | bornée, Fable | | |
@@ -31,6 +31,14 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 - Un nombre de tokens s'affiche « 1,2M » dans les jauges du Chantier et « 1,23 M » dans la Salle : deux formats, donc pas de fonction commune sans changer l'écran.
 - L'orchestrateur est écrit « Fable · élevé » à deux endroits et « Fable élevé », sans point médian, dans la Salle ; l'une des écritures est dans le HTML statique.
 - Restes mineurs du vérificateur, repris dans la consigne de M6b : le nom `habitArret`, peu parlant, et deux commentaires empilés au-dessus de lui.
+
+### M4 : défauts relevés par le vérificateur, antérieurs au chantier, non corrigés
+Ils changeraient un comportement : ils attendent la décision de la personne responsable.
+- L'écriture du profil n'est pas atomique : une panne en cours d'écriture laisse `chantier/profil.json` tronqué (les trois écritures, avant comme après M4).
+- Un `commandes_permises` mal typé dans le fichier fait encore lever `_regler_outils`.
+- Après un réglage d'outils refusé pour profil illisible, la demande reste marquée comme répondue : un second clic après correction ne fait rien.
+- Les deux phrases de raison (« pas lisible », « pas pu être écrit ») sont écrites à trois endroits de `serveur.py`.
+- Les tests existants ne voient pas une réécriture inutile du profil, ni un changement de son format (indentation, accents).
 
 ## Contrôles communs
 

@@ -710,23 +710,30 @@ class Atelier:
         if choix != ACCEPTER_OUTILS:
             return self._dire("Réglage des outils écarté : rien n'a changé.")
         with self._verrou_profil:  # le même verrou que pour une règle « toujours »
-            chemin = self.depot / "chantier" / "profil.json"
-            fichier = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
-            actuelles = fichier.get(
-                "commandes_permises", self.moteur.profil.get("commandes_permises", [])
-            )
-            permises = list(
-                dict.fromkeys([*actuelles, *(demande["outils"]["commandes_permises"] or [])])
-            )
-            fichier["commandes_permises"] = permises
-            if demande["outils"]["commandes"] is not None:
-                fichier["commandes"] = demande["outils"]["commandes"]
-            chemin.parent.mkdir(parents=True, exist_ok=True)
-            chemin.write_text(json.dumps(fichier, ensure_ascii=False, indent=2) + "\n", "utf-8")
-            valeurs = {"commandes_permises": permises}
-            if "commandes" in fichier:
-                valeurs["commandes"] = fichier["commandes"]
-            self._propager(valeurs)
+            try:
+                fichier = self._lire_profil()
+                actuelles = fichier.get(
+                    "commandes_permises", self.moteur.profil.get("commandes_permises", [])
+                )
+                permises = list(
+                    dict.fromkeys([*actuelles, *(demande["outils"]["commandes_permises"] or [])])
+                )
+                fichier["commandes_permises"] = permises
+                if demande["outils"]["commandes"] is not None:
+                    fichier["commandes"] = demande["outils"]["commandes"]
+                self._ecrire_profil(fichier)
+            except ValueError:
+                raison = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+            except OSError:
+                raison = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+            else:
+                raison = ""
+                valeurs = {"commandes_permises": permises}
+                if "commandes" in fichier:
+                    valeurs["commandes"] = fichier["commandes"]
+                self._propager(valeurs)
+        if raison:
+            return self._dire(f"Réglage des outils non appliqué : {raison}")
         if hasattr(self.moteur.controles, "regler_outils"):
             self.moteur.controles.regler_outils(fichier)
         self._dire(
@@ -827,19 +834,35 @@ class Atelier:
     def _inscrire_regle(self, regle: str) -> None:
         """Ajoute une règle, sans doublon, aux autorisations de `chantier/profil.json`."""
         with self._verrou_profil:
-            chemin = self.depot / "chantier" / "profil.json"
-            fichier = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
-            if not isinstance(fichier, dict):
-                raise ValueError("le profil du projet n'est pas lisible")
+            fichier = self._lire_profil()
             actuelles = fichier.get("autorisations", self.moteur.profil.get("autorisations"))
             regles = list(actuelles) if isinstance(actuelles, list) else []
             if regle not in regles:
                 regles.append(regle)
                 fichier["autorisations"] = regles
-                chemin.parent.mkdir(parents=True, exist_ok=True)
-                texte = json.dumps(fichier, ensure_ascii=False, indent=2) + "\n"
-                chemin.write_text(texte, "utf-8")
+                self._ecrire_profil(fichier)
             self._propager({"autorisations": regles})
+
+    def _lire_profil(self) -> dict:
+        """Lit `chantier/profil.json` pour le modifier ; à appeler sous `_verrou_profil`.
+
+        Rend un dictionnaire, vide si le fichier n'existe pas. Lève `ValueError` si le contenu
+        n'est pas du JSON ou n'est pas un objet, `OSError` si le fichier ne peut pas être lu.
+        """
+        chemin = self.depot / "chantier" / "profil.json"
+        fichier = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
+        if not isinstance(fichier, dict):
+            raise ValueError("le profil du projet n'est pas lisible")
+        return fichier
+
+    def _ecrire_profil(self, fichier: dict) -> None:
+        """Écrit `chantier/profil.json` en entier ; à appeler sous `_verrou_profil`.
+
+        Crée le dossier `chantier` au besoin. Lève `OSError` si l'écriture échoue.
+        """
+        chemin = self.depot / "chantier" / "profil.json"
+        chemin.parent.mkdir(parents=True, exist_ok=True)
+        chemin.write_text(json.dumps(fichier, ensure_ascii=False, indent=2) + "\n", "utf-8")
 
     # --- le mode des ouvriers -----------------------------------------------------
 
@@ -872,14 +895,10 @@ class Atelier:
         Comme pour une règle « toujours » : un fichier absent est créé ; un fichier illisible,
         ou qui n'est pas un objet, n'est pas écrasé. Rend "" ou la raison de l'échec.
         """
-        chemin = self.depot / "chantier" / "profil.json"
         try:
-            fichier = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
-            if not isinstance(fichier, dict):
-                raise ValueError("le profil du projet n'est pas lisible")
+            fichier = self._lire_profil()
             fichier[cle] = valeur
-            chemin.parent.mkdir(parents=True, exist_ok=True)
-            chemin.write_text(json.dumps(fichier, ensure_ascii=False, indent=2) + "\n", "utf-8")
+            self._ecrire_profil(fichier)
         except ValueError:
             return "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
         except OSError:

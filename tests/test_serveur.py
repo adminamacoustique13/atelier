@@ -975,6 +975,60 @@ def test_les_deux_ecritures_du_profil_passent_par_le_meme_verrou(tmp_path):
     assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["make"]
 
 
+class ControlesQuiNotent(ControlesSimules):
+    """Des contrôles simulés qui retiennent chaque réglage d'outils reçu."""
+
+    def __init__(self):
+        super().__init__()
+        self.reglages = []
+
+    def regler_outils(self, profil: dict) -> None:
+        self.reglages.append(profil)
+
+
+ILLISIBLE = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+NON_ECRIT = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+
+
+@pytest.mark.parametrize(
+    ("contenu", "ecriture_refusee", "raison"),
+    [
+        ("[1, 2]", False, ILLISIBLE),
+        ("pas du json", False, ILLISIBLE),
+        ('{"commandes_permises": ["ls"]}', True, NON_ECRIT),
+    ],
+)
+def test_un_reglage_d_outils_sur_un_profil_inutilisable_n_applique_rien_et_le_dit(
+    tmp_path, monkeypatch, contenu, ecriture_refusee, raison
+):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text(contenu, "utf-8")
+    controles = ControlesQuiNotent()
+    profil = {"commandes_permises": ["ls"]}
+    atelier = atelier_simule(tmp_path, profil=profil, controles=controles)
+    atelier._proposer_outils({"commandes_permises": ["make"], "commandes": ["make test"]})
+    demande = atelier.moteur.chantier.demandes[0]
+    if ecriture_refusee:
+        ecrire = pathlib.Path.write_text
+
+        def refuser_le_profil(soi, *arguments, **options):
+            if soi == chemin:
+                raise PermissionError("écriture refusée")
+            return ecrire(soi, *arguments, **options)
+
+        monkeypatch.setattr(pathlib.Path, "write_text", refuser_le_profil)
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert chemin.read_text("utf-8") == contenu
+    assert atelier.moteur.profil == {"commandes_permises": ["ls"]}
+    assert controles.reglages == []
+    textes = [e["texte"] for e in atelier.moteur.chantier.evenements]
+    assert f"Réglage des outils non appliqué : {raison}" in textes
+    assert not any(t.startswith("Outils réglés.") for t in textes)
+
+
 def test_le_verrou_de_l_activite_protege_les_lectures_pendant_les_ecritures():
     ancien = sys.getswitchinterval()
     sys.setswitchinterval(1e-6)
