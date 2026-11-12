@@ -91,6 +91,20 @@ PHASES = {
     "verificateur": "Le vérificateur relit ({})",
     "enregistrement": "Enregistrement et fusion",
 }
+# La clé de l'attente avant le départ, rangée avec les durées des phases (voir `_tracer`).
+ATTENTE = "attente"
+
+
+def cle_de_phase(phrase: str) -> str:
+    """La clé de `PHASES` d'une phrase de phase, reconnue au texte qui précède son premier `{`.
+
+    Une phrase qui ne vient d'aucune entrée de `PHASES` rend « autre » : elle est mesurée quand
+    même, sous ce nom.
+    """
+    for cle, modele in PHASES.items():
+        if phrase.startswith(modele.split("{")[0]):
+            return cle
+    return "autre"
 
 
 class Moteur:
@@ -103,8 +117,11 @@ class Moteur:
         controles,
         profil: dict | None = None,
         sur_changement: Callable[[], None] | None = None,
+        horloge: Callable[[], float] | None = None,
     ):
         self.chantier = chantier
+        # Une horloge monotone, en secondes : remplaçable dans les tests, jamais l'heure du mur.
+        self.horloge = horloge or time.monotonic
         self.agent = agent
         self.controles = controles
         self.profil = profil or {}
@@ -115,6 +132,15 @@ class Moteur:
         # Où en est chaque tâche active, en mémoire seulement : (phrase, depuis). Le tableau de
         # bord le montre même quand aucun agent ne tourne (copie, contrôles, fusion).
         self.phases: dict[str, tuple[str, float]] = {}
+        # La mesure, sans rien décider : la phase mesurée de chaque tâche (clé, début), les
+        # durées de sa tentative en cours, son attente avant le départ, et les moments où une
+        # tâche est devenue prête (dépendance vérifiée, relance décidée, lancement du moteur).
+        self._mesure: dict[str, tuple[str, float]] = {}
+        self._durees: dict[str, dict[str, float]] = {}
+        self._attentes: dict[str, float] = {}
+        self._verifiee_a: dict[str, float] = {}
+        self._relancee_a: dict[str, float] = {}
+        self._lance_a = self.horloge()
         self._principale_rouge = False  # les réparations n'ont pas suffi : chantier pas fini
         for tache in chantier.taches:
             if not tache.modele:
@@ -129,9 +155,33 @@ class Moteur:
         self.sur_changement()
 
     def _phase(self, tache: Tache, phrase: str) -> None:
-        """Note la phase : en mémoire seulement, le tableau de bord la relit à chaque passage."""
+        """Note la phase : en mémoire, le tableau de bord la relit à chaque passage.
+
+        Elle clôt aussi la mesure de la phase précédente et ouvre celle-ci : sa durée entre
+        dans la tentative en cours, et `_tracer` l'écrit dans l'historique.
+        """
+        cle, maintenant = cle_de_phase(phrase), self.horloge()
         with self.verrou:
-            self.phases[tache.id] = (phrase, time.monotonic())
+            self.phases[tache.id] = (phrase, maintenant)
+            self._clore_mesure(tache.id, maintenant)
+            self._mesure[tache.id] = (cle, maintenant)
+
+    def _clore_mesure(self, identifiant: str, maintenant: float) -> None:
+        """Sous le verrou : ajoute aux durées de la tentative celle de la phase mesurée."""
+        mesuree = self._mesure.pop(identifiant, None)
+        if mesuree is not None:
+            durees = self._durees.setdefault(identifiant, {})
+            durees[mesuree[0]] = durees.get(mesuree[0], 0.0) + maintenant - mesuree[1]
+
+    def _partir(self, tache: Tache) -> None:
+        """Sous le verrou, au départ d'une tâche : note son attente depuis qu'elle est prête.
+
+        Prête : au lancement du moteur, à la vérification de sa dernière dépendance, ou à la
+        relance décidée par la personne responsable, selon ce qui vient en dernier.
+        """
+        moments = [self._lance_a, self._relancee_a.pop(tache.id, self._lance_a)]
+        moments += [self._verifiee_a.get(d, self._lance_a) for d in tache.depend_de]
+        self._attentes[tache.id] = max(0.0, self.horloge() - max(moments))
 
     def phase(self, identifiant: str) -> dict | None:
         """La phase en cours d'une tâche active et depuis combien de secondes, ou None."""
@@ -139,7 +189,7 @@ class Moteur:
             trouvee = self.phases.get(identifiant)
         if trouvee is None:
             return None
-        return {"texte": trouvee[0], "depuis_s": round(time.monotonic() - trouvee[1])}
+        return {"texte": trouvee[0], "depuis_s": round(self.horloge() - trouvee[1])}
 
     def _prendre_agent(self) -> None:
         """Compte un lancement d'agent, pour le bilan."""
@@ -158,7 +208,18 @@ class Moteur:
 
         Le décalage vaut 1 pour une tentative arrêtée avant son départ, qui n'a pas encore été
         comptée dans `tache.tentatives`.
+
+        L'entrée porte aussi `durees` : les secondes de chaque phase de la tentative, par clé de
+        `PHASES`, et `attente` pour la première tentative d'un départ. La phase en cours est
+        close ici ; une tentative jugée valide marque le moment où la tâche est vérifiée.
         """
+        maintenant = self.horloge()
+        self._clore_mesure(tache.id, maintenant)
+        durees = self._durees.pop(tache.id, {})
+        if tache.id in self._attentes:
+            durees = {ATTENTE: self._attentes.pop(tache.id), **durees}
+        if issue == "valide":
+            self._verifiee_a[tache.id] = maintenant
         tache.historique.append(
             {
                 "tentative": tache.tentatives + decalage,
@@ -166,6 +227,7 @@ class Moteur:
                 "effort": tache.effort,
                 "issue": issue,
                 "detail": detail,
+                "durees": {cle: round(secondes, 3) for cle, secondes in durees.items()},
             }
         )
 
@@ -292,12 +354,14 @@ class Moteur:
         if not self.chantier.contrat.valide:
             raise ContratNonValide("Le contrat de chantier n'est pas validé.")
         paralleles = int(self.profil.get("paralleles", 3))
+        self._lance_a = self.horloge()
         with ThreadPoolExecutor(max_workers=paralleles) as bassin:
             en_vol: set = set()
             while True:
                 with self.verrou:
                     while len(en_vol) < paralleles and (tache := self._prochaine()):
                         tache.etat = "en_cours"
+                        self._partir(tache)
                         en_vol.add(bassin.submit(self._traiter, tache))
                 if not en_vol and not self._reparer_si_besoin():
                     break
@@ -331,6 +395,8 @@ class Moteur:
                 self._arretees.discard(tache.id)
                 self._enregistrement.discard(tache.id)
                 self.phases.pop(tache.id, None)
+                for mesures in (self._mesure, self._durees, self._attentes):
+                    mesures.pop(tache.id, None)
 
     def _boucle(self, tache: Tache) -> None:
         remarques = ""
@@ -604,6 +670,7 @@ class Moteur:
                     tache.modele, tache.effort = suivant
                 tache.rallonge = tache.tentatives
                 tache.etat = "a_lancer"
+                self._relancee_a[tache.id] = self.horloge()  # la mesure de l'attente seulement
             else:
                 tache.etat = "abandonnee"
         self._noter(f"Décision reçue : {choix.lower()}.", tache)

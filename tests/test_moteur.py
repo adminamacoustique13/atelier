@@ -803,3 +803,189 @@ def test_la_relance_seule_ne_depasse_jamais_le_plafond_du_contrat():
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
     assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low")]
     assert "3 tentatives sans succès" in c.demandes[-1]["question"]
+
+
+# --- la mesure du temps : chaque phase de chaque tentative, l'attente avant le départ ---------
+
+PAS = {"preparer": 1.0, "ouvrier": 10.0, "mecaniques": 3.0, "verificateur": 20.0}
+PAS |= {"enregistrer": 2.0, "annuler": 5.0}
+
+
+class Horloge:
+    """Une horloge de test : elle n'avance que quand on le lui dit, jamais avec le temps réel."""
+
+    def __init__(self):
+        self.t = 1000.0
+
+    def __call__(self):
+        return self.t
+
+
+def moteur_chronometre(c, scenario=None, paralleles=3):
+    """Un moteur dont chaque étape fait avancer l'horloge de test d'un pas connu (`PAS`)."""
+    horloge = Horloge()
+
+    class Controles(ControlesSimules):
+        commandes = ["python3 -m pytest -q"]
+
+        def preparer(self, t):
+            horloge.t += PAS["preparer"]
+
+        def mecaniques(self, t, dossier):
+            horloge.t += PAS["mecaniques"]
+            return True, ""
+
+        def enregistrer(self, t, dossier):
+            horloge.t += PAS["enregistrer"]
+            return ""
+
+        def annuler(self, t, dossier):
+            horloge.t += PAS["annuler"]
+
+    class Agent(AgentSimule):
+        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None):
+            horloge.t += PAS[contexte["role"]]
+            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte)
+
+    agent = Agent(scenario or {}, perimetres={t.id: t.perimetre for t in c.taches})
+    profil = {"paralleles": paralleles}
+    return Moteur(c, agent, Controles(), profil, horloge=horloge), horloge
+
+
+DUREES_ACCEPTEE = {"preparation": 1.0, "ouvrier": 10.0, "perimetre": 0.0, "controles": 3.0}
+DUREES_ACCEPTEE |= {"verificateur": 20.0, "enregistrement": 2.0}
+DUREE_ACCEPTEE = sum(DUREES_ACCEPTEE.values())  # 36 secondes
+
+
+def test_chaque_phase_d_une_tentative_garde_sa_duree():
+    c = chantier([tache("A")])
+    m, _ = moteur_chronometre(c)
+    m.executer()
+    (entree,) = c.tache("A").historique
+    assert entree["issue"] == "valide"
+    assert entree["durees"] == {"attente": 0.0, **DUREES_ACCEPTEE}
+
+
+def test_une_tentative_refusee_puis_une_acceptee_donnent_deux_jeux_de_durees():
+    c = chantier([tache("A")])
+    m, _ = moteur_chronometre(c, {"A": ["bacle", "ok"]})
+    m.executer()
+    refusee, acceptee = c.tache("A").historique
+    assert (refusee["issue"], acceptee["issue"]) == ("bacle", "valide")
+    sans_enregistrement = {k: v for k, v in DUREES_ACCEPTEE.items() if k != "enregistrement"}
+    assert refusee["durees"] == {"attente": 0.0, **sans_enregistrement}
+    assert acceptee["durees"] == DUREES_ACCEPTEE  # l'attente n'appartient qu'au départ
+
+
+def test_une_tache_qui_attend_sa_dependance_ne_compte_son_attente_qu_apres_sa_verification():
+    """Prête dès que sa dépendance est vérifiée : le temps de la dépendance n'est pas une file."""
+    c = chantier([tache("A"), tache("B", depend_de=["A"])])
+    m, horloge = moteur_chronometre(c)
+    m.executer()
+    attente_b = c.tache("B").historique[0]["durees"]["attente"]
+    assert attente_b == 0.0
+    assert horloge.t == 1000.0 + 2 * DUREE_ACCEPTEE  # B est bien partie après les 36 s de A
+
+
+def test_une_tache_bloquee_par_un_perimetre_attend_le_temps_de_la_tache_qui_le_tient():
+    c = chantier([tache("A"), tache("C", perimetre=["a.py"])])
+    m, _ = moteur_chronometre(c)
+    m.executer()
+    assert c.tache("A").historique[0]["durees"]["attente"] == 0.0
+    assert c.tache("C").historique[0]["durees"]["attente"] == DUREE_ACCEPTEE
+
+
+def test_une_tache_qui_attend_une_place_compte_le_temps_de_celle_qui_l_occupe():
+    c = chantier([tache("A"), tache("B")])
+    m, _ = moteur_chronometre(c, paralleles=1)
+    m.executer()
+    assert c.tache("B").historique[0]["durees"]["attente"] == DUREE_ACCEPTEE
+
+
+def test_une_relance_decidee_par_la_personne_compte_son_attente_depuis_la_decision():
+    c = chantier([tache("A", type="physique")], plafond_modele="fable", plafond_effort="max")
+    m, horloge = moteur_chronometre(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m.executer()
+    assert c.tache("A").etat == "revenu"
+    horloge.t += 600  # la personne met dix minutes à répondre : ce n'est pas une file d'attente
+    m.repondre(c.demandes[-1]["id"], RELANCER_TEL)
+    horloge.t += 4
+    m.executer()
+    entrees = c.tache("A").historique
+    assert [e["issue"] for e in entrees] == ["ne_sait_pas", "ne_sait_pas", "valide"]
+    assert entrees[2]["durees"]["attente"] == 0.0  # le moteur relancé part aussitôt
+
+
+def test_un_arret_pendant_la_preparation_garde_la_duree_de_la_preparation():
+    c = chantier([tache("A")])
+    horloge = Horloge()
+
+    class Controles(ControlesSimules):
+        def preparer(self, t):
+            horloge.t += 7
+            assert m.arreter(t.id)
+
+    m = Moteur(c, AgentSimule(perimetres={"A": ["a.py"]}), Controles(), horloge=horloge)
+    m.executer()
+    (entree,) = c.tache("A").historique
+    assert entree["issue"] == "arretee"
+    assert entree["durees"] == {"attente": 0.0, "preparation": 7.0}
+
+
+def test_la_phase_en_cours_se_lit_sur_l_horloge_du_moteur():
+    c = chantier([tache("A")])
+    horloge = Horloge()
+    m = Moteur(c, AgentSimule(), ControlesSimules(), horloge=horloge)
+    m._phase(c.tache("A"), "Contrôle du périmètre")
+    horloge.t += 42
+    assert m.phase("A") == {"texte": "Contrôle du périmètre", "depuis_s": 42}
+
+
+def test_chaque_phrase_de_phase_retrouve_sa_cle():
+    from atelier.moteur import PHASES, cle_de_phase
+
+    for cle, modele in PHASES.items():
+        assert cle_de_phase(modele.format("x") + "pytest -q") == cle
+    assert cle_de_phase("Une phase que personne n'a déclarée") == "autre"
+
+
+def test_une_tache_rendue_au_redemarrage_n_a_aucune_duree_mesuree():
+    t = tache("A", etat="en_cours", tentatives=1)
+    moteur(chantier([t]))
+    assert t.historique[-1]["durees"] == {}
+
+
+def test_les_durees_survivent_a_l_arret_et_un_etat_sans_durees_se_relit(tmp_path):
+    c = chantier([tache("A")])
+    m, _ = moteur_chronometre(c, {"A": ["bacle", "ok"]})
+    m.executer()
+    c.sauver(tmp_path / "etat.json")
+    relu = Chantier.charger(tmp_path / "etat.json")
+    assert [e["durees"] for e in relu.tache("A").historique] == [
+        e["durees"] for e in c.tache("A").historique
+    ]
+    ancien = c.en_dict()
+    for t in ancien["taches"]:
+        for entree in t["historique"]:
+            del entree["durees"]  # un état écrit avant les mesures
+    vieux = Chantier.depuis_dict(ancien)
+    assert [e["issue"] for e in vieux.tache("A").historique] == ["bacle", "valide"]
+    vieux.taches.append(tache("B"))
+    moteur(vieux)[0].executer()  # et le moteur repart dessus
+    assert vieux.tache("B").etat == "verifie" and "durees" in vieux.tache("B").historique[0]
+
+
+def test_la_mesure_ne_change_rien_a_ce_que_le_moteur_fait():
+    def deroule(chronometre):
+        c = chantier([tache("A"), tache("B", depend_de=["A"]), tache("C", perimetre=["a.py"])])
+        scenario = {"A": ["bacle", "ok"], "C": ["ne_sait_pas", "ok"]}
+        m, agent = moteur_chronometre(c, scenario, 1) if chronometre else moteur(c, scenario)
+        if not chronometre:
+            m.profil = {"paralleles": 1}
+        m.executer()
+        appels = [(x["role"], x.get("tache"), x["modele"]) for x in m.agent.appels]
+        sans = [[{k: v for k, v in e.items() if k != "durees"} for e in t.historique]
+                for t in c.taches]  # fmt: skip
+        return appels, [e["texte"] for e in c.evenements], [t.etat for t in c.taches], sans
+
+    assert deroule(True) == deroule(False)
