@@ -100,7 +100,8 @@ class Rapport:
 
 
 def _git(dossier: Path, *arguments: str) -> str:
-    # Un échec de git lève CalledProcessError : l'essai s'arrête là, avec le message de git.
+    # Un échec de git lève CalledProcessError : l'essai s'arrête là. Le rapport cite alors la
+    # commande et son code de sortie, mais pas le message de git, que l'erreur garde à part.
     resultat = lancer_git(dossier, *arguments)
     resultat.check_returncode()
     return resultat.stdout
@@ -123,9 +124,8 @@ def creer_projet_d_essai(dossier: Path, python: str) -> None:
     (dossier / "chantier" / "profil.json").write_text(texte, "utf-8")
     (dossier / ".gitignore").write_text(".atelier/\n", "utf-8")
     _git(dossier, "init", "-q", "-b", "main")
-    identite = IDENTITE_DE_REPLI
     _git(dossier, "add", "-A")
-    _git(dossier, *identite, "commit", "-q", "-m", "Création du projet d'essai")
+    _git(dossier, *IDENTITE_DE_REPLI, "commit", "-q", "-m", "Création du projet d'essai")
 
 
 def programmes_claude(racine_pid: int) -> list[str]:

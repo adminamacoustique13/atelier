@@ -16,6 +16,8 @@ from contextlib import suppress
 from fnmatch import fnmatch
 from pathlib import Path
 
+from atelier.git import IDENTITE_DE_REPLI, lancer_git
+
 TOUJOURS_PERMIS = ("chantier/relais/*",)
 CAHIER = "chantier/CAHIER.md"
 # Combien de fois une tâche rejoue la branche principale qui a bougé pendant ses contrôles.
@@ -152,30 +154,20 @@ class ControlesGit:
         self.verrou_fusion = threading.Lock()
         self.envoi = ""  # dernier problème d'envoi vers le dépôt en ligne, vide si tout va bien
         self._distant: str | None = None
-        self.identite: list[str] = []
+        self.identite: tuple[str, ...] = ()
         if not self._config("user.email"):
             # Sans nom git sur l'ordinateur, les enregistrements échoueraient : on signe Atelier.
-            self.identite = ["-c", "user.name=Atelier", "-c", "user.email=atelier@localhost"]
+            self.identite = IDENTITE_DE_REPLI
 
     def _config(self, cle: str) -> str:
-        resultat = subprocess.run(
-            ["git", "config", cle], cwd=self.depot, capture_output=True, text=True
-        )
-        return resultat.stdout.strip()
+        # Une clé absente (git rend un code d'erreur) donne une valeur vide.
+        return lancer_git(self.depot, "config", cle).stdout.strip()
 
     def _git(self, *arguments: str, dossier: Path | None = None, delai: int = 120) -> str:
-        # Pas de question posée par git : l'Atelier tourne sans terminal.
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        # Un échec ou un délai dépassé devient une RuntimeError ; une OSError remonte.
         try:
-            signe = self.identite if arguments[0] in ("commit", "merge") else []
-            resultat = subprocess.run(
-                ["git", *signe, *arguments],
-                cwd=dossier or self.depot,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=delai,
-            )
+            signe = self.identite if arguments[0] in ("commit", "merge") else ()
+            resultat = lancer_git(dossier or self.depot, *signe, *arguments, delai=delai)
         except subprocess.TimeoutExpired as erreur:
             raise RuntimeError(f"git {arguments[0]} : pas de réponse à temps") from erreur
         if resultat.returncode != 0:
@@ -317,10 +309,7 @@ class ControlesGit:
 
     def _ancetre(self, base: str, dossier) -> bool:
         """Dit si `base` est déjà contenu dans la branche de la copie de travail."""
-        resultat = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", base, "HEAD"],
-            cwd=dossier, capture_output=True, text=True,
-        )  # fmt: skip
+        resultat = lancer_git(dossier, "merge-base", "--is-ancestor", base, "HEAD")
         return resultat.returncode == 0
 
     def controler_principale(self) -> tuple[bool, str]:

@@ -129,10 +129,8 @@ def creer_depot(dossier: Path, nom: str) -> Atelier:
     (dossier / "chantier" / "profil.json").write_text(profil + "\n", "utf-8")
     (dossier / ".gitignore").write_text(".atelier/\n", "utf-8")
     _git(dossier, "init", "-q", "-b", "main")
-    identite = []
-    if not subprocess.run(
-        ["git", "config", "user.email"], cwd=dossier, capture_output=True, text=True
-    ).stdout.strip():
+    identite: tuple[str, ...] = ()
+    if not lancer_git(dossier, "config", "user.email").stdout.strip():
         identite = IDENTITE_DE_REPLI
     _git(dossier, "add", "-A")
     _git(dossier, *identite, "commit", "-q", "-m", "Création du projet")

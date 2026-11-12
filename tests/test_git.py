@@ -82,3 +82,14 @@ def test_un_git_introuvable_remonte_en_oserror(depot, monkeypatch):
     monkeypatch.setenv("PATH", str(depot / "nulle-part"))
     with pytest.raises(OSError):
         lancer_git(depot, "status")
+
+
+def test_une_variable_supplementaire_prime_sur_celle_du_processus(depot, monkeypatch):
+    # La mise à jour impose LC_ALL=C pour reconnaître les messages de git, quelle que soit la
+    # langue réglée sur l'ordinateur.
+    monkeypatch.setenv("LC_ALL", "fr_FR.UTF-8")
+    resultat = lancer_git(
+        depot, "-c", "alias.montre=!printenv LC_ALL", "montre",
+        environnement={"LC_ALL": "C"},
+    )  # fmt: skip
+    assert resultat.stdout.strip() == "C"

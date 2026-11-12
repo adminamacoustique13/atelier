@@ -14,7 +14,8 @@ from collections.abc import Mapping
 from pathlib import Path
 
 # Le nom et l'adresse donnés à un commit quand la machine n'a pas d'identité git réglée.
-IDENTITE_DE_REPLI = ["-c", "user.name=Atelier", "-c", "user.email=atelier@localhost"]
+# Un tuple, et non une liste : partagé entre modules, il ne doit pas pouvoir être modifié.
+IDENTITE_DE_REPLI = ("-c", "user.name=Atelier", "-c", "user.email=atelier@localhost")
 
 
 def lancer_git(

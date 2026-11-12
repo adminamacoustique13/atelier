@@ -8,13 +8,14 @@ nouveau code.
 
 from __future__ import annotations
 
-import os
 import re
 import subprocess
 import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
+
+from atelier.git import lancer_git
 
 BRANCHE = "main"
 DELAI_GIT_S = 60
@@ -52,20 +53,15 @@ def _nettoyer(texte: str) -> str:
 
 def _git(dossier: Path, *arguments: str) -> tuple[int | None, str, str]:
     """Lance git sans shell ni saisie possible. Rend (code, sortie, erreur) ; code None = délai."""
-    env = dict(
-        os.environ,
-        GIT_TERMINAL_PROMPT="0",
-        GIT_ASKPASS="",
-        GIT_EDITOR="true",
-        GIT_MERGE_AUTOEDIT="no",
-        GIT_SSH_COMMAND="ssh -o BatchMode=yes",
-        LC_ALL="C",
-    )
+    variables = {
+        "GIT_ASKPASS": "",
+        "GIT_EDITOR": "true",
+        "GIT_MERGE_AUTOEDIT": "no",
+        "GIT_SSH_COMMAND": "ssh -o BatchMode=yes",
+        "LC_ALL": "C",  # messages de git en anglais, pour que `_cause` les reconnaisse
+    }
     try:
-        r = subprocess.run(
-            ["git", *arguments], cwd=dossier, capture_output=True, text=True, env=env,
-            stdin=subprocess.DEVNULL, timeout=DELAI_GIT_S,
-        )
+        r = lancer_git(dossier, *arguments, delai=DELAI_GIT_S, environnement=variables)
     except subprocess.TimeoutExpired:
         return None, "", "délai dépassé"
     except OSError as erreur:
