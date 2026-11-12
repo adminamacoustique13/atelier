@@ -26,7 +26,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | V0. Vitesse : mesurer le temps de chaque phase d'une tâche | vérifié | Opus | bornée, Opus : accepté | 1 | 861 tests ; ancien et nouveau moteur identiques sur 11 plans ; mesures justes à 0,1 % |
 | V1. Vitesse : un plan large, et sa largeur calculée | vérifié | Opus | complète, Fable : accepté | 1 | 873 tests ; vagues calculées identiques à celles du vrai moteur sur 36 plans |
 | V2. Vitesse : les niveaux de vérification et le dosage de départ | vérifié | Opus | bornée, Opus : recalé puis corrigé | 2 | 844 tests ; le test du plafond de la relance seule éprouve de nouveau sa garde |
-| V5. Vitesse : le pont lit les limites de l'abonnement et sait reprendre une session | en cours | Opus | complète, Fable | 1 | |
+| V5. Vitesse : le pont lit les limites de l'abonnement et sait reprendre une session | vérifié | Opus | complète, Fable : recalé puis seconde vérification bornée acceptée | 2 | 68 scénarios identiques à l'ancien pont ; la règle du dépassement payant reproduit celle de Claude Code ; 37 casses vues |
 | V3. Vitesse, moteur : vérification proportionnée, reprise à chaud, places et régulateur | à lancer, après V0, V2, V5 | Opus | complète, Fable | | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | vérifié | Opus | bornée, Opus, par casses : accepté | 1 | 786 tests (14 nouveaux) ; les 12 casses de la consigne et 6 des 7 casses du vérificateur font échouer un test nouveau |
 | M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
@@ -90,7 +90,7 @@ Le diagnostic complet est dans le fichier de travail de la session (`diagnostic-
 ### Vitesse, vague 2 (fiches détaillées dans le fichier de travail `fiches-V3-moteur.md`)
 Ordre : V3a (reprise à chaud), V3b (refus répété et erreur d'environnement), V3d (montées par tâche, plafond), V3c (agent qui n'avance plus), V3e (vérification proportionnée), V3f (débit et régulateur). `moteur.py` n'a qu'un ouvrier à la fois ; en parallèle : le lot des consignes, `refus.py`, `places.py`, les retouches de `plan.py`, la correction de l'onglet Code. Décisions attendues de la personne responsable avant V3e et V3c : Fable pour toute vérification complète ou un modèle au-dessus ; les propositions R1 et R2 sur les cartes, qui reviennent sur deux décisions du journal.
 
-### V5 : recalé une fois, seconde passe en cours
+### V5 : recalé une fois, corrigé et accepté
 Deux défauts : le dépassement payant de l'abonnement (statut « rejected » mais requêtes acceptées) était lu comme un refus, ce qui aurait suspendu les lancements pour rien ; une reprise demandée avec une session vide repartait dans une session neuve sans le dire. Relevé pour le lot du pont de la vague 2 (pas dans la seconde passe) : Claude Code marque aussi « rate_limit » une surcharge du serveur qui n'est pas la limite de l'abonnement ; le moteur devra la traiter comme une pause courte, pas comme une suspension de 15 minutes.
 
 ### CC et V1b, entrées avec une vérification mécanique

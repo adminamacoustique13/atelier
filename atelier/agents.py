@@ -89,6 +89,18 @@ RAISONS_SIMULEES = {
     "consigne": "Les critères ne suffisent pas à prouver le but.",
 }
 DEMANDE_SIMULEE = {"command": "npm install left-pad"}
+# Deux erreurs à part, que l'appelant reconnaît à leur texte exact (`resultat.erreur == ...`).
+LIMITE_ATTEINTE = "L'agent a été refusé : une limite de l'abonnement Claude est atteinte."
+REPRISE_IMPOSSIBLE = "La session de la tentative précédente ne peut pas être reprise."
+LIMITE_INCONNUE = "inconnue"  # le type d'une limite que le SDK ne nomme pas
+# Les fenêtres de l'abonnement que nomme le SDK (`RateLimitType`), dites en clair.
+LIMITES_LUES = {
+    "five_hour": "fenêtre de 5 heures",
+    "seven_day": "fenêtre de 7 jours",
+    "seven_day_opus": "fenêtre de 7 jours d'Opus",
+    "seven_day_sonnet": "fenêtre de 7 jours de Sonnet",
+    "overage": "dépassement payant",
+}
 CHOIX_LUS = {
     "une_fois": "autorisé une fois",
     "toujours": "autorisé pour ce projet",
@@ -107,6 +119,29 @@ class Resultat:
     tokens: int = 0
     erreur: str = ""
     fichiers: list[str] | None = None
+    # Pour un refus pour limite (`erreur == LIMITE_ATTEINTE`) : la limite, comme le SDK la nomme
+    # (« five_hour »…, ou « inconnue »), et l'heure où elle se lève (secondes Unix), si connue.
+    type_limite: str = ""
+    fin_limite: float | None = None
+    # L'identifiant de la session Claude Code de l'agent, "" s'il est inconnu : de quoi la
+    # reprendre. Hors comparaison : deux résultats égaux le restent, quelle que soit la session.
+    session: str = field(default="", compare=False)
+
+
+def decrire_limite(statut: str, type_limite: str, fin=None, utilisation=None) -> str:
+    """Dit en une phrase une limite de l'abonnement : proche (« alerte ») ou atteinte.
+
+    `fin` est l'heure de remise à zéro (secondes Unix), `utilisation` la part consommée (0 à 1).
+    """
+    nom = LIMITES_LUES.get(type_limite, f"limite {type_limite or LIMITE_INCONNUE}")
+    etat = "proche" if statut == "alerte" else "atteinte"
+    phrase = f"Limite de l'abonnement {etat} ({nom}"
+    if isinstance(utilisation, (int, float)) and not isinstance(utilisation, bool):
+        phrase += f", {round(utilisation * 100)} % consommés"
+    phrase += ")"
+    if isinstance(fin, (int, float)) and not isinstance(fin, bool):
+        phrase += " ; remise à zéro à " + time.strftime("%H:%M", time.localtime(fin))
+    return phrase + "."
 
 
 def mode_valide(mode) -> bool:
@@ -264,6 +299,13 @@ class _ModeDesOuvriers:
         return self._postes.appliques()
 
 
+def _sans_reprise(rappel, nom: str) -> Resultat:
+    """Une reprise demandée d'une session vide : l'erreur à part, sans lancer d'agent."""
+    resultat = Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE)
+    _emettre(rappel, nom, "fin", _fin(resultat))
+    return resultat
+
+
 def _arrete(marche: _Marche, resultat: Resultat) -> Resultat:
     """Un arrêt demandé pendant le travail l'emporte sur ce que l'agent a rendu."""
     if not marche.arret.is_set():
@@ -322,6 +364,7 @@ class AgentClaude(_ModeDesOuvriers):
         lecture_seule: bool = False,
         contexte: dict | None = None,
         copie_jetable: bool = False,
+        reprendre: str | None = None,
     ) -> Resultat:
         """Exécute une consigne et rend le résultat de l'agent.
 
@@ -329,6 +372,13 @@ class AgentClaude(_ModeDesOuvriers):
         jette après son avis. Il peut y écrire sans carte (ses essais : un fichier modifié pour
         voir un test échouer, un script), puisque rien de ce qu'il y fait n'est enregistré ; il
         n'a toujours aucun accès en écriture à la copie de l'ouvrier, ni aux modes des ouvriers.
+
+        `reprendre` : l'identifiant d'une session rendue par un appel précédent (`session` du
+        résultat). L'agent repart dans cette session, et la consigne lui arrive comme un message
+        de plus ; `dossier` doit être celui de cette session. Si elle ne peut pas être reprise,
+        le résultat a pour erreur `REPRISE_IMPOSSIBLE`, et rien d'autre n'est tenté ; une
+        session vide ("") la rend aussi, sans lancer d'agent. Sans `reprendre` (None), la
+        session est neuve, comme toujours.
         """
         tache, nom = _poste(contexte)
         bac_a_sable = lecture_seule and copie_jetable
@@ -337,12 +387,17 @@ class AgentClaude(_ModeDesOuvriers):
             mode = "acceptEdits"
         else:  # le mode d'un ouvrier est relu sous le verrou des postes, à son inscription
             mode = "default" if lecture_seule else self._postes.mode
+        reprise = {}
+        if reprendre is not None:  # une session qu'on ne peut pas reprendre rend une erreur à part
+            if not isinstance(reprendre, str) or not reprendre.strip():  # session vide : rien
+                return _sans_reprise(self.sur_evenement, nom)  # n'est lancé à la place
+            reprise = {"session": reprendre, "reprise": True, "reprise_exigee": True}
         return self._travailler(
             tache, nom, consigne, ouvrier=not lecture_seule,
             modele=self._alias(modele), effort=effort, dossier=dossier,
             outils_permis=self._outils(not ecrit) + self._autorisations(not ecrit),
             outils_interdits=[] if ecrit else list(ECRITURE),
-            mode_permission=mode,
+            mode_permission=mode, **reprise,
         )  # fmt: skip
 
     def converser(
@@ -416,6 +471,8 @@ class AgentClaude(_ModeDesOuvriers):
                 fermer()
                 fermee.wait()  # la fermeture lancée par un arrêt est attendue elle aussi
         resultat = _arrete(marche, resultat)  # après le retrait du poste : aucune fenêtre
+        perdue = resultat.erreur == REPRISE_IMPOSSIBLE  # la session demandée n'est pas la sienne
+        resultat.session = "" if perdue else session.session or ""
         self.source_connexion = session.source_connexion or self.source_connexion
         if not marche.fin_emise:  # le pont n'a pas commencé de tour : arrêté avant
             _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
@@ -502,6 +559,17 @@ class AgentSimule(_ModeDesOuvriers):
 
     Avec `gestes_s` (la démonstration), un agent qui patiente joue un geste de travail toutes les
     `gestes_s` secondes environ, pour que la courbe d'activité du tableau de bord vive.
+
+    Les limites de l'abonnement, sur demande : `limites` donne, par tâche (« orchestrateur » pour
+    un appel sans tâche), ce que jouent ses appels successifs à `executer`, tous rôles confondus :
+    "refus" (refusé pour limite, aussitôt, sans rien écrire), "alerte" (un événement « limite »
+    d'alerte, puis le travail prévu), ou "" (rien de spécial). Au-delà de la liste, rien. La limite
+    jouée est `type_limite`, levée `delai_limite_s` secondes plus tard (None : heure inconnue).
+
+    La reprise : chaque appel rend une session (`resultat.session`). `executer(...,
+    reprendre=session)` repart dans une session déjà rendue, la note dans `reprises` et rend la
+    même session ; une session inconnue, ou oubliée par `oublier_sessions`, rend
+    `REPRISE_IMPOSSIBLE`. Par défaut, rien de tout cela ne change ce qu'il joue.
     """
 
     scenario: dict[str, list[str]] = field(default_factory=dict)
@@ -515,10 +583,17 @@ class AgentSimule(_ModeDesOuvriers):
     retombee: bool = False
     pause_arbitre: bool = False
     gestes_s: float = 0.0
+    limites: dict[str, list[str]] = field(default_factory=dict)
+    type_limite: str = "five_hour"
+    delai_limite_s: float | None = 3600.0
+    reprises: list[dict] = field(default_factory=list)
     _postes: _Postes = field(default_factory=_Postes, init=False, repr=False, compare=False)
     _demandes: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     _refus: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     _verrou: object = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+    _joues: dict = field(default_factory=dict, init=False, repr=False, compare=False)
+    _sessions: set = field(default_factory=set, init=False, repr=False, compare=False)
+    _ouvertes: int = field(default=0, init=False, repr=False, compare=False)
 
     def _issue(self, contexte: dict) -> str:
         issues = self.scenario.get(contexte.get("tache", ""), ["ok"])
@@ -550,14 +625,22 @@ class AgentSimule(_ModeDesOuvriers):
         lecture_seule: bool = False,
         contexte: dict | None = None,
         copie_jetable: bool = False,
+        reprendre: str | None = None,
     ) -> Resultat:
         """Rend le résultat prévu par le scénario pour cette tâche et cette tentative."""
         contexte = contexte or {}
-        self.appels.append({**contexte, "modele": modele, "effort": effort})
+        appel = {**contexte, "modele": modele, "effort": effort}
+        self.appels.append(appel if reprendre is None else {**appel, "reprise": reprendre})
         tache, nom = _poste(contexte)
+        jeu = self._jeu_de_limite(tache)
+        session = self._ouvrir_session(reprendre, consigne, contexte)
+        if session is None or jeu == "refus":
+            return self._refuser(nom, session, jeu)
         ouvrier = contexte.get("role") == "ouvrier"
         with self._postes.occuper(tache, nom, lambda: self._annuler(nom), None, ouvrier) as marche:
             _emettre(self.sur_evenement, nom, "outil", "Lit la consigne")
+            if jeu == "alerte":
+                self._annoncer_limite(nom, "alerte")
             if ouvrier:
                 self._jouer_mode(marche)
             if ouvrier and self._premiere_demande(nom):
@@ -565,8 +648,57 @@ class AgentSimule(_ModeDesOuvriers):
             arrete = self._patienter(marche)
             prevu = Resultat(ok=False) if arrete else self._prevu(contexte, dossier, modele)
         resultat = _arrete(marche, prevu)  # après le retrait du poste : aucune fenêtre
+        resultat.session = session
         _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
         return resultat
+
+    def oublier_sessions(self) -> None:
+        """Oublie les sessions rendues : les reprendre rendra désormais `REPRISE_IMPOSSIBLE`."""
+        with self._verrou:
+            self._sessions.clear()
+
+    def _jeu_de_limite(self, tache: str | None) -> str:
+        """Ce que `limites` fait jouer à cet appel pour cette tâche : "refus", "alerte" ou ""."""
+        cle = tache or "orchestrateur"
+        with self._verrou:
+            rang = self._joues.get(cle, 0)
+            self._joues[cle] = rang + 1
+        jeux = self.limites.get(cle, [])
+        return jeux[rang] if rang < len(jeux) else ""
+
+    def _ouvrir_session(self, reprendre: str | None, message: str, contexte: dict) -> str | None:
+        """La session de l'appel : neuve, ou celle à reprendre ; None si elle est inconnue."""
+        with self._verrou:
+            if reprendre is None:
+                self._ouvertes += 1  # jamais deux fois le même numéro, même après un oubli
+                session = f"session-simulee-{self._ouvertes}"
+                self._sessions.add(session)
+                return session
+            if reprendre not in self._sessions:
+                return None
+        reprise = {c: contexte.get(c) for c in ("tache", "role", "tentative")}
+        self.reprises.append({**reprise, "session": reprendre, "message": message})
+        return reprendre
+
+    def _refuser(self, nom: str, session: str | None, jeu: str) -> Resultat:
+        """Rend aussitôt une reprise impossible, ou un refus pour limite, et le dit."""
+        if session is None:
+            resultat = Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE)
+        else:
+            fin = self._annoncer_limite(nom, "atteinte")
+            resultat = Resultat(ok=False, erreur=LIMITE_ATTEINTE, type_limite=self.type_limite,
+                                fin_limite=fin, session=session)  # fmt: skip
+        _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
+        return resultat
+
+    def _annoncer_limite(self, nom: str, statut: str) -> float | None:
+        """Émet l'événement « limite » qu'émettrait le pont ; rend l'heure de remise à zéro."""
+        fin = None if self.delai_limite_s is None else time.time() + self.delai_limite_s
+        utilisation = 0.9 if statut == "alerte" else 1.0
+        texte = decrire_limite(statut, self.type_limite, fin, utilisation)
+        _emettre(self.sur_evenement, nom, "limite", texte, statut=statut,
+                 limite=self.type_limite, fin=fin, utilisation=utilisation)  # fmt: skip
+        return fin
 
     def _patienter(self, marche: _Marche) -> bool:
         """Attend le délai de l'agent ; rend True dès un arrêt. Rejoue un changement de mode."""

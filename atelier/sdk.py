@@ -24,6 +24,17 @@ Le mode réel : Claude Code le donne au départ (message `init`) et quand il cha
 `status`) ; le pont le garde dans `mode_applique` et émet un événement « mode » quand il n'est
 pas celui demandé. Les refus de l'arbitre du mode auto se lisent dans les résultats d'outil en
 erreur, puis dans `permission_denials` en fin de tour ; chacun est annoncé une seule fois.
+
+Les limites de l'abonnement : le SDK émet un `RateLimitEvent` quand l'état d'une limite change.
+Une alerte (`allowed_warning`) ou un refus (`rejected`) donne un événement « limite » ; rien ne
+s'arrête pour autant. C'est à la fin du tour qu'on juge : un tour en échec après un refus, ou
+signalé comme tel par Claude Code (message en erreur « rate_limit », statut HTTP 429), rend
+`LIMITE_ATTEINTE`, avec la limite et l'heure où elle se lève. Un tour réussi reste réussi.
+Un `rejected` pendant que le dépassement payant prend le relais n'est pas un refus.
+
+La reprise exigée (`reprise_exigee`) : la session demandée doit être celle qui répond. Si Claude
+Code part dans une autre, ou si le tour échoue avant que la session ait répondu (connexion
+refusée, fin en erreur, aucune réponse), le tour rend `REPRISE_IMPOSSIBLE`.
 """
 
 from __future__ import annotations
@@ -36,7 +47,15 @@ import warnings
 from contextlib import suppress
 from pathlib import Path
 
-from atelier.agents import Resultat, decrire_outil, mode_valide
+from atelier.agents import (
+    LIMITE_ATTEINTE,
+    LIMITE_INCONNUE,
+    REPRISE_IMPOSSIBLE,
+    Resultat,
+    decrire_limite,
+    decrire_outil,
+    mode_valide,
+)
 from atelier.guichet import ARRETE
 
 # Le SDK avertit, à chaque agent, que le guichet n'est pas consulté pour les outils permis
@@ -61,6 +80,14 @@ REGLE_ARBITRE = re.compile(r"Reason:\s*\[([^\]\n]{1,80})\]")
 SANS_RAISON = "raison non précisée"
 INDISPONIBLE = "le mode auto n'est pas disponible pour son modèle"
 MEMOIRE_MAX = 256  # appels et refus retenus par session : au-delà, les plus anciens sont oubliés
+# Les états de limite du SDK (`RateLimitStatus`) qui donnent un événement, et leur nom ici.
+STATUTS_LIMITE = {"allowed_warning": "alerte", "rejected": "atteinte"}
+DEPASSEMENT_PERMIS = ("allowed", "allowed_warning")  # le dépassement payant prend le relais
+STATUT_HTTP_LIMITE = 429  # « trop de requêtes » : la limite atteinte, vue par l'API
+
+
+class _RepriseRefusee(Exception):
+    """Claude Code est parti dans une autre session que celle qu'il fallait reprendre."""
 
 
 def lire_source(api_key_source) -> str:
@@ -95,6 +122,41 @@ def lire_refus(texte) -> str:
     if trouve:
         return f"règle {trouve[1].strip()}"
     return " ".join(texte.split())[:120]
+
+
+def lire_limite(info) -> dict | None:
+    """Traduit un `RateLimitInfo` du SDK : statut, limite, heure de remise à zéro, consommation.
+
+    Rend None pour un état sans alerte ni refus (`allowed`) ou illisible. L'heure est en secondes
+    Unix ; une valeur qui ne peut être qu'en millisecondes est ramenée en secondes.
+    """
+    statut = STATUTS_LIMITE.get(getattr(info, "status", None))
+    if statut is None:
+        return None
+    limite = getattr(info, "rate_limit_type", None)
+    fin = getattr(info, "resets_at", None)
+    if not isinstance(fin, (int, float)) or isinstance(fin, bool) or fin <= 0:
+        fin = None
+    elif fin > 1e11:  # au-delà de l'an 5000 en secondes : ce sont des millisecondes
+        fin = fin / 1000
+    part = getattr(info, "utilization", None)
+    part = part if isinstance(part, (int, float)) and not isinstance(part, bool) else None
+    limite = limite if isinstance(limite, str) and limite else LIMITE_INCONNUE
+    return {"statut": statut, "limite": limite, "fin": fin, "utilisation": part}
+
+
+def depassement_en_service(info) -> bool:
+    """Dit si le dépassement payant a pris le relais d'une limite atteinte.
+
+    Claude Code (2.1.308) calcule `isUsingOverage` ainsi : statut `rejected` et dépassement
+    `allowed` ou `allowed_warning`. Le SDK donne ce champ dans `raw` et le dépassement dans
+    `overage_status` : l'un ou l'autre suffit. Les requêtes passent alors normalement.
+    """
+    brut = getattr(info, "raw", None)
+    if isinstance(brut, dict) and brut.get("isUsingOverage") is True:
+        return True
+    depassement = getattr(info, "overage_status", None)
+    return getattr(info, "status", None) == "rejected" and depassement in DEPASSEMENT_PERMIS
 
 
 def texte_du_resultat(contenu) -> str:
@@ -227,6 +289,7 @@ class SessionSDK:
         session: str | None = None,
         reprise: bool = False,
         fabrique_client=None,
+        reprise_exigee: bool = False,
     ):
         if not mode_valide(mode_permission):  # jamais bypassPermissions, ni un mode inconnu
             raise ValueError(f"Mode de permission refusé : {mode_permission!r}.")
@@ -237,6 +300,12 @@ class SessionSDK:
         self.guichet, self.sur_evenement, self.delai_max_s = guichet, sur_evenement, delai_max_s
         self.session, self.reprise = session, reprise
         self.fabrique_client = fabrique_client
+        # La session qu'il faut reprendre, et non une autre ; vue : elle a répondu.
+        self._a_reprendre = session if reprise and reprise_exigee else None
+        self._session_vue = False
+        # Les limites du tour : la dernière annoncée (alerte ou refus), et le refus.
+        self._limite: dict | None = None
+        self._limite_refusee = False
         self.source_connexion = ""
         self._client = None
         self._coupure: _Arret | None = None  # le drapeau du client ouvert, posé à sa coupure
@@ -387,6 +456,7 @@ class SessionSDK:
 
     async def _tour(self, consigne: str, arret: _Arret) -> Resultat:
         """Fait travailler l'agent jusqu'à sa réponse, son arrêt ou la fin du délai."""
+        self._limite, self._limite_refusee = None, False
         travail = asyncio.ensure_future(self._travailler(consigne))
         attente = asyncio.ensure_future(arret.evenement.wait())
         try:
@@ -402,7 +472,20 @@ class SessionSDK:
                 return Resultat(ok=False, erreur=ARRETE)
             delai = f"{self.delai_max_s} secondes"
             return Resultat(ok=False, erreur=f"L'agent n'a pas fini dans le délai de {delai}.")
-        return self._issue(travail)
+        return self._qualifier(self._issue(travail))
+
+    def _qualifier(self, resultat: Resultat) -> Resultat:
+        """Un échec dû à une limite, ou à une session qu'on n'a pas pu reprendre, le dit."""
+        if resultat.ok:
+            return resultat
+        reste = {"cout_usd": resultat.cout_usd, "tokens": resultat.tokens}
+        if self._limite_refusee:
+            limite = self._limite or {"limite": LIMITE_INCONNUE, "fin": None}
+            return Resultat(ok=False, erreur=LIMITE_ATTEINTE, type_limite=limite["limite"],
+                            fin_limite=limite["fin"], **reste)  # fmt: skip
+        if self._a_reprendre and not self._session_vue:
+            return Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE, **reste)
+        return resultat
 
     def _issue(self, travail: asyncio.Future) -> Resultat:
         """Lit l'issue d'un travail terminé ; en cas d'erreur, le client est coupé."""
@@ -466,28 +549,59 @@ class SessionSDK:
                 morceaux.append(delta["text"])
                 self._emettre("texte", delta["text"])
         elif isinstance(message, sdk.AssistantMessage):
-            for bloc in message.content:
-                if isinstance(bloc, sdk.ToolUseBlock):
-                    forme = decrire_outil({"name": bloc.name, "input": bloc.input}, self.dossier)
-                    self._appels.retenir(bloc.id, forme)
-                    self._emettre("outil", forme)
+            self._suivre_assistant(message)
         elif isinstance(message, sdk.UserMessage) and isinstance(message.content, list):
             resultats = [b for b in message.content if isinstance(b, sdk.ToolResultBlock)]
             for bloc in resultats:
                 self._lire_refus(bloc)
         elif isinstance(message, sdk.SystemMessage):
             self._suivre_systeme(message)
+        elif isinstance(message, sdk.RateLimitEvent):
+            self._suivre_limite(message.rate_limit_info)
         elif isinstance(message, sdk.ResultMessage):
             self._retenir_session(message.session_id)
             self._refus_du_tour(message.permission_denials)
+            statut_http = getattr(message, "api_error_status", None)
+            self._limite_refusee |= message.is_error and statut_http == STATUT_HTTP_LIMITE
             return message
         return None
+
+    def _suivre_assistant(self, message) -> None:
+        """Annonce les outils appelés ; une réponse en erreur « rate_limit » est un refus."""
+        import claude_agent_sdk as sdk
+
+        if getattr(message, "error", None) == "rate_limit":
+            self._limite_refusee = True
+        for bloc in message.content:
+            if isinstance(bloc, sdk.ToolUseBlock):
+                forme = decrire_outil({"name": bloc.name, "input": bloc.input}, self.dossier)
+                self._appels.retenir(bloc.id, forme)
+                self._emettre("outil", forme)
+
+    def _suivre_limite(self, info) -> None:
+        """Retient et annonce une alerte ou un refus de limite ; rien ne s'arrête ici.
+
+        Quand le dépassement payant a pris le relais, le `rejected` n'est pas un refus : rien
+        n'est annoncé, et un refus vu plus tôt dans le tour ne compte plus.
+        """
+        if depassement_en_service(info):
+            self._limite_refusee = False
+            return
+        limite = lire_limite(info)
+        if limite is None:
+            return
+        self._limite = limite
+        self._limite_refusee = self._limite_refusee or limite["statut"] == "atteinte"
+        texte = decrire_limite(limite["statut"], limite["limite"], limite["fin"],
+                               limite["utilisation"])  # fmt: skip
+        self._emettre("limite", texte, **limite)
 
     def _suivre_systeme(self, message) -> None:
         """Le départ (`init`) donne la source, la session et le mode ; `status`, un nouveau mode."""
         donnees = message.data if isinstance(message.data, dict) else {}
         if message.subtype == "init":
             self.source_connexion = lire_source(donnees.get("apiKeySource"))
+            self._verifier_reprise(donnees.get("session_id"))
             self._retenir_session(donnees.get("session_id"))
         mode = donnees.get("permissionMode")
         if message.subtype in ("init", "status") and isinstance(mode, str) and mode:
@@ -540,6 +654,14 @@ class SessionSDK:
             return
         self._refus.retenir(identifiant)
         self._emettre("refus", f"{forme or 'Un outil'} ({raison})", outil=forme, raison=raison)
+
+    def _verifier_reprise(self, identifiant) -> None:
+        """Avec une reprise exigée, la session annoncée au départ doit être celle demandée."""
+        if not self._a_reprendre or not identifiant or self._session_vue:
+            return
+        if identifiant != self._a_reprendre:
+            raise _RepriseRefusee(f"Claude Code est parti dans la session {identifiant}.")
+        self._session_vue = True
 
     def _retenir_session(self, identifiant) -> None:
         """Garde l'identifiant de session : après une coupure, on reprendra cette session."""
