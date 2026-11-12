@@ -28,7 +28,14 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | V2. Vitesse : les niveaux de vérification et le dosage de départ | vérifié | Opus | bornée, Opus : recalé puis corrigé | 2 | 844 tests ; le test du plafond de la relance seule éprouve de nouveau sa garde |
 | V5. Vitesse : le pont lit les limites de l'abonnement et sait reprendre une session | vérifié | Opus | complète, Fable : recalé puis seconde vérification bornée acceptée | 2 | 68 scénarios identiques à l'ancien pont ; la règle du dépassement payant reproduit celle de Claude Code ; 37 casses vues |
 | V3a. Moteur : reprise à chaud après un refus | vérifié | Opus | complète, Fable : recalé sur un test, seconde passe mécanique | 2 | 1 250 tests ; 26 scénarios conformes, 29 identiques à l'ancien moteur |
-| V3b. Moteur et serveur : refus répété, empêchement, diagnostic | en cours | Opus | complète, Fable | 1 | |
+| V3b. Moteur et serveur : refus répété, empêchement, diagnostic | vérifié | Opus | complète, Fable : accepté (serveur : deux passes de plus) | 2 | 1 552 tests ; scénario `uv` de bout en bout : bloqué dès la première passe, un clic relance ; 199 cas sur 200 identiques à l'ancien moteur ; aucun droit sans clic |
+| P1. Pont : outils refusés, surcharge, commandes permises | vérifié | Opus | bornée, Opus : recalé puis seconde passe | 2 | comparé au vrai Claude Code avec un faux serveur d'API ; 106 commandes |
+| P2. Pont : signes de vie, délai hors attente d'autorisation | en cours | Opus | complète, Fable | 1 | |
+| V3d. Moteur : montées par tâche, plafond, « Je m'arrête ici » | en cours | Opus | complète, Fable | 1 | |
+| V3b.1. Pas de blocage sur un seul outil refusé sans rapport ; relance par une méthode nommée | à lancer, après V3d | Opus | bornée, Opus | | |
+| V3c. Moteur : l'agent qui n'avance plus | à lancer, après V3d et P2 | Opus | complète, Fable | | |
+| V3e. Moteur : vérification proportionnée | à lancer, après V3c ; attend la décision « qui vérifie une tâche délicate » | Opus | complète, Fable | | |
+| V3f. Moteur : six places et régulateur | à lancer, après V3e | Opus | complète, Fable | | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | vérifié | Opus | bornée, Opus, par casses : accepté | 1 | 786 tests (14 nouveaux) ; les 12 casses de la consigne et 6 des 7 casses du vérificateur font échouer un test nouveau |
 | M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
 | M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | vérifié | Opus | bornée, Fable : recalé puis seconde passe mécanique | 2 | essai nouveau PANNES-reseau 34 sur 34 (9 ECHEC sur la première passe) ; les sept autres essais à leurs comptes, CODE-carte excepté (instable, diagnostiqué) |
