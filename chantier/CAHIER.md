@@ -7,6 +7,7 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 | F1. Fichiers partagés et leur fusion | reprise à chaud (3 points bloquants du vérificateur) | Opus | complète, Opus : refusé une fois | 1 + 1 reprise | |
 | F2. V3f : six places, vérificateur hors place, réveil, régulateur | en cours | Opus | complète, Opus | 1 | |
 | F3.1. Un outil refusé ne bloque que si un contrôle du projet en a besoin ; même règle pour le vérificateur | en cours (même ouvrier, à chaud) | Opus | bornée, Opus | 1 | |
+| F5. Un plan trop étroit est élargi avant d'être proposé (la forme du plan, écrite en V1, n'était branchée nulle part) | en cours | Opus | bornée, Opus | 1 | |
 | F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | prête, entre derrière F1 | Sonnet | mécanique : 3 tests qui échouaient avant | 1 | 4 tests ; suite F1+F3+F4 réunies : 1 712 verts, ruff propre |
 | F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | vérifié | Opus | bornée, Opus : accepté | 1 + 1 reprise | 19 tests nouveaux, 16 mutations sur 18 attrapées (les 2 autres sans effet réel) ; suite 1 691, 8 essais verts |
 
