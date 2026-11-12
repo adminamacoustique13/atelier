@@ -1,6 +1,6 @@
 # Cahier des charges — chantier « débit » (2026-11-12)
 
-Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dans sa copie de travail ; elles touchent `atelier/moteur.py` dans des fonctions distinctes et sont réunies à l'intégration.
+État : terminé le 2026-11-12, quatre tâches vérifiées et enregistrées (F1, F2, F3 avec F3.1, F4) ; F5 reportée. Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dans sa copie de travail ; elles touchent `atelier/moteur.py` dans des fonctions distinctes et sont réunies à l'intégration.
 
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
@@ -56,3 +56,8 @@ Ajoutée en route : défaut antérieur relevé par F1. `fnmatch` lit `[slug]` co
 - F2, refusé (premier passage) : aucun défaut de concurrence trouvé, mais une reprise à chaud sans `_malgre_les_limites` ou sans place passerait les tests ; une tâche déjà en vol qui attend une place passe après toutes les tâches neuves (une tâche refusée et ce qui dépend d'elle attendent la fin du plan). Reprise avec ces points, la pause de surcharge et la phase « jeton » testées, `_de_suite` et `rendre` retirés de `places.py` avec leurs tests (exception arbitrée : ces tests ne servent qu'à du code retiré), `archives.GROUPES`, `Atelier.en_marche()` et le retour en arrière de `_partir`.
 - F2, seconde passe : aucun défaut dans le code, un seul test manquant (la règle de priorité laisse partir les neuves quand la tâche qui attend est sur un modèle suspendu). Le vérificateur a écrit ce test et dit ne pas avoir besoin de revoir ; je l'ai ajouté tel quel à la réunion et vérifié qu'il échoue quand on retire la condition. Peut attendre : `_signaler()` dans le `finally` d'`executer` après une panne ; le `_reveiller` en double dans `_prendre_place` ; une ligne de fil par surcharge prolongée ; l'état non sauvé tout de suite quand un fil ne démarre pas ; `fil.is_alive()` dans `fil_attendu` par prudence ; le travail d'un ouvrier coupé par une limite est perdu (le pont ne rend pas sa session) ; l'alerte de limite (V3c) ; `point_d_etape`.
 - F1, troisième passage accepté. Peut attendre : LISEZMOI dit « sans jamais de conflit » pour l'union, alors qu'un fichier union modifié d'un côté et supprimé de l'autre bute quand même (il suit alors le chemin d'avant) ; `_a_marqueurs` hors verrou (clés par tâche, sans effet) ; la docstring de `consigne_reprise` ne cite pas l'origine « integration ».
+
+## Clôture
+- Suite complète sur la branche : 1 763 tests ; ruff propre ; les 8 essais de la page verts aux mêmes comptes (sur la réunion finale).
+- Un test instable : un échec unique sur une vingtaine de passages complets, sans nom relevé au moment de l'échec (probablement l'un des deux tests git de `test_moteur.py` vus instables par le vérificateur de F3.1). À identifier et rendre déterministe.
+- Restes pour un prochain chantier : F5 (élargir un plan trop étroit, travail commencé gardé hors dépôt) ; un contrôle en `cd … &&` (monorepo) jamais jugé permis ; l'affichage des places et des fichiers partagés dans la page ; le travail d'un ouvrier coupé par une limite est perdu ; l'alerte de limite (V3c) ; `decider` et `repondre` acceptent une seconde réponse ; les « peut attendre » des vérificateurs ci-dessus ; les tâches reportées du chantier « ménage » (V3c, V3d, V3e, P2, découpages).

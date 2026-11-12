@@ -34,3 +34,18 @@ Une ligne par type de tâche : le modèle et l'effort choisis, et ce qui s'est p
 ## Le temps
 
 Environ sept heures et demie de travail d'agents sur les douze premières tâches : deux heures et demie pour écrire, quatre heures pour vérifier, une heure vingt pour corriger après un verdict.
+
+## Chantier « débit » (2026-11-12)
+
+| Tâche | Type | Ouvrier | Vérificateur | Premier coup ? |
+|---|---|---|---|---|
+| F1. Fichiers partagés et fusion | délicate (git, moteur) | Opus | Opus, complète | Non : refusée deux fois (cas non couverts par la consigne, puis une condition fausse), acceptée au troisième passage |
+| F2. Places et régulateur | délicate (concurrence) | Opus | Opus, complète | Non : code juste, mais tests manquants et une priorité inversée ; puis un test écrit par le vérificateur |
+| F3. Outil refusé sans rapport | courante | Opus | Opus, bornée | Oui, après une retouche demandée par l'ouvrier lui-même |
+| F3.1. Règle affinée | courante | Opus (reprise du même ouvrier) | Opus, bornée (reprise du même vérificateur) | Oui |
+| F4. Chemins à crochets | mécanique | Sonnet | aucune : tests qui échouaient avant | Oui, refaite une fois sur une base qui avait bougé |
+
+- **Reprendre à chaud les mêmes agents** (ouvrier et vérificateur) a rendu chaque passage suivant court : cinq à quinze minutes, contre vingt à cinquante pour un premier passage.
+- **Les deux refus de tâches délicates venaient d'abord de la consigne** : des cas que les critères ne prouvaient pas (conflit sur un fichier non déclaré, reprise sans place). Pour une tâche de concurrence ou de fusion, demander dès la consigne un test par chemin qui touche une exigence prioritaire.
+- **Réunir à l'essai avant les verdicts** a fait gagner l'intégration : conflits de texte réglés pendant que les vérificateurs travaillaient, entrée immédiate après l'acceptation.
+- Huit agents lancés (dont une tâche arrêtée en route sur décision de la personne responsable), sept reprises à chaud.
