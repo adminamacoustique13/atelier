@@ -98,7 +98,7 @@ Cette voie est la moins sûre : les commandes que l'Atelier permet d'avance aux 
 - **Ce qui est facturé.** Le fil commence par dire s'il voit une variable `ANTHROPIC_API_KEY`. Après ton premier message à l'orchestrateur, il doit ajouter : « Le SDK de Claude annonce qu'aucune clé API n'est utilisée : le travail est compté sur ton abonnement Claude. » S'il parle d'une clé API, arrête-toi : une clé serait facturée à la place de ton abonnement.
 - **Les cartes d'autorisation.** Quand un agent veut lancer une commande qui n'est pas permise d'avance, une carte orange te le demande. « Toujours pour ce projet » retient une règle large : la carte te montre laquelle avant ton clic.
 
-Le fichier `LISEZMOI.md` explique le reste : le contrat, les quatre onglets (dont la carte du code), les autorisations, le mode des ouvriers.
+Le fichier `LISEZMOI.md` explique le reste : le contrat, l'accueil, les onglets d'un projet (dont la carte du code), les autorisations, le mode des ouvriers.
 
 ## Ce qui n'existe pas sur PC
 

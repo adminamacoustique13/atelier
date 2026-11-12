@@ -18,7 +18,7 @@ from pathlib import Path
 
 from atelier import archives, dosage
 from atelier.agents import MODE_PAR_DEFAUT, MODES_OUVRIERS, AgentSimule, lire_mode, mode_valide
-from atelier.carte import ExplicateurAuto, ExplicateurClaude, SuiviCarte
+from atelier.carte import ExplicateurAuto, ExplicateurClaude, SuiviCarte, provisoire
 from atelier.consignes import (
     BALISE_OUTILS,
     BALISE_PLAN,
@@ -435,7 +435,7 @@ class Atelier:
         )
         if self.carte.carte is not None and mode != "démonstration":
             self.carte.demarrer_veille()
-        self._en_cours_cache: tuple[float, dict] = (0.0, {})
+        self._en_cours_cache: tuple[float, dict, dict] = (0.0, {}, {})
         if not chantier.taches and not chantier.evenements:
             chantier.noter(ACCUEIL, auteur="orchestrateur")
         if isinstance(profil, dict) and "mode_ouvriers" in profil and not mode_valide(lu):
@@ -555,7 +555,7 @@ class Atelier:
         donnees["agents"] = self.activite.agents()
         donnees["mode_ouvriers"] = self._vue_mode()
         donnees["archives"] = list(self.archives)
-        donnees["carte"] = self.carte.resume(self.en_cours())
+        donnees["carte"] = self.carte.resume(self.en_cours(), self.provisoire())
         donnees["nom_propose"] = archives.nom_propose(self.moteur.chantier)
         controles = self.moteur.controles
         if hasattr(controles, "distant"):
@@ -854,9 +854,16 @@ class Atelier:
         démonstration, rien n'est modifié pour de vrai : chaque tâche en cours fait clignoter
         deux fichiers de la carte, toujours les mêmes.
         """
+        return self._travail_en_cours()[0]
+
+    def provisoire(self) -> dict:
+        """Les fichiers et les liens nouveaux que les agents écrivent, pas encore vérifiés."""
+        return self._travail_en_cours()[1]
+
+    def _travail_en_cours(self) -> tuple[dict[str, list[str]], dict]:
         maintenant = time.monotonic()
         if maintenant - self._en_cours_cache[0] < EN_COURS_TTL_S:
-            return self._en_cours_cache[1]
+            return self._en_cours_cache[1], self._en_cours_cache[2]
         with self.moteur.verrou:
             actives = [
                 t for t in self.moteur.chantier.taches if t.etat in ("en_cours", "en_verification")
@@ -865,11 +872,31 @@ class Atelier:
         for agent in self.activite.agents():
             noms.setdefault(agent.get("tache", ""), []).append(agent["nom"])
         resultat: dict[str, list[str]] = {}
+        brouillons = []
         for tache in actives:
-            for chemin in self._fichiers_en_cours(tache):
-                resultat.setdefault(chemin, []).extend(noms.get(tache.id) or [f"tâche {tache.id}"])
-        self._en_cours_cache = (maintenant, resultat)
-        return resultat
+            agents = noms.get(tache.id) or [f"tâche {tache.id}"]
+            fichiers = self._fichiers_en_cours(tache)
+            for chemin in fichiers:
+                resultat.setdefault(chemin, []).extend(agents)
+            brouillons.append(self._brouillon(tache, agents, fichiers))
+        with self.carte.verrou:
+            carte = self.carte.carte
+        prov = provisoire(carte, [b for b in brouillons if b])
+        self._en_cours_cache = (maintenant, resultat, prov)
+        return resultat, prov
+
+    def _brouillon(self, tache, agents: list[str], fichiers: list[str]) -> dict | None:
+        controles = self.moteur.controles
+        if hasattr(controles, "_arbre"):
+            return {"agents": agents, "fichiers": fichiers, "dossier": controles._arbre(tache)}
+        if self.mode != "démonstration" or not fichiers:
+            return None
+        # Démonstration : chaque tâche écrit un nouveau fichier, relié aux deux qu'elle modifie.
+        nom = f"atelier/brouillon_{tache.id.lower()}.py"
+        resume = f"Nouveau fichier de la tâche {tache.id} : {tache.titre}."
+        fantome = {"chemin": nom, "genre": "code", "lignes": 60, "resume": resume}
+        liens = [[nom, fichiers[0]], [fichiers[-1], nom]]
+        return {"agents": agents, "dossier": None, "fantomes": [fantome], "liens": liens}
 
     def _fichiers_en_cours(self, tache) -> list[str]:
         controles = self.moteur.controles
@@ -1205,10 +1232,14 @@ ROUTES = {
     "/api/contrat/valider": lambda r, c: r.atelier.valider_contrat(),
     "/api/decision": lambda r, c: r.atelier.decider(c["id"], c["choix"]),
     "/api/message": lambda r, c: r.atelier.message(c["texte"]),
-    "/api/projets/creer": lambda r, c: r.projets.creer(c["nom"]),
-    "/api/projets/cloner": lambda r, c: r.projets.cloner(c["adresse"]),
+    "/api/projets/creer": lambda r, c: {"projet_cree": r.projets.creer(c["nom"])},
+    "/api/projets/cloner": lambda r, c: {"projet_cree": r.projets.cloner(c["adresse"])},
     "/api/projet/relier": lambda r, c: r.atelier.relier(c["adresse"]),
     "/api/projets/ouvrir": lambda r, c: r.projets.ouvrir(c["id"]),
+    "/api/accueil": lambda r, c: {"accueil": r.projets.accueil()},
+    "/api/projets/nouvelle-session": lambda r, c: {
+        "nouveau_chantier": r.projets.nouvelle_session(c["id"], c.get("nom", ""))
+    },
     "/api/autorisation": lambda r, c: {
         "autorisation": r.atelier.autoriser(c["id"], c["choix"], c.get("message", ""))
     },

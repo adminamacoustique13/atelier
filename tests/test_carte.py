@@ -315,3 +315,21 @@ def test_l_explicateur_claude_passe_par_le_pont_sans_aucun_outil(tmp_path, monke
     assert vus["modele"] == "sonnet" and vus["effort"] == "low"
     assert vus["outils_permis"] == [] and vus["mode_permission"] == "dontAsk"
     assert "Bash" in vus["outils_interdits"] and "Write" in vus["outils_interdits"]
+
+
+def test_provisoire_lit_la_copie_de_travail_sans_rien_ecrire(tmp_path):
+    from atelier.carte import provisoire
+
+    (tmp_path / "web").mkdir()
+    (tmp_path / "web" / "index.html").write_text('<script src="neuf.js"></script>', "utf-8")
+    (tmp_path / "web" / "neuf.js").write_text("// Dessine le plan.\nexport const a = 1;\n", "utf-8")
+    carte = {"fichiers": {"web/index.html": {"genre": "page"}}, "liens": []}
+    brouillon = {"agents": ["B-ouvrier-1"], "dossier": tmp_path,
+                 "fichiers": ["web/index.html", "web/neuf.js", "parti.py"]}  # fmt: skip
+    prov = provisoire(carte, [brouillon])
+    assert [f["chemin"] for f in prov["fichiers"]] == ["web/neuf.js"]
+    assert prov["fichiers"][0]["agents"] == ["B-ouvrier-1"]
+    assert prov["liens"] == [["web/index.html", "web/neuf.js"]]
+    assert provisoire(None, [brouillon]) == {"fichiers": [], "liens": []}
+    assert provisoire(carte, []) == {"fichiers": [], "liens": []}
+    assert sorted(p.name for p in tmp_path.iterdir()) == ["web"]

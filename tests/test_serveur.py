@@ -2010,12 +2010,18 @@ def test_en_demonstration_la_carte_est_celle_de_l_atelier_et_ses_taches_font_cli
             "a.py": {"genre": "code"},
             "b.py": {"genre": "code"},
             "c.md": {"genre": "documentation"},
-        }
+        },
+        "liens": [],
     }
     atelier.moteur.chantier.taches = [tache("A", etat="en_cours"), tache("B", etat="a_lancer")]
     en_cours = atelier.en_cours()
     assert set(en_cours) <= {"a.py", "b.py"} and en_cours
     assert all(agents == ["tâche A"] for agents in en_cours.values())
+    # La tâche en cours écrit aussi un nouveau fichier, relié à ceux qu'elle modifie.
+    prov = atelier.provisoire()
+    assert [f["chemin"] for f in prov["fichiers"]] == ["atelier/brouillon_a.py"]
+    assert prov["fichiers"][0]["agents"] == ["tâche A"]
+    assert all("atelier/brouillon_a.py" in lien for lien in prov["liens"]) and prov["liens"]
 
 
 def test_les_fichiers_en_cours_viennent_de_la_copie_de_travail_de_chaque_tache(tmp_path):
@@ -2036,3 +2042,54 @@ def test_les_fichiers_en_cours_viennent_de_la_copie_de_travail_de_chaque_tache(t
     ]
     atelier.activite.ajouter({"agent": "A-ouvrier-1", "type": "outil", "contenu": "Modifie app.py"})
     assert atelier.en_cours() == {"app.py": ["A-ouvrier-1", "tâche B"], "neuf.py": ["A-ouvrier-1"]}
+
+
+def test_le_travail_en_cours_ajoute_a_la_carte_ses_fichiers_et_liens_provisoires(tmp_path):
+    class Controles(ControlesSimules):
+        def _arbre(self, t):
+            return tmp_path / "arbres" / t.id
+
+        def fichiers_modifies(self, t, dossier, resultat):
+            return ["app.py", "neuf.py"]
+
+    arbre = tmp_path / "arbres" / "A"
+    arbre.mkdir(parents=True)
+    (arbre / "app.py").write_text("import neuf\nimport outils\n", "utf-8")
+    (arbre / "neuf.py").write_text('"""Calcule les formules."""\n', "utf-8")
+    atelier = atelier_simule(tmp_path, controles=Controles())
+    atelier.carte.carte = {
+        "fichiers": {"app.py": {"genre": "code"}, "outils.py": {"genre": "code"}},
+        "liens": [["app.py", "outils.py"]],
+    }
+    atelier.moteur.chantier.taches = [tache("A", etat="en_cours")]
+    prov = atelier.provisoire()
+    assert prov["fichiers"] == [
+        {"chemin": "neuf.py", "genre": "code", "lignes": 1,
+         "resume": "Calcule les formules.", "agents": ["tâche A"]}
+    ]  # fmt: skip
+    assert prov["liens"] == [["app.py", "neuf.py"]]  # le lien déjà connu n'est pas répété
+
+
+def test_creer_un_projet_et_lire_l_accueil_par_le_tableau(tmp_path):
+    from atelier.modele import Chantier as C
+
+    depot = tmp_path / "premier"
+    depot.mkdir()
+    tableau = Tableau(atelier_simule(depot), tmp_path)
+    try:
+
+        def creer(dossier, nom):
+            dossier.mkdir()
+            vide = C(projet=nom, contrat=Contrat(objectif=""))
+            return Atelier(dossier, vide, AgentSimule(), ControlesSimules(), {})
+
+        tableau.serveur.RequestHandlerClass.projets._creer = creer
+        code, vue = tableau.appeler("/api/projets/creer", {"nom": "Deuxième"})
+        assert code == 200 and vue["projet_cree"] == "deuxieme" and vue["projet"] == "Deuxième"
+        code, vue = tableau.appeler("/api/accueil")
+        assert code == 200 and {p["id"] for p in vue["accueil"]} == {"premier", "deuxieme"}
+        code, vue = tableau.appeler("/api/projets/nouvelle-session", {"id": "premier"})
+        assert code == 200 and vue["nouveau_chantier"]["fait"] is False  # rien à archiver
+        assert vue["projet"] == "essai"  # le projet est ouvert quand même
+    finally:
+        tableau.fermer()

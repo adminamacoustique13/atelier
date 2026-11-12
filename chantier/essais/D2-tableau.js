@@ -63,7 +63,7 @@ async function ouvrir(browser, serveur, options = {}) {
   page.on("pageerror", (e) => erreurs.push(String(e)));
   page.on("console", (m) => { if (m.type() === "error" && !/Failed to load resource/.test(m.text())) erreurs.push(m.text()); });
   page.on("request", (r) => { if (r.method() === "POST") requetes.push({ url: new URL(r.url()).pathname, corps: r.postData() ? JSON.parse(r.postData()) : null }); });
-  await page.goto(serveur.url);
+  await page.goto(serveur.url + "#conversation");
   return { page, contexte, erreurs, requetes };
 }
 
@@ -319,7 +319,7 @@ async function main() {
     const erreurs = [];
     page.on("pageerror", (e) => erreurs.push(String(e)));
     await page.route("**/api/etat", (route) => route.fulfill({ json: faux }));
-    await page.goto(s1.url);
+    await page.goto(s1.url + "#conversation");
     await page.waitForSelector("#colonne .autorisation");
     const cartes = page.locator("#colonne .autorisation");
     verifier("deux cartes s'affichent", (await cartes.count()) === 2);
@@ -352,7 +352,7 @@ async function main() {
     const etroit = await browser.newContext({ viewport: { width: 390, height: 800 }, deviceScaleFactor: 2 });
     const p2 = await etroit.newPage();
     await p2.route("**/api/etat", (route) => route.fulfill({ json: faux }));
-    await p2.goto(s1.url);
+    await p2.goto(s1.url + "#conversation");
     await p2.waitForSelector("#colonne .autorisation");
     await p2.locator("#colonne .autor-corps").first().click();
     const debord = await p2.evaluate(() => [...document.querySelectorAll(".carte-fil, .autorisation")].map((e) => e.scrollWidth - e.clientWidth).filter((d) => d > 1));
@@ -368,7 +368,7 @@ async function main() {
       const ctx = await browser.newContext({ viewport: { width: largeur, height: 900 }, deviceScaleFactor: 2 });
       const p = await ctx.newPage();
       await p.route("**/api/etat", (route) => route.fulfill({ json: longue }));
-      await p.goto(s1.url);
+      await p.goto(s1.url + "#conversation");
       await aller(p, "chantier");
       await p.waitForSelector("#anneau svg.anneau");
       const m = await p.evaluate(() => {
@@ -396,7 +396,7 @@ async function main() {
       page.on("pageerror", (e) => erreurs.push(String(e)));
       page.on("request", (r) => { if (r.method() === "POST") requetes.push(new URL(r.url()).pathname); });
       await page.route("**/api/etat", (route) => route.fulfill({ json: courante() }));
-      await page.goto(s1.url);
+      await page.goto(s1.url + "#conversation");
       return { page, contexte, erreurs, requetes };
     };
     const copie = () => JSON.parse(JSON.stringify(base));

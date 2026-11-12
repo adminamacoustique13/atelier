@@ -475,3 +475,43 @@ def test_l_orchestrateur_propose_des_outils_et_un_clic_les_fait_valoir(tmp_path)
     assert "Outils du projet" in historique
     atelier.decider(demande["id"], ACCEPTER_OUTILS)  # un second clic ne refait rien
     assert historique.count("Outils du projet") == 1
+
+
+def test_l_accueil_resume_chaque_projet_sans_le_demarrer(tmp_path):
+    import subprocess
+
+    from atelier.modele import Tache
+    from atelier.projets import Projets, creer_depot, depot_en_ligne, ouvrir_depot
+
+    projets = Projets(tmp_path, creer_depot, ouvrir_depot)
+    projets.creer("Ancien")
+    projets.creer("Récent")
+    subprocess.run(["git", "remote", "add", "origin", "https://moi:jeton@github.com/moi/recent.git"],
+                   cwd=tmp_path / "recent", check=True)  # fmt: skip
+    atelier = projets.atelier()
+    atelier.moteur.chantier.noter("Un calcul de charpente", auteur="toi")
+    atelier.moteur.chantier.taches = [Tache("A", "Un"), Tache("B", "Deux")]
+    atelier.moteur.chantier.taches[0].etat = "verifie"
+    atelier.moteur.chantier.contrat.valide = True
+    atelier._sauver()
+
+    # Un autre atelier, au redémarrage : il découvre les projets sans en ouvrir aucun.
+    autres = Projets(tmp_path, creer_depot, ouvrir_depot)
+    autres.decouvrir()
+    fiches = {f["id"]: f for f in autres.accueil()}
+    assert set(fiches) == {"ancien", "recent"} and not autres.ateliers
+    recent = fiches["recent"]
+    assert recent["nom"] == "Récent" and recent["ouvert"] is False
+    assert recent["chantier"]["nom"] == "Un calcul de charpente"
+    assert recent["chantier"]["phrase"] == "1 tâche livrée sur 2."
+    assert recent["chantier"]["taches"] == ["verifie", "a_lancer"]
+    assert recent["en_ligne"] == "github.com/moi/recent"  # sans le jeton
+    assert fiches["ancien"]["chantier"]["etat"] == "vide"
+    assert depot_en_ligne(tmp_path / "ancien") == ""
+
+    # Nouvelle session : l'ancien chantier est archivé, le projet repart d'un chantier vide.
+    resultat = autres.nouvelle_session("recent", "Charpente, premier jet")
+    assert resultat["fait"] and autres.courant == "recent"
+    fiche = next(f for f in autres.accueil() if f["id"] == "recent")
+    assert fiche["archives"] == 1 and fiche["chantier"]["etat"] == "vide" and fiche["courant"]
+    assert autres.nouvelle_session("recent")["fait"] is False  # un chantier vide n'est pas archivé

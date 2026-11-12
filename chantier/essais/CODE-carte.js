@@ -137,15 +137,29 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     const blocEnCours = page.locator('#plan .bloc.fichier.en-cours').first();
     await blocEnCours.waitFor();
     ok('et dedans, le fichier lui-même', (await blocEnCours.textContent()).includes('En cours'));
-    const enCours = await blocEnCours.getAttribute('data-chemin');
-    await blocEnCours.click();
-    ok('la fiche dit quel agent le modifie', /En cours de modification par /.test(await fiche.textContent()));
+    // Ce que l'agent écrit, pas encore vérifié : un fichier fantôme et des flèches en pointillés.
+    const fantome = page.locator('#plan .bloc.fantome').first();
+    await fantome.waitFor({ timeout: 10000 });
+    ok('le fichier que l\'agent écrit apparaît en brouillon dans le plan', (await fantome.textContent()).includes('Brouillon'));
+    ok('ses liens sont tracés en pointillés', (await page.locator('#plan path.fleche.provisoire').count()) > 0);
+    await fantome.click();
+    ok('sa fiche dit qu\'il n\'est pas encore vérifié', (await fiche.textContent()).includes('n\'existe encore que dans la copie de travail'));
+    await page.locator('#vue-code').screenshot({ path: path.join(CAPTURES, 'CODE-brouillon.png') });
+    // Les tâches de démonstration avancent vite : on prend un fichier encore en cours au moment du clic.
+    let dit = false;
+    for (let i = 0; i < 20 && !dit; i++) {
+      const bloc = page.locator('#plan .bloc.fichier.en-cours:not(.fantome)').first();
+      if (await bloc.count()) { await bloc.click(); dit = /En cours de modification par /.test(await fiche.textContent()); }
+      if (!dit) await pause(150);
+    }
+    ok('la fiche dit quel agent le modifie', dit);
     await page.locator('#vue-code').screenshot({ path: path.join(CAPTURES, 'CODE-en-cours.png') });
     await page.click('button[data-action="code-vue"][data-vue="explorateur"]');
-    const ligne = page.locator(`#explorateur .ligne-arbre.fichier[data-chemin="${enCours}"]`);
-    await ligne.waitFor();
-    ok('la ligne du fichier clignote dans l\'explorateur', (await ligne.getAttribute('class')).includes('en-cours'));
+    const ligne = page.locator('#explorateur .ligne-arbre.fichier.en-cours:not(.fantome)').first();
+    await ligne.waitFor({ timeout: 10000 });
+    ok('la ligne du fichier clignote dans l\'explorateur', true);
     ok('elle porte le badge « En cours »', (await ligne.textContent()).includes('En cours'));
+    ok('le brouillon est aussi dans l\'explorateur', (await page.locator('#explorateur .ligne-arbre.fichier.fantome').count()) > 0);
 
     // Un texte hostile reste du texte (carte fabriquée).
     const hostile = '<img src=x onerror="window.pirate=1">';

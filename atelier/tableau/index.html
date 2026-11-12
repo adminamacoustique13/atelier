@@ -28,7 +28,7 @@
   --verre-fort: rgba(255, 255, 255, 0.17); --creux: rgba(0, 0, 0, 0.14);
   --bord: rgba(255, 255, 255, 0.12); --reflet: rgba(255, 255, 255, 0.2); --trait: rgba(255, 255, 255, 0.12);
   --texte: #ffffff; --discret: rgba(255, 255, 255, 0.8); --faible: rgba(255, 255, 255, 0.66);
-  --reussite: #72ebdc; --refus: #ffa76e; --change: #ffd76e; --plein: #ffffff; --sur-plein: #2a2a2e;
+  --reussite: #72ebdc; --refus: #ffa76e; --change: #ffd76e; --fragile: #ff9db0; --plein: #ffffff; --sur-plein: #2a2a2e;
   --ombre: 0 14px 34px -22px rgba(0, 0, 0, 0.5);
   --rayon: 22px; --mono: ui-monospace, "SF Mono", Menlo, monospace;
 }
@@ -426,7 +426,7 @@ button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinit
 .ariane button:last-child { color: var(--texte); font-weight: 600; }
 .ariane button:hover { background: var(--creux); }
 .plan-aide { line-height: 1.45; }
-.plan-aide .souci { color: var(--refus); }
+.plan-aide .souci { color: var(--fragile); }
 .plan-toile, .voisins-toile { flex: 1 1 0; min-height: 0; position: relative; overflow: auto; border-radius: 14px; background: var(--creux); }
 .plan-toile { display: flex; flex-direction: column; gap: 44px; padding: 40px 18px 24px; }
 .etage { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 22px; }
@@ -435,16 +435,22 @@ button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinit
 svg.fleches { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
 svg.fleches marker path { fill: rgba(255, 255, 255, 0.55); }
 .fleche { fill: none; stroke: rgba(255, 255, 255, 0.32); pointer-events: stroke; }
-.fleche.mutuel { stroke: var(--refus); stroke-dasharray: 5 4; }
+.fleche.mutuel { stroke: var(--fragile); }
+.fleche.provisoire { stroke: var(--refus); stroke-dasharray: 4 3; animation: couler 0.9s linear infinite; }
 .fleche.actif { stroke: rgba(255, 255, 255, 0.9); }
 .fleche.long { stroke: rgba(255, 255, 255, 0.13); }
 .fleche.pale { stroke: rgba(255, 255, 255, 0.07); }
+.fleche.provisoire.actif { stroke: var(--refus); }
+.fleche.provisoire.pale { stroke: color-mix(in srgb, var(--refus) 35%, transparent); }
 button.bloc, button.voisin-carte { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 190px; height: auto; min-height: 58px;
   padding: 9px 11px; border-radius: 12px; border: 1px solid var(--bord); background: rgb(68 68 74 / 0.96); color: var(--texte); font-weight: 400; text-align: left; }
 button.bloc:hover, button.voisin-carte:hover { border-color: rgba(255, 255, 255, 0.45); }
 button.bloc.dossier { background: rgb(80 80 88 / 0.97); }
 button.bloc.choisi, button.voisin-carte.centre { border-color: #ffffff; box-shadow: 0 0 0 1px #ffffff; }
 button.bloc.pale { opacity: 0.4; }
+button.bloc.fantome, button.voisin-carte.fantome { border: 1.5px dashed var(--refus); background: rgb(68 68 74 / 0.78); }
+button.bloc.fantome.en-cours, button.voisin-carte.fantome.en-cours { animation: none; }
+button.ligne-arbre.fantome .nom { font-style: italic; }
 button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus); animation: clignoter-bord 1.2s ease-in-out infinite; }
 .bloc-nom { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; font-size: 13px; }
 .bloc-nom b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -467,7 +473,7 @@ button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus);
 .fiche button.lien-fichier { height: auto; padding: 2px 0; border: 0; background: transparent; color: var(--discret); font-family: var(--mono); font-size: 11.5px; font-weight: 400; text-align: left; overflow-wrap: anywhere; }
 .fiche button.lien-fichier:hover { color: var(--texte); text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
-  button.ligne-arbre.en-cours, .badge.en-cours-badge, button.bloc.en-cours, button.voisin-carte.en-cours { animation: none; }
+  button.ligne-arbre.en-cours, .badge.en-cours-badge, button.bloc.en-cours, button.voisin-carte.en-cours, .fleche.provisoire { animation: none; }
   button.ligne-arbre.en-cours { background: color-mix(in srgb, var(--refus) 18%, transparent); }
 }
 @media (max-width: 900px) {
@@ -488,21 +494,93 @@ button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus);
   .app { margin: 6px; height: calc(100% - 12px); padding: 8px 10px 10px; border-radius: 22px; }
   .onglets { gap: 16px; margin-left: 4px; }
 }
-/* Accueil, quand aucun projet n'existe encore */
-.accueil { flex: 1 1 0; display: none; align-items: center; justify-content: center; padding: 20px; }
-.sans-projet .accueil { display: flex; }
-.sans-projet .vue { display: none !important; }
+/* Accueil : tous les projets, pour en reprendre un ou en commencer un */
+.vers-accueil { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
+.vers-accueil:hover b { text-decoration: underline; text-underline-offset: 3px; }
+.sans-projet .vue:not(#vue-accueil) { display: none !important; }
+.sans-projet #vue-accueil { display: flex; }
 .sans-projet .onglets { visibility: hidden; }
-.accueil .carte { max-width: 460px; gap: 14px; padding: 26px 28px; }
-.accueil h1 { font-size: 20px; font-weight: 500; letter-spacing: -0.01em; text-wrap: balance; }
-.accueil p { color: var(--discret); line-height: 1.55; }
+.sur-accueil #infos, .sur-accueil #distant { visibility: hidden; }
+#vue-accueil { overflow-y: auto; }
+.accueil-defile > * { flex: none; }
+.accueil-defile { flex: none; width: min(1120px, 100%); margin: 0 auto; padding: 10px 6px 28px; display: flex; flex-direction: column; gap: 26px; }
+.accueil-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: center; gap: 26px 36px;
+  padding: 34px 34px 30px; border-radius: 28px; border: 1px solid var(--bord); border-top-color: var(--reflet);
+  background: radial-gradient(60% 90% at 0% 0%, rgba(255, 255, 255, 0.16), transparent 60%), radial-gradient(50% 80% at 100% 110%, rgba(255, 214, 170, 0.18), transparent 70%), var(--verre);
+  box-shadow: var(--ombre); }
+.sur-titre { color: var(--faible); font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; }
+.hero-texte { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 10px; }
+.hero-texte h1 { font-size: clamp(30px, 4.4vw, 46px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.02; }
+.hero-sous { max-width: 420px; color: var(--discret); font-size: 15px; line-height: 1.5; }
+.hero-actions { grid-column: 1 / -1; position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+button.tuile-action { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 14px; height: auto; padding: 14px 16px; border-radius: 16px;
+  border: 1px solid var(--bord); background: rgba(255, 255, 255, 0.07); color: var(--texte); text-align: left; font-weight: 400; transition: background 0.15s, transform 0.15s, border-color 0.15s; }
+button.tuile-action:hover { background: rgba(255, 255, 255, 0.13); border-color: rgba(255, 255, 255, 0.3); transform: translateY(-1px); }
+button.tuile-action b { display: block; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
+button.tuile-action .petit { display: block; white-space: normal; line-height: 1.4; }
+.tuile-icone { width: 38px; height: 38px; border-radius: 12px; background: var(--plein); position: relative; }
+.tuile-icone::before, .tuile-icone::after { content: ""; position: absolute; background: var(--sur-plein); border-radius: 2px; }
+.plus-grand::before { left: 18px; top: 11px; width: 2px; height: 16px; } .plus-grand::after { left: 11px; top: 18px; width: 16px; height: 2px; }
+.fleche-bas { background: rgba(255, 255, 255, 0.16); border: 1px solid var(--bord); }
+.fleche-bas::before { left: 17px; top: 9px; width: 2px; height: 14px; background: var(--texte); }
+.fleche-bas::after { left: 12px; top: 18px; width: 8px; height: 8px; background: transparent; border-right: 2px solid var(--texte); border-bottom: 2px solid var(--texte); transform: rotate(45deg); border-radius: 0; }
+.hero-dessin { grid-row: 1; grid-column: 2; width: 100%; opacity: 0.55; pointer-events: none; }
+.hero-dessin path { fill: none; stroke: #ffffff; stroke-width: 1.4; }
+.hero-dessin rect { fill: none; stroke: #ffffff; stroke-width: 1.4; }
+.hero-dessin rect.vif { stroke: var(--refus); stroke-dasharray: 4 3; animation: couler 1.4s linear infinite; }
+button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
+.titre-section { display: flex; align-items: baseline; gap: 12px; padding: 0 4px; }
+.titre-section h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+.grille-projets { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
+.projet-carte { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 18px 18px 16px; border-radius: 22px; min-width: 0;
+  background: var(--verre); border: 1px solid var(--bord); border-top-color: var(--reflet); box-shadow: var(--ombre); transition: transform 0.18s, border-color 0.18s; }
+.projet-carte:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.28); }
+.projet-carte.courant { border-color: rgba(255, 255, 255, 0.42); }
+.projet-haut { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 12px; }
+.chantier-tete { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.monogramme { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 15px; font-weight: 700; letter-spacing: 0.02em; color: #2a2a2e;
+  background: linear-gradient(140deg, hsl(var(--teinte) 62% 84%), hsl(calc(var(--teinte) + 38) 46% 64%)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
+.projet-haut h3 { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projet-haut .petit { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.etat-projet { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11px; color: var(--discret); background: var(--creux); white-space: nowrap; }
+.etat-projet::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faible); }
+.etat-projet.travail::before { background: var(--reussite); animation: battre 1.4s ease-in-out infinite; }
+.etat-projet.attente { color: var(--refus); } .etat-projet.attente::before { background: var(--refus); }
+.etat-projet.fini::before { background: var(--reussite); }
+.projet-chantier { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; background: var(--creux); }
+.chantier-nom { font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.chantier-nom.vide { color: var(--faible); }
+.barre-taches { display: flex; gap: 3px; height: 6px; }
+.barre-taches i { flex: 1 1 0; min-width: 2px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); }
+.barre-taches i.verifie { background: var(--reussite); }
+.barre-taches i.en_cours, .barre-taches i.en_verification { background: #ffffff; animation: battre 1.4s ease-in-out infinite; }
+.barre-taches i.revenu { background: var(--refus); }
+.barre-taches i.abandonnee { background: rgba(255, 255, 255, 0.05); }
+.projet-meta { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--faible); font-size: 11.5px; }
+.projet-meta li { overflow-wrap: anywhere; }
+.projet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.projet-actions .principal { flex: 1 1 auto; }
+.session-neuve { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; border: 1px dashed rgba(255, 255, 255, 0.28); }
+.session-neuve p { color: var(--discret); line-height: 1.45; }
+.session-neuve .alerte:empty { display: none; }
+.projet-vide { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 42px 20px; text-align: center; border-radius: 22px; border: 1px dashed rgba(255, 255, 255, 0.25); }
+.projet-vide h3 { font-size: 16px; font-weight: 600; }
+.projet-vide p { max-width: 460px; color: var(--discret); line-height: 1.5; }
+.accueil-lieu { padding: 0 4px; color: var(--faible); }
+@media (max-width: 900px) {
+  .accueil-hero { grid-template-columns: minmax(0, 1fr); padding: 24px 20px; }
+  .hero-dessin { display: none; }
+  .grille-projets { grid-template-columns: minmax(0, 1fr); }
+}
+@media (prefers-reduced-motion: reduce) { .etat-projet.travail::before, .barre-taches i, .hero-dessin rect.vif { animation: none; } }
 </style>
 </head>
 <body>
 <div class="app">
   <header class="tete">
-    <div class="pilule marque"><i class="logo" aria-hidden="true"></i><b>Atelier</b><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus" id="nouveau">Nouveau projet</button><button type="button" class="distant" id="distant" hidden>Dépôt en ligne</button></div>
+    <div class="pilule marque"><a class="vers-accueil" href="#accueil" title="Accueil : tous tes projets"><i class="logo" aria-hidden="true"></i><b>Atelier</b></a><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus" id="nouveau">Nouveau projet</button><button type="button" class="distant" id="distant" hidden>Dépôt en ligne</button></div>
     <nav class="pilule onglets" aria-label="Onglets">
+      <a href="#accueil" data-onglet="accueil">Accueil</a>
       <a href="#conversation" data-onglet="conversation">Conversation<i class="pt" id="pt-conversation" title="Quelque chose t'attend"></i></a>
       <a href="#chantier" data-onglet="chantier">Chantier<span class="cpt" id="cpt-chantier"></span></a>
       <a href="#plan" data-onglet="plan">Plan<span class="cpt" id="cpt-plan"></span></a>
@@ -514,13 +592,36 @@ button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus);
   </header>
   <p class="maj-phrase" id="maj-phrase" role="status" hidden></p>
 
-  <section class="accueil" aria-label="Accueil">
-    <article class="carte">
-      <h1>Bienvenue dans l'Atelier</h1>
-      <p>Un projet, c'est un dossier de code avec son historique. Crée le premier : tu décriras ensuite à l'orchestrateur ce que tu veux construire, il proposera un découpage, et rien ne démarre avant ta validation.</p>
-      <p class="petit" id="lieu-accueil"></p>
-      <div class="boutons"><button class="principal" type="button" data-action="nouveau-projet">Créer un premier projet</button></div>
-    </article>
+  <section class="vue" id="vue-accueil" aria-label="Accueil">
+    <div class="accueil-defile">
+      <header class="accueil-hero">
+        <div class="hero-texte">
+          <p class="sur-titre" id="accueil-date"></p>
+          <h1 id="accueil-salut">Bonjour.</h1>
+          <p class="hero-sous">Reprends un projet là où tu l'as laissé, ou commence quelque chose de neuf.</p>
+        </div>
+        <div class="hero-actions" id="hero-actions">
+          <button type="button" class="tuile-action" data-action="accueil-creer">
+            <span class="tuile-icone plus-grand" aria-hidden="true"></span>
+            <span><b>Nouveau projet</b><span class="petit">Un dossier neuf, avec son historique git. Tu décris ce que tu veux, l'orchestrateur propose un plan.</span></span>
+          </button>
+          <button type="button" class="tuile-action" data-action="accueil-cloner" id="tuile-cloner">
+            <span class="tuile-icone fleche-bas" aria-hidden="true"></span>
+            <span><b>Récupérer un dépôt</b><span class="petit">Un projet qui existe déjà, sur GitHub ou ailleurs, récupéré avec tes accès git.</span></span>
+          </button>
+        </div>
+        <svg class="hero-dessin" viewBox="0 0 220 150" aria-hidden="true">
+          <path d="M110 22 C110 50 52 46 52 74 M110 22 C110 50 168 46 168 74 M52 90 C52 112 110 108 110 128 M168 90 C168 112 110 108 110 128"/>
+          <rect x="84" y="8" width="52" height="16" rx="5"/><rect x="26" y="74" width="52" height="16" rx="5"/>
+          <rect class="vif" x="142" y="74" width="52" height="16" rx="5"/><rect x="84" y="128" width="52" height="16" rx="5"/>
+        </svg>
+      </header>
+      <section class="accueil-projets" aria-labelledby="titre-projets">
+        <div class="titre-section"><h2 id="titre-projets">Tes projets</h2><span class="petit" id="accueil-compte"></span></div>
+        <div class="grille-projets" id="grille-projets"></div>
+      </section>
+      <p class="petit accueil-lieu" id="accueil-lieu"></p>
+    </div>
   </section>
 
   <section class="vue" id="vue-conversation" aria-label="Conversation">
@@ -1151,21 +1252,21 @@ function afficherPlan(vue) {
 }
 
 /* ---------- Ensemble ---------- */
-function afficherAccueil(vue) {
+function afficherSansProjet(vue) {
   const choix = document.getElementById("projet");
   choix.innerHTML = "<option>Aucun projet</option>";
   choix.dataset.empreinte = "";
   choix.disabled = true;
   document.getElementById("infos").hidden = true;
   document.getElementById("carte-mode").hidden = true;
-  document.getElementById("lieu-accueil").textContent = `Les projets seront rangés dans ${vue.racine}.`;
+  if (location.hash !== "#accueil") location.hash = "#accueil";
 }
 
 function afficher(vue) {
   derniere = vue;
   afficherMaj(vue);
   document.querySelector(".app").classList.toggle("sans-projet", Boolean(vue.aucun_projet));
-  if (vue.aucun_projet) return afficherAccueil(vue);
+  if (vue.aucun_projet) return afficherSansProjet(vue);
   const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
   const choix = document.getElementById("projet"), liste = vue.projets || [{ id: "", nom: vue.projet, courant: true }];
   const empreinte = liste.map((p) => `${p.id}/${p.nom}/${p.courant}`).join("|");
@@ -1202,13 +1303,16 @@ function afficher(vue) {
 }
 
 function onglet() {
-  const nom = ["conversation", "chantier", "plan", "code"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "conversation";
+  const demande = location.hash.slice(1);
+  const nom = ["accueil", "conversation", "chantier", "plan", "code"].includes(demande) ? demande : rejoue ? "conversation" : "accueil";
+  document.querySelector(".app").classList.toggle("sur-accueil", nom === "accueil");
   document.querySelectorAll(".vue").forEach((v) => v.classList.toggle("active", v.id === `vue-${nom}`));
   document.querySelectorAll(".onglets a").forEach((a) => {
     if (a.dataset.onglet === nom) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   if (nom === "conversation") { const cadre = document.getElementById("fil"); cadre.scrollTop = cadre.scrollHeight; }
   if (nom === "code" && derniere) { afficherCode(derniere); chargerCarte(true); }
+  if (nom === "accueil") chargerAccueil();
 }
 window.addEventListener("hashchange", onglet);
 
@@ -1482,7 +1586,7 @@ document.getElementById("fermer-archive").addEventListener("click", () => docume
 let carteComplete = null, carteVersion = -1, carteChargement = false, vueCode = "explorateur", fichierChoisi = "";
 let estimationCarte = null, codePhrase = "";
 const dossiersOuverts = new Set(), fichiersOuverts = new Set();
-const VUES_CODE = ["explorateur", "plan", "voisinage"];
+const VUES_CODE = ["explorateur", "plan", "voisinage"], SEP = "\u0000";
 const GENRES_FR = { code: "Code", tests: "Tests", page: "Interface", "réglages": "Réglages", documentation: "Documentation", autre: "Autre" };
 const genreClasse = (g) => "g-" + (g === "réglages" ? "reglages" : g);
 const carteDe = (vue) => (vue && vue.carte) || { etat: "absente", en_cours: [] };
@@ -1491,8 +1595,26 @@ const pluriel = (n, mot) => `${n} ${mot}${n > 1 ? "s" : ""}`;
 function enCoursDe(vue) {
   const carte = new Map();
   for (const e of carteDe(vue).en_cours || []) carte.set(e.chemin, e.agents || []);
+  for (const f of provisoireDe(vue).fichiers) if (!carte.has(f.chemin)) carte.set(f.chemin, f.agents || []);
   return carte;
 }
+/* Ce que les agents écrivent en ce moment, pas encore vérifié : des fichiers fantômes et des liens en pointillés,
+   ajoutés à la carte sans la modifier. Ils disparaissent si la tâche est refusée, deviennent réels si elle est fusionnée. */
+const provisoireDe = (vue) => carteDe(vue).provisoire || { fichiers: [], liens: [] };
+let fusion = { carte: null, cle: "", fichiers: [], liens: [], provisoires: new Set() };
+function carteFusionnee() {
+  const prov = provisoireDe(derniere), cle = JSON.stringify(prov);
+  if (fusion.carte === carteComplete && fusion.cle === cle) return fusion;
+  const connus = new Set(carteComplete.fichiers.map((f) => f.chemin));
+  const fantomes = prov.fichiers.filter((f) => !connus.has(f.chemin)).map((f) => ({ chemin: f.chemin, genre: f.genre || "autre",
+    lignes: f.lignes || 0, statut: "", resume: f.resume || "", detail: "", explique: false, attente: false, pieces: [], fantome: true }));
+  const tous = new Set([...connus, ...fantomes.map((f) => f.chemin)]);
+  const nouveaux = prov.liens.filter(([a, b]) => tous.has(a) && tous.has(b));
+  fusion = { carte: carteComplete, cle, fichiers: carteComplete.fichiers.concat(fantomes), liens: carteComplete.liens.concat(nouveaux),
+    provisoires: new Set(nouveaux.map(([a, b]) => a + SEP + b)) };
+  return fusion;
+}
+const fichierDe = (chemin) => carteFusionnee().fichiers.find((x) => x.chemin === chemin);
 
 async function chargerCarte(force) {
   const resume = carteDe(derniere);
@@ -1562,7 +1684,7 @@ function afficherCode(vue) {
   const pret = Boolean(carteComplete) && resume.etat === "prete";
   document.querySelectorAll('[data-action="code-vue"]').forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.vue === vueCode)));
   for (const v of VUES_CODE) document.getElementById(v).hidden = !pret || vueCode !== v;
-  if (pret && vueCode === "explorateur") poser("explorateur", arbreHtml(arbreDe(carteComplete.fichiers), 0, enCours));
+  if (pret && vueCode === "explorateur") poser("explorateur", arbreHtml(arbreDe(carteFusionnee().fichiers), 0, enCours));
   if (pret && vueCode === "plan") { poser("plan", planHtml(enCours)); flechesPlan(); }
   if (pret && vueCode === "voisinage") { poser("voisinage", voisinageHtml(enCours)); flechesVoisinage(); }
   poser("fiche-code", pret ? ficheCodeHtml(enCours) : "");
@@ -1597,12 +1719,12 @@ function arbreHtml(noeud, profondeur, enCours) {
   return html;
 }
 function badgesHtml(f, enCours) {
-  return (enCours.has(f.chemin) ? `<span class="badge en-cours-badge">En cours</span>` : "")
+  return (enCours.has(f.chemin) ? `<span class="badge en-cours-badge">${f.fantome ? "Brouillon" : "En cours"}</span>` : "")
     + (f.statut === "nouveau" ? `<span class="badge change">Nouveau</span>` : f.statut === "modifie" ? `<span class="badge change">Modifié</span>` : "");
 }
 function fichierHtml(f, profondeur, enCours) {
   const ouvert = fichiersOuverts.has(f.chemin);
-  const classes = `ligne-arbre fichier ${genreClasse(f.genre)}${enCours.has(f.chemin) ? " en-cours" : ""}${f.chemin === fichierChoisi ? " choisi" : ""}`;
+  const classes = `ligne-arbre fichier ${genreClasse(f.genre)}${f.fantome ? " fantome" : ""}${enCours.has(f.chemin) ? " en-cours" : ""}${f.chemin === fichierChoisi ? " choisi" : ""}`;
   let html = `<button type="button" class="${classes}" style="--p:${profondeur}" data-action="fichier" data-chemin="${propre(f.chemin)}" aria-expanded="${ouvert}" title="${propre(f.chemin)}">
     <span class="chevron" aria-hidden="true">${ouvert ? "▾" : "▸"}</span><i class="pastille-genre" aria-hidden="true"></i><span class="nom">${propre(nomCourt(f.chemin))}</span>
     <span class="marques">${badgesHtml(f, enCours)}</span><span class="petit">${f.lignes} l.</span></button>`;
@@ -1620,15 +1742,15 @@ function piecesHtml(f) {
 /* Le plan en étages : un bloc par dossier ou fichier du niveau ouvert. Les flèches vont de celui qui se sert vers
    celui qui sert : en haut ce qui se sert des autres, en bas les fondations. Un clic sur un dossier l'ouvre. */
 let planChemin = "", planTout = false, indexLiens = { carte: null, sert: new Map(), utilise: new Map() };
-const SEP = "\u0000";
 function liensDe() {
-  if (indexLiens.carte === carteComplete) return indexLiens;
+  const m = carteFusionnee();
+  if (indexLiens.carte === m) return indexLiens;
   const sert = new Map(), utilise = new Map();
-  for (const [a, b] of carteComplete.liens) {
+  for (const [a, b] of m.liens) {
     if (!sert.has(a)) sert.set(a, []); sert.get(a).push(b);
     if (!utilise.has(b)) utilise.set(b, []); utilise.get(b).push(a);
   }
-  indexLiens = { carte: carteComplete, sert, utilise };
+  indexLiens = { carte: m, sert, utilise };
   return indexLiens;
 }
 function blocDe(chemin) {
@@ -1638,17 +1760,21 @@ function blocDe(chemin) {
   return prefixe + (i < 0 ? reste : reste.slice(0, i));
 }
 function niveauPlan() {
-  const blocs = new Map();
-  for (const f of carteComplete.fichiers) {
+  const blocs = new Map(), m = carteFusionnee();
+  for (const f of m.fichiers) {
     const id = blocDe(f.chemin);
     if (!id) continue;
     if (!blocs.has(id)) blocs.set(id, { id, nom: nomCourt(id), dossier: id !== f.chemin, fichiers: [] });
     blocs.get(id).fichiers.push(f);
   }
   const aretes = new Map(), dehors = new Set(), venus = new Set();
-  for (const [a, b] of carteComplete.liens) {
-    const ba = blocDe(a), bb = blocDe(b);
-    if (ba && bb && ba !== bb) aretes.set(ba + SEP + bb, (aretes.get(ba + SEP + bb) || 0) + 1);
+  for (const [a, b] of m.liens) {
+    const ba = blocDe(a), bb = blocDe(b), k = ba + SEP + bb;
+    if (ba && bb && ba !== bb) {
+      const arete = aretes.get(k) || { n: 0, prov: 0 };
+      arete.n++; if (m.provisoires.has(a + SEP + b)) arete.prov++;
+      aretes.set(k, arete);
+    }
     else if (ba && !bb) dehors.add(b);
     else if (!ba && bb) venus.add(a);
   }
@@ -1710,11 +1836,12 @@ function blocHtml(b, enCours, choisi, proches) {
   const lignes = b.fichiers.reduce((s, f) => s + f.lignes, 0);
   const f = b.fichiers[0];
   const texte = b.dossier ? `${pluriel(b.fichiers.length, "fichier")} · ${nombre(lignes)} lignes` : raccourci(f.resume, 90);
-  const classes = ["bloc", b.dossier ? "dossier" : `fichier ${genreClasse(f.genre)}`, actif ? "en-cours" : "", change ? "change" : "",
+  const fantome = !b.dossier && f.fantome;
+  const classes = ["bloc", b.dossier ? "dossier" : `fichier ${genreClasse(f.genre)}`, fantome ? "fantome" : "", actif ? "en-cours" : "", change ? "change" : "",
     b.id === choisi ? "choisi" : "", choisi && !proches.has(b.id) && b.id !== choisi ? "pale" : ""].filter(Boolean).join(" ");
   const titre = b.dossier ? `Ouvrir le dossier ${b.id}` : `${b.id} : ${f.resume}`;
   return `<button type="button" class="${classes}" data-action="bloc" data-chemin="${propre(b.id)}" data-dossier="${b.dossier ? 1 : ""}" title="${propre(titre)}">
-    <span class="bloc-nom">${b.dossier ? `<i class="icone-dossier" aria-hidden="true"></i>` : `<i class="pastille-genre" aria-hidden="true"></i>`}<b>${propre(b.nom)}</b>${actif ? `<span class="badge en-cours-badge">En cours</span>` : ""}${change ? `<i class="point-change" title="Changé dans la dernière version"></i>` : ""}</span>
+    <span class="bloc-nom">${b.dossier ? `<i class="icone-dossier" aria-hidden="true"></i>` : `<i class="pastille-genre" aria-hidden="true"></i>`}<b>${propre(b.nom)}</b>${actif ? `<span class="badge en-cours-badge">${fantome ? "Brouillon" : "En cours"}</span>` : ""}${change ? `<i class="point-change" title="Changé dans la dernière version"></i>` : ""}</span>
     <span class="bloc-texte">${propre(texte)}</span></button>`;
 }
 function planHtml(enCours) {
@@ -1727,7 +1854,7 @@ function planHtml(enCours) {
     .join(`<span aria-hidden="true">›</span>`);
   const notes = [];
   if (planChemin && (niveau.dehors || niveau.venus)) notes.push(`Hors de ce dossier : il se sert de ${pluriel(niveau.dehors, "fichier")}, et ${pluriel(niveau.venus, "fichier")} se ${niveau.venus > 1 ? "servent" : "sert"} de lui.`);
-  for (const g of mutuels.slice(0, 3)) notes.push(`<span class="souci">${propre(g.map(nomCourt).sort().join(" et "))} dépendent l'un de l'autre (flèches orange) : les modifier séparément est délicat.</span>`);
+  for (const g of mutuels.slice(0, 3)) notes.push(`<span class="souci">${propre(g.map(nomCourt).sort().join(" et "))} dépendent l'un de l'autre (flèches roses) : les modifier séparément est délicat.</span>`);
   const bascule = niveau.isoles.length
     ? `<button type="button" class="discret" data-action="plan-tout">${planTout ? "Cacher" : "Montrer"} ${pluriel(niveau.isoles.length, "élément")} sans lien</button>` : "";
   const corps = etages.filter((e) => e.length).map((e) => `<div class="etage">${e.map((b) => blocHtml(b, enCours, choisi, proches)).join("")}</div>`).join("");
@@ -1743,11 +1870,11 @@ function flechesPlan() {
   const niveau = niveauPlan(), { groupeDe, etages } = etagesDe(niveau.blocs, niveau.aretes);
   const choisi = fichierChoisi ? blocDe(fichierChoisi) : null, traits = [], etageDe = new Map();
   etages.forEach((e, i) => e.forEach((b) => etageDe.set(b.id, i)));
-  for (const [k, n] of niveau.aretes) {
-    const [a, b] = k.split(SEP), mutuel = groupeDe.get(a) !== undefined && groupeDe.get(a) === groupeDe.get(b);
+  for (const [k, { n, prov }] of niveau.aretes) {
+    const [a, b] = k.split(SEP), enCoursEcrit = prov === n, mutuel = groupeDe.get(a) !== undefined && groupeDe.get(a) === groupeDe.get(b);
     const long = etageDe.get(b) - etageDe.get(a) > 1 ? " long" : "";
-    traits.push({ de: a, vers: b, n, classe: `${mutuel ? "mutuel" : ""}${choisi ? (a === choisi || b === choisi ? " actif" : " pale") : long}`,
-      titre: `${nomCourt(a)} se sert de ${nomCourt(b)} (${pluriel(n, "lien")})` });
+    traits.push({ de: a, vers: b, n, classe: `${enCoursEcrit ? "provisoire" : mutuel ? "mutuel" : ""}${choisi ? (a === choisi || b === choisi ? " actif" : " pale") : long}`,
+      titre: `${nomCourt(a)} se sert de ${nomCourt(b)} (${pluriel(n, "lien")})${prov ? `, dont ${prov} en cours d'écriture par un agent` : ""}` });
   }
   tracer(toile, "#plan .bloc", traits, "vertical");
 }
@@ -1809,16 +1936,16 @@ function touches(chemin) {
   return vus.size;
 }
 function carteVoisinHtml(chemin, enCours, centre) {
-  const f = carteComplete.fichiers.find((x) => x.chemin === chemin);
+  const f = fichierDe(chemin);
   if (!f) return "";
   const dossier = chemin.includes("/") ? chemin.slice(0, chemin.lastIndexOf("/")) : "";
-  const classes = ["voisin-carte", genreClasse(f.genre), centre ? "centre" : "", enCours.has(chemin) ? "en-cours" : "", f.statut ? "change" : ""].filter(Boolean).join(" ");
+  const classes = ["voisin-carte", genreClasse(f.genre), f.fantome ? "fantome" : "", centre ? "centre" : "", enCours.has(chemin) ? "en-cours" : "", f.statut ? "change" : ""].filter(Boolean).join(" ");
   return `<button type="button" class="${classes}" data-action="centrer" data-chemin="${propre(chemin)}" title="${propre(`${chemin} : ${f.resume}`)}">
     <span class="bloc-nom"><i class="pastille-genre" aria-hidden="true"></i><b>${propre(nomCourt(chemin))}</b>${enCours.has(chemin) ? `<span class="badge en-cours-badge">En cours</span>` : ""}${f.statut ? `<i class="point-change" title="Changé dans la dernière version"></i>` : ""}</span>
     ${dossier ? `<span class="petit chemin">${propre(dossier)}</span>` : ""}<span class="bloc-texte">${propre(centre ? f.resume : raccourci(f.resume, 80))}</span></button>`;
 }
 function voisinageHtml(enCours) {
-  const f = carteComplete.fichiers.find((x) => x.chemin === fichierChoisi);
+  const f = fichierDe(fichierChoisi);
   if (!f) return `<p class="calme voisinage-vide">Choisis un fichier dans l'explorateur ou le plan : il s'affichera ici, au milieu de ceux qui se servent de lui et de ceux dont il se sert.</p>`;
   const colonnes = colonnesDe(f.chemin), directs = colonnes[1].length, tous = touches(f.chemin);
   const impact = !directs ? `Aucun fichier ne se sert de ${f.chemin} : le modifier ne touche que lui.`
@@ -1837,10 +1964,12 @@ function voisinageHtml(enCours) {
 function flechesVoisinage() {
   const toile = document.querySelector("#voisinage .voisins-toile");
   if (!toile || !fichierChoisi) return;
-  const { sert } = liensDe(), colonnes = colonnesDe(fichierChoisi).map((l, i) => (i === 2 ? l : l.slice(0, MAX_COLONNE)));
+  const { sert } = liensDe(), { provisoires } = carteFusionnee(), colonnes = colonnesDe(fichierChoisi).map((l, i) => (i === 2 ? l : l.slice(0, MAX_COLONNE)));
   const traits = [];
   for (let i = 0; i < 4; i++) for (const a of colonnes[i]) for (const b of colonnes[i + 1]) {
-    if ((sert.get(a) || []).includes(b)) traits.push({ de: a, vers: b, n: 1, titre: `${nomCourt(a)} se sert de ${nomCourt(b)}` });
+    if (!(sert.get(a) || []).includes(b)) continue;
+    const enCoursEcrit = provisoires.has(a + SEP + b);
+    traits.push({ de: a, vers: b, n: 1, classe: enCoursEcrit ? "provisoire" : "", titre: `${nomCourt(a)} se sert de ${nomCourt(b)}${enCoursEcrit ? " (en cours d'écriture)" : ""}` });
   }
   tracer(toile, "#voisinage .voisin-carte", traits, "horizontal");
 }
@@ -1850,29 +1979,30 @@ new ResizeObserver(() => { if (vueCode === "plan") flechesPlan(); if (vueCode ==
 function legendeCodeHtml() {
   const genres = ["code", "tests", "page", "réglages", "documentation"].map((g) => `<span class="${genreClasse(g)}"><i class="pastille-genre"></i>${GENRES_FR[g]}</span>`).join("");
   return `<div class="legende-code">${genres}</div>
-    <p class="petit">Point jaune : nouveau ou modifié dans la dernière version. Orange qui clignote : un agent y travaille en ce moment.</p>`;
+    <p class="petit">Point jaune : nouveau ou modifié dans la dernière version. Orange qui clignote : un agent y travaille en ce moment. Pointillés orange : ce qu'un agent est en train d'écrire, pas encore vérifié.</p>`;
 }
 function listeFichiersHtml(titre, chemins) {
   if (!chemins.length) return "";
   return `<section><h3>${titre}</h3>${chemins.sort().map((c) => `<button type="button" class="lien-fichier" data-action="choisir-fichier" data-chemin="${propre(c)}">${propre(c)}</button>`).join("")}</section>`;
 }
 function ficheCodeHtml(enCours) {
-  const f = carteComplete.fichiers.find((x) => x.chemin === fichierChoisi);
+  const f = fichierDe(fichierChoisi), m = carteFusionnee();
   if (!f) {
     const supprimes = carteComplete.supprimes.length ? `<section><h3>Supprimés dans la dernière version</h3><ul class="fichiers">${carteComplete.supprimes.map((c) => `<li>${propre(c)}</li>`).join("")}</ul></section>` : "";
-    const naissants = carteComplete.nouveaux_absents.length ? `<section><h3>En préparation par un agent</h3><ul class="fichiers">${carteComplete.nouveaux_absents.map((c) => `<li>${propre(c)}</li>`).join("")}</ul></section>` : "";
+    const naissants = listeFichiersHtml("En cours d'écriture par un agent", m.fichiers.filter((x) => x.fantome).map((x) => x.chemin));
     return `<header><h2>Aucun fichier choisi</h2><p class="petit">Clique un fichier dans l'explorateur ou dans le plan : son rôle s'affiche ici.</p></header>${naissants}${supprimes}<section>${legendeCodeHtml()}</section>`;
   }
   const agents = enCours.get(f.chemin) || [];
-  const sert = carteComplete.liens.filter(([a]) => a === f.chemin).map(([, b]) => b);
-  const utilise = carteComplete.liens.filter(([, b]) => b === f.chemin).map(([a]) => a);
+  const sert = m.liens.filter(([a]) => a === f.chemin).map(([, b]) => b);
+  const utilise = m.liens.filter(([, b]) => b === f.chemin).map(([a]) => a);
+  const brouillon = f.fantome ? `<p class="calme">Ce fichier n'existe encore que dans la copie de travail de l'agent. Il entrera dans la carte si le vérificateur accepte la tâche, et disparaîtra sinon.</p>` : "";
   const statut = f.statut === "nouveau" ? " · nouveau dans la dernière version" : f.statut === "modifie" ? " · modifié dans la dernière version" : "";
   const provisoire = f.attente && !carteDe(derniere).auto ? `<p class="petit">Explication provisoire, tirée du code lui-même : celle de Claude arrive.</p>` : "";
   return `<header><h2>${propre(nomCourt(f.chemin))}</h2><p class="petit">${propre(f.chemin)}</p>
-      <p class="petit">${GENRES_FR[f.genre] || f.genre} · ${f.lignes} lignes${statut}</p>
-      ${agents.length ? `<p class="en-cours-texte">En cours de modification par ${propre(agents.join(", "))}.</p>` : ""}
+      <p class="petit">${GENRES_FR[f.genre] || f.genre} · ${f.lignes} lignes${f.fantome ? " · brouillon" : statut}</p>
+      ${agents.length ? `<p class="en-cours-texte">${f.fantome ? "En cours d'écriture" : "En cours de modification"} par ${propre(agents.join(", "))}.</p>` : ""}
       ${vueCode !== "voisinage" ? `<button type="button" class="discret" data-action="vue-fichier">Voir ses dépendances</button>` : ""}</header>
-    <section><h3>À quoi il sert</h3><p>${propre(f.resume)}</p>${f.detail ? `<p class="calme">${propre(f.detail)}</p>` : ""}${provisoire}</section>
+    <section><h3>À quoi il sert</h3><p>${propre(f.resume)}</p>${f.detail ? `<p class="calme">${propre(f.detail)}</p>` : ""}${provisoire}${brouillon}</section>
     ${f.pieces.length ? `<section><h3>Ses parties</h3>${piecesHtml(f)}</section>` : ""}
     ${listeFichiersHtml("Il se sert de", sert)}${listeFichiersHtml("Ils se servent de lui", utilise)}`;
 }
@@ -1907,6 +2037,117 @@ async function lancerAnalyse() {
   if (donnees && Array.isArray(donnees.taches)) afficher(donnees); else afficherCode(derniere);
 }
 
+/* ---------- Accueil : chaque projet, son chantier en cours, et de quoi le reprendre ou repartir à neuf ---------- */
+let accueil = null, accueilChargement = false, sessionOuverte = "", sessionNom = "", sessionPhrase = "";
+const ETATS_PROJET = { vide: "Pas commencé", conversation: "En discussion", plan: "Plan à valider", en_cours: "En pause", travail: "Agents au travail", attente: "Une question t'attend", fini: "Terminé" };
+function teinte(texte) { let h = 0; for (const c of texte) h = (h * 31 + c.charCodeAt(0)) % 360; return h; }
+function initiales(nom) {
+  const mots = nom.replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean);
+  return ((mots[0] || "?")[0] + (mots.length > 1 ? mots[1][0] : (mots[0] || "")[1] || "")).toUpperCase();
+}
+function ilYa(iso) {
+  const ecart = (Date.now() - new Date(iso).getTime()) / 60000;
+  if (!Number.isFinite(ecart)) return "";
+  if (ecart < 1) return "à l'instant";
+  if (ecart < 60) return `il y a ${Math.round(ecart)} min`;
+  if (ecart < 60 * 24) return `il y a ${Math.round(ecart / 60)} h`;
+  const jours = Math.round(ecart / 1440);
+  return jours < 30 ? `il y a ${jours} jour${jours > 1 ? "s" : ""}` : "";
+}
+function salutation() {
+  const maintenant = new Date(), heure = maintenant.getHours();
+  document.getElementById("accueil-salut").textContent = heure >= 5 && heure < 18 ? "Bonjour." : "Bonsoir.";
+  const date = maintenant.toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long" });
+  document.getElementById("accueil-date").textContent = date;
+}
+async function chargerAccueil() {
+  salutation();
+  if (rejoue) return afficherAccueil();
+  if (accueilChargement) return;
+  accueilChargement = true;
+  const donnees = await envoyerSansAfficher("/api/accueil", {});
+  accueilChargement = false;
+  if (donnees && Array.isArray(donnees.accueil)) accueil = donnees.accueil;
+  afficherAccueil();
+}
+function carteProjetHtml(p) {
+  const c = p.chantier, vide = c.etat === "vide";
+  const quand = ilYa(p.activite);
+  const sous = [quand ? `Touché ${quand}` : `Touché le ${p.activite_fr}`, p.courant ? "affiché" : ""].filter(Boolean).join(" · ");
+  const meta = [p.archives ? `${pluriel(p.archives, "chantier")} passé${p.archives > 1 ? "s" : ""}` : "", p.fichiers && derniere && derniere.mode !== "démonstration" ? `${p.fichiers} fichiers cartographiés` : "", p.en_ligne]
+    .filter(Boolean).map((m) => `<li>${propre(m)}</li>`).join("");
+  const barre = c.taches.length ? `<div class="barre-taches" aria-hidden="true">${c.taches.map((e) => `<i class="${propre(e)}"></i>`).join("")}</div>` : "";
+  const ouvert = sessionOuverte === p.id;
+  const session = ouvert ? `<form class="session-neuve" data-id="${propre(p.id)}">
+      <p>Le chantier « ${propre(c.nom)} » sera archivé avec son journal : tu le relis dans l'onglet Chantier. Le code du projet ne change pas, et l'orchestrateur repart d'une conversation neuve.</p>
+      <label class="etiquette" for="nom-session">Nom du chantier qui se termine</label>
+      <input id="nom-session" type="text" maxlength="80" autocomplete="off" value="${propre(sessionNom)}">
+      <p class="alerte" role="alert">${propre(sessionPhrase)}</p>
+      <div class="boutons"><button type="submit" class="principal">Archiver et commencer</button><button type="button" data-action="session-annuler">Annuler</button></div>
+    </form>` : "";
+  return `<article class="projet-carte${p.courant ? " courant" : ""}" data-id="${propre(p.id)}">
+    <div class="projet-haut">
+      <div class="monogramme" style="--teinte: ${teinte(p.nom)}" aria-hidden="true">${propre(initiales(p.nom))}</div>
+      <div><h3>${propre(p.nom)}</h3><p class="petit">${propre(sous)}</p></div>
+    </div>
+    <div class="projet-chantier">
+      <div class="chantier-tete"><p class="sur-titre">${vide ? "Chantier" : "Chantier en cours"}</p><span class="etat-projet ${propre(c.etat)}">${ETATS_PROJET[c.etat] || ""}</span></div>
+      <p class="chantier-nom${vide ? " vide" : ""}">${vide ? "Rien de commencé : décris à l'orchestrateur ce que tu veux construire." : `« ${propre(c.nom)} »`}</p>
+      ${barre}<p class="petit">${propre(vide ? "" : c.phrase)}</p>
+    </div>
+    ${meta ? `<ul class="projet-meta">${meta}</ul>` : ""}
+    ${session || `<div class="projet-actions">
+      <button type="button" class="principal" data-action="reprendre" data-id="${propre(p.id)}">${vide ? "Commencer" : "Reprendre le chantier"}</button>
+      ${vide || rejoue ? "" : `<button type="button" data-action="session-neuve" data-id="${propre(p.id)}" title="Archive le chantier en cours et en commence un nouveau, dans le même projet.">Nouveau chantier</button>`}
+    </div>`}
+  </article>`;
+}
+function afficherAccueil() {
+  const reel = derniere && derniere.mode === "réel";
+  document.getElementById("tuile-cloner").hidden = !reel;
+  document.getElementById("hero-actions").hidden = rejoue;
+  if (rejoue) {
+    poser("grille-projets", `<div class="projet-vide"><h3>Démonstration rejouée</h3><p>Elle n'a qu'un projet. Pour créer les tiens, lance l'Atelier sur ton ordinateur.</p><button type="button" class="principal" data-action="vers-conversation">Revoir la démonstration</button></div>`);
+    return;
+  }
+  if (!accueil) return poser("grille-projets", `<p class="calme">Chargement des projets…</p>`);
+  document.getElementById("accueil-compte").textContent = accueil.length ? pluriel(accueil.length, "projet") : "";
+  document.getElementById("accueil-lieu").textContent = derniere && derniere.racine ? `Les projets sont rangés dans ${derniere.racine}.` : "";
+  poser("grille-projets", accueil.length ? accueil.map(carteProjetHtml).join("")
+    : `<div class="projet-vide"><h3>Aucun projet pour l'instant</h3><p>Crée le premier : tu décriras ensuite à l'orchestrateur ce que tu veux construire, il proposera un découpage, et rien ne démarre avant ta validation.</p>
+       <button type="button" class="principal" data-action="accueil-creer">Créer un premier projet</button></div>`);
+  const champ = document.getElementById("nom-session");
+  if (champ && document.activeElement !== champ && !champ.dataset.vu) { champ.dataset.vu = "1"; champ.focus(); champ.select(); }
+}
+async function reprendre(id) {
+  const p = (accueil || []).find((x) => x.id === id);
+  if (!p) return;
+  if (!p.courant) {
+    const { ok, donnees } = await demander("/api/projets/ouvrir", { id });
+    if (!ok) return;
+    changerDeProjet(donnees);
+  }
+  location.hash = ["vide", "conversation", "plan"].includes(p.chantier.etat) ? "#conversation" : "#chantier";
+}
+document.getElementById("grille-projets").addEventListener("input", (e) => { if (e.target.id === "nom-session") sessionNom = e.target.value; });
+document.getElementById("grille-projets").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const form = e.target, bouton = form.querySelector('button[type="submit"]');
+  if (bouton.disabled) return;
+  bouton.disabled = true;
+  const { ok, donnees } = await demander("/api/projets/nouvelle-session", { id: form.dataset.id, nom: sessionNom });
+  bouton.disabled = false;
+  const resultat = donnees && donnees.nouveau_chantier;
+  if (!ok || !resultat || !resultat.fait) {
+    sessionPhrase = (resultat && resultat.phrase) || (donnees && donnees.erreur) || "Le nouveau chantier n'a pas pu commencer.";
+    return afficherAccueil();
+  }
+  sessionOuverte = ""; sessionPhrase = "";
+  changerDeProjet(donnees);
+  location.hash = "#conversation";
+});
+setInterval(() => { if (location.hash === "#accueil" && !sessionOuverte && !document.hidden) chargerAccueil(); }, 4000);
+
 function agir(cible) {
   const action = cible.dataset.action;
   if (action === "valider") envoyer("/api/contrat/valider");
@@ -1922,6 +2163,15 @@ function agir(cible) {
   if (action === "nouveau-chantier") ouvrirNouveauChantier(true);
   if (action === "nouveau-chantier-annuler") ouvrirNouveauChantier(false);
   if (action === "lire-archive") lireArchive(cible.dataset.id);
+  if (action === "accueil-creer") document.getElementById("nouveau").click();
+  if (action === "accueil-cloner") { document.getElementById("nouveau").click(); document.getElementById("adresse-depot").focus(); }
+  if (action === "reprendre") reprendre(cible.dataset.id);
+  if (action === "session-neuve") {
+    const p = (accueil || []).find((x) => x.id === cible.dataset.id);
+    sessionOuverte = cible.dataset.id; sessionNom = p ? p.chantier.nom : ""; sessionPhrase = ""; afficherAccueil();
+  }
+  if (action === "vers-conversation") location.hash = "#conversation";
+  if (action === "session-annuler") { sessionOuverte = ""; sessionPhrase = ""; afficherAccueil(); }
   if (action === "code-vue") { vueCode = cible.dataset.vue; afficherCode(derniere); }
   if (action === "dossier") { const c = cible.dataset.chemin; if (dossiersOuverts.has(c)) dossiersOuverts.delete(c); else dossiersOuverts.add(c); afficherCode(derniere); }
   if (action === "fichier") { const c = cible.dataset.chemin; if (fichiersOuverts.has(c)) fichiersOuverts.delete(c); else fichiersOuverts.add(c); choisirFichier(c); }
@@ -1986,6 +2236,7 @@ async function charger() {
     if (majCoupure()) return; // Atelier redémarre : rien d'alarmant à dire
     if (INSTANTANES.length) {
       rejoue = true;
+      if (!location.hash || location.hash === "#accueil") onglet();
       afficher(INSTANTANES[0]);
       const premiere = INSTANTANES.flatMap((v) => v.evenements).find((e) => e.auteur === "toi");
       if (premiere) { zone.value = premiere.texte; ajuster(); }
@@ -1997,7 +2248,7 @@ async function demander(adresse, corps) {
   const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
   return { ok: retour.ok, donnees: await retour.json() };
 }
-function changerDeProjet(vue) { signatureFil = ""; choisie = null; afficher(vue); }
+function changerDeProjet(vue) { signatureFil = ""; choisie = null; afficher(vue); if (location.hash === "#accueil") chargerAccueil(); }
 document.getElementById("projet").addEventListener("change", async (e) => {
   const { ok, donnees } = await demander("/api/projets/ouvrir", { id: e.target.value });
   if (ok) changerDeProjet(donnees);

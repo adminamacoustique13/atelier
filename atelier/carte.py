@@ -305,9 +305,13 @@ JS_IMPORTS = [
 def _imports_js(chemin: str, texte: str, fichiers) -> set[str]:
     cibles = set()
     dossier = posixpath.dirname(chemin)
-    for motif in JS_IMPORTS:
+    for rang, motif in enumerate(JS_IMPORTS):
+        # Dans une page ou une feuille de style, « app.js » est un chemin ; dans du code, un paquet.
+        nu_permis = rang in (3, 4, 5)
         for cible in motif.findall(texte):
-            if not cible.startswith((".", "/")) or "://" in cible:
+            if "://" in cible or cible.startswith(("//", "data:")):
+                continue
+            if not nu_permis and not cible.startswith((".", "/")):
                 continue
             base = posixpath.normpath(
                 cible.lstrip("/") if cible.startswith("/") else posixpath.join(dossier, cible)
@@ -319,37 +323,81 @@ def _imports_js(chemin: str, texte: str, fichiers) -> set[str]:
     return cibles
 
 
+JS_EXT_LIENS = tuple(".js .ts .tsx .jsx .mjs .cjs .html .htm .css .vue .svelte .scss".split())
+
+
+def _cibles(chemin: str, texte: str, fichiers, index: dict[str, str]) -> set[str]:
+    """Les fichiers du projet dont `chemin` se sert, lus dans son texte."""
+    if chemin.endswith(".py"):
+        cibles = _imports_python(chemin, texte, index)
+    elif chemin.lower().endswith(JS_EXT_LIENS):
+        cibles = _imports_js(chemin, texte, fichiers)
+    else:
+        return set()
+    return {c for c in cibles if c != chemin}
+
+
 def liens(depot: Path, fiches: dict) -> list[list[str]]:
     """Les liens « se sert de » entre fichiers du projet : [fichier, fichier dont il se sert]."""
     index = _modules_python(fiches)
     paires = set()
     for chemin in fiches:
         texte = lire_texte(depot, chemin)
-        if texte is None:
-            continue
-        if chemin.endswith(".py"):
-            cibles = _imports_python(chemin, texte, index)
-        elif chemin.lower().endswith(
-            (
-                ".js",
-                ".ts",
-                ".tsx",
-                ".jsx",
-                ".mjs",
-                ".cjs",
-                ".html",
-                ".htm",
-                ".css",
-                ".vue",
-                ".svelte",
-                ".scss",
-            )
-        ):
-            cibles = _imports_js(chemin, texte, fiches)
-        else:
-            continue
-        paires.update((chemin, c) for c in cibles if c != chemin)
+        if texte is not None:
+            paires.update((chemin, c) for c in _cibles(chemin, texte, fiches, index))
     return sorted([a, b] for a, b in paires)
+
+
+BROUILLON_MAX = 40  # fichiers lus au plus dans la copie de travail d'une tâche
+
+
+def provisoire(carte: dict | None, brouillons: list[dict]) -> dict:
+    """Ce que les agents sont en train d'écrire, avant toute vérification.
+
+    Chaque brouillon porte `agents`, `fichiers` (les fichiers modifiés dans sa copie de travail)
+    et `dossier` (cette copie). Rend les fichiers nouveaux, que la carte ne connaît pas encore,
+    et les liens nouveaux, lus dans le code de la copie : rien n'est demandé à Claude. Un
+    brouillon de démonstration porte directement `fantomes` et `liens`.
+    """
+    if not carte or not brouillons:
+        return {"fichiers": [], "liens": []}
+    connus, existants = carte["fichiers"], {tuple(lien) for lien in carte["liens"]}
+    nouveaux: dict[str, dict] = {}
+    paires: set[tuple[str, str]] = set()
+    for b in brouillons:
+        agents = list(b.get("agents", []))
+        if b.get("dossier") is None:  # démonstration
+            for f in b.get("fantomes", []):
+                nouveaux.setdefault(f["chemin"], {**f, "agents": agents})
+            paires.update(tuple(lien) for lien in b.get("liens", []))
+            continue
+        dossier = Path(b["dossier"])
+        textes = {}
+        for chemin in b.get("fichiers", [])[:BROUILLON_MAX]:
+            if _ignore(chemin):
+                continue
+            texte = lire_texte(dossier, chemin)
+            if texte is None:
+                continue
+            textes[chemin] = texte
+            if chemin not in connus and chemin not in nouveaux:
+                doc, _ = decrire(chemin, texte)
+                nouveaux[chemin] = {
+                    "chemin": chemin,
+                    "genre": genre(chemin),
+                    "lignes": texte.count("\n") + (not texte.endswith("\n") and bool(texte)),
+                    "resume": doc or "Nouveau fichier, en cours d'écriture.",
+                    "agents": agents,
+                }
+        tous = set(connus) | set(nouveaux)
+        index = _modules_python(tous)
+        for chemin, texte in textes.items():
+            paires.update((chemin, c) for c in _cibles(chemin, texte, tous, index))
+    tous = set(connus) | set(nouveaux)
+    return {
+        "fichiers": [nouveaux[c] for c in sorted(nouveaux)],
+        "liens": sorted([a, b] for a, b in paires - existants if a in tous and b in tous),
+    }
 
 
 # --- la carte : relever, comparer, garder ce qui n'a pas changé -------------------------------
@@ -769,7 +817,7 @@ class SuiviCarte:
 
     # ce que voit le tableau de bord
 
-    def resume(self, en_cours: dict[str, list[str]] | None = None) -> dict:
+    def resume(self, en_cours: dict[str, list[str]] | None = None, prov=None) -> dict:
         """L'état de la carte, en quelques champs : il part avec chaque vue du tableau de bord."""
         with self.verrou:
             carte, travail, restants, probleme = (
@@ -804,6 +852,7 @@ class SuiviCarte:
                 "changements": bilan_changements(carte["changements"]),
                 "cout": f"{carte.get('cout_usd', 0.0):.2f}".replace(".", ",") + " $",
                 "en_cours": _liste_en_cours(en_cours),
+                "provisoire": prov or {"fichiers": [], "liens": []},
                 "auto": not self.explicateur.reel,
             }
 

@@ -186,7 +186,21 @@ Le bouton « Relier à un dépôt en ligne », en haut à côté du nom du proje
 
 L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en ligne) mais ne le modifie jamais : la liaison passe par ce bouton, pas par des commandes à taper.
 
-## Les quatre onglets
+## L'accueil
+
+L'Atelier s'ouvre sur l'accueil (onglet « Accueil », ou un clic sur « Atelier » en haut à gauche). Il montre tous tes projets, du plus récemment touché au plus ancien, sans en démarrer aucun. Chaque carte dit :
+
+- le nom du chantier en cours, une barre avec une case par tâche (turquoise : livrée, blanche : en cours, orange : revenue vers toi) et où il en est : « Plan à valider », « Agents au travail », « Une question t'attend », « Terminé »… ;
+- quand le projet a été touché pour la dernière fois, combien de chantiers passés il a, combien de fichiers sa carte du code compte, et son dépôt en ligne s'il en a un.
+
+Deux boutons par projet :
+
+- **Reprendre le chantier** : le projet s'ouvre là où tu l'as laissé, sur la conversation si le plan n'est pas encore validé, sur le tableau de bord sinon. C'est la même session : l'orchestrateur se souvient de la conversation.
+- **Nouveau chantier** : une confirmation s'ouvre dans la carte, avec le nom proposé pour le chantier qui se termine. Il est archivé avec son journal, et le projet repart d'une conversation neuve. Refusé tant qu'un agent travaille ; la carte le dit.
+
+En haut, « Nouveau projet » crée un projet, et « Récupérer un dépôt » (pas dans la démonstration) reprend un dépôt GitHub ou autre.
+
+## Les onglets d'un projet
 
 - **Conversation** : tu écris à l'orchestrateur. C'est une session Claude (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.
 - **Chantier** : le tableau de bord (point d'étape, ce qui t'attend, dosage, enveloppe, tâches, fil).
@@ -198,7 +212,7 @@ L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en l
 L'onglet Code montre le code du projet de trois façons :
 
 - **L'explorateur**, comme dans un éditeur de code : les dossiers et les fichiers. Un clic déroule un fichier et dit, en français, à quoi il sert et à quoi servent ses parties (fonctions, classes).
-- **Le plan**, rangé en étages : en haut ce qui se sert des autres, en bas les fondations dont les autres se servent. Une flèche va de celui qui se sert vers celui qui sert ; plus elle est épaisse, plus il y a de liens. Le plan s'ouvre sur un bloc par dossier ; un clic sur un dossier montre ses fichiers, rangés de la même façon, et le fil d'Ariane remonte. Les éléments sans lien sont cachés, un bouton les montre. Deux fichiers qui dépendent l'un de l'autre sont reliés en orange et signalés : c'est un point fragile du code.
+- **Le plan**, rangé en étages : en haut ce qui se sert des autres, en bas les fondations dont les autres se servent. Une flèche va de celui qui se sert vers celui qui sert ; plus elle est épaisse, plus il y a de liens. Le plan s'ouvre sur un bloc par dossier ; un clic sur un dossier montre ses fichiers, rangés de la même façon, et le fil d'Ariane remonte. Les éléments sans lien sont cachés, un bouton les montre. Deux fichiers qui dépendent l'un de l'autre sont reliés en rose et signalés : c'est un point fragile du code.
 - **La vue d'un fichier** (« Fichier », ou « Voir ses dépendances » dans la fiche) : le fichier au milieu, à gauche ceux qui se servent de lui, à droite ceux dont il se sert, sur deux niveaux. Elle répond à la question « si je touche à ce fichier, qu'est-ce qui peut être touché ? », et le dit en une phrase. Un clic sur un voisin le met au milieu ; « Précédent » revient.
 
 Dans toutes les vues, la fiche à droite dit à quoi sert le fichier choisi, de quels fichiers il se sert et lesquels se servent de lui.
@@ -208,6 +222,8 @@ Dans toutes les vues, la fiche à droite dit à quoi sert le fichier choisi, de 
 **La carte suit le code.** Elle ne repart jamais de zéro : chaque fichier est reconnu à son empreinte git. Quand une nouvelle version arrive sur la branche du projet (une tâche fusionnée par l'Atelier, ou un commit fait ailleurs), un fil de fond la compare à la précédente en quinze secondes au plus, et seuls les fichiers nouveaux ou modifiés sont réexpliqués. Ils portent un point jaune et un badge « Nouveau » ou « Modifié » ; les fichiers supprimés sont listés dans la fiche.
 
 **Ce qui est en train de changer clignote.** Les fichiers qu'un agent modifie dans sa copie de travail clignotent en orange, dans l'explorateur, le plan (le dossier qui les contient aussi) et la vue d'un fichier, et la fiche dit quel agent y travaille. Le point orange de l'onglet Code s'allume tant qu'un agent travaille.
+
+**Ce qu'un agent écrit apparaît en brouillon.** Avant même la vérification, l'Atelier lit le code de la copie de travail de chaque agent, sans appeler Claude. Un fichier qu'il crée apparaît comme un bloc en pointillés orange, marqué « Brouillon » ; un lien qu'il ajoute entre deux fichiers apparaît comme une flèche orange en pointillés qui avance. Si le vérificateur refuse la tâche, ils disparaissent ; s'il l'accepte, ils entrent dans la carte pour de bon. Deux fichiers qui dépendent l'un de l'autre sont, eux, reliés en rose.
 
 Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqué par ses seuls commentaires : aucun appel à Claude. Les explications de Claude n'ont pas encore été essayées pour de vrai.
 

@@ -8,8 +8,11 @@ import re
 import subprocess
 import threading
 import unicodedata
+from datetime import datetime
 from pathlib import Path
 
+from atelier import archives
+from atelier import carte as carte_du_code
 from atelier.agents import AgentClaude
 from atelier.controles import ControlesGit, expliquer_refus_git
 from atelier.modele import Chantier, Contrat, ProjetImpossible
@@ -97,6 +100,61 @@ def creer_depot(dossier: Path, nom: str) -> Atelier:
     _git(dossier, "add", "-A")
     _git(dossier, *identite, "commit", "-q", "-m", "Création du projet")
     return ouvrir_depot(dossier)
+
+
+def depot_en_ligne(dossier: Path) -> str:
+    """L'adresse du dépôt en ligne (« origin »), lue dans .git/config, sans identifiants."""
+    try:
+        config = (Path(dossier) / ".git" / "config").read_text("utf-8", errors="replace")
+    except OSError:
+        return ""
+    dedans = False
+    for ligne in config.splitlines():
+        ligne = ligne.strip()
+        if ligne.startswith("["):
+            dedans = ligne.replace(" ", "") == '[remote"origin"]'
+        elif dedans and ligne.startswith("url"):
+            adresse = ligne.split("=", 1)[-1].strip()
+            adresse = re.sub(r"^[a-z]+://([^@/]*@)?", "", adresse)  # schéma et identifiants
+            adresse = re.sub(r"^[^@/]+@([^:]+):", r"\1/", adresse)  # git@hote:chemin
+            return re.sub(r"\.git$", "", adresse)
+    return ""
+
+
+def resume_chantier(chantier: Chantier | None, travaille: bool = False, attente: int = 0) -> dict:
+    """Où en est le chantier d'un projet, en une phrase et une barre de tâches."""
+    if chantier is None:
+        return {"nom": "", "etat": "vide", "phrase": "Aucun chantier commencé.", "taches": []}
+    taches = [t.etat for t in chantier.taches]
+    livrees, total = taches.count("verifie"), len(taches)
+    parle = any(e.get("auteur") == "toi" for e in chantier.evenements)
+    s = "s" if livrees > 1 else ""
+    if not total and not parle:
+        etat, phrase = "vide", "Aucun chantier commencé."
+    elif not total:
+        etat, phrase = "conversation", "Conversation en cours, pas encore de plan."
+    elif not chantier.contrat.valide:
+        etat, phrase = "plan", "Un plan attend ta validation."
+    elif livrees == total:
+        etat, phrase = "fini", f"Terminé : {total} tâche{s} livrée{s}."
+    else:
+        etat, phrase = "en_cours", f"{livrees} tâche{s} livrée{s} sur {total}."
+    if attente:
+        question = "Une question t'attend" if attente == 1 else f"{attente} questions t'attendent"
+        etat, phrase = "attente", f"{phrase} {question}."
+    elif travaille:
+        etat, phrase = "travail", f"{phrase} Des agents travaillent en ce moment."
+    nom = archives.nom_propose(chantier) if total or parle else ""
+    return {"nom": nom, "etat": etat, "phrase": phrase, "taches": taches}
+
+
+def _activite(dossier: Path) -> datetime:
+    for chemin in (dossier / ".atelier" / "etat.json", dossier / ".git" / "HEAD", dossier):
+        try:
+            return datetime.fromtimestamp(chemin.stat().st_mtime)
+        except OSError:
+            continue
+    return datetime.fromtimestamp(0)
 
 
 class Projets:
@@ -194,6 +252,49 @@ class Projets:
             self.ateliers[cle] = atelier
             self.courant = cle
         return cle
+
+    def accueil(self) -> list[dict]:
+        """Chaque projet, du plus récemment touché au plus ancien, sans en démarrer aucun."""
+        fiches = []
+        for cle in sorted(set(self.ateliers) | set(self.dossiers)):
+            atelier = self.ateliers.get(cle)
+            dossier = atelier.depot if atelier else self.dossiers[cle]
+            if atelier:
+                # Le guichet d'abord, hors du verrou du moteur : c'est l'ordre que suit Atelier.vue,
+                # l'inverse bloquerait le serveur quand un agent attend une autorisation.
+                autorisations = len(atelier.guichet.ouvertes()) if atelier.guichet else 0
+                travaille = atelier.en_marche() or atelier.occupe
+                with atelier.moteur.verrou:
+                    chantier = atelier.moteur.chantier
+                    nom = chantier.projet
+                    attente = autorisations + sum(d["reponse"] is None for d in chantier.demandes)
+                    resume = resume_chantier(chantier, travaille, attente)
+                passes = len(atelier.archives)
+                carte = atelier.carte.carte
+            else:
+                try:
+                    chantier = Chantier.charger(dossier / ".atelier" / "etat.json")
+                except (OSError, ValueError, TypeError, KeyError):
+                    chantier = None
+                nom = chantier.projet if chantier else cle
+                resume = resume_chantier(chantier)
+                passes = len(archives.lister(dossier))
+                carte = carte_du_code.charger(dossier)
+            moment = _activite(dossier)
+            fiches.append({
+                "id": cle, "nom": nom, "courant": cle == self.courant, "ouvert": bool(atelier),
+                "chantier": resume, "archives": passes,
+                "fichiers": len(carte["fichiers"]) if carte else 0,
+                "en_ligne": depot_en_ligne(dossier),
+                "activite": moment.isoformat(timespec="seconds"),
+                "activite_fr": archives.date_fr(moment.isoformat(timespec="minutes")),
+            })  # fmt: skip
+        return sorted(fiches, key=lambda f: f["activite"], reverse=True)
+
+    def nouvelle_session(self, cle: str, nom: str = "") -> dict:
+        """Ouvre un projet et y commence un nouveau chantier ; l'ancien est archivé."""
+        self.ouvrir(cle)
+        return self.atelier().nouveau_chantier(nom)
 
     def vue(self) -> dict:
         if not self.courant:
