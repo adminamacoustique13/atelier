@@ -144,8 +144,11 @@ REPRISES = {
     "perimetre": (
         "Le contrôle du périmètre a refusé ton livrable : tu as modifié des fichiers qui n'en "
         "font pas partie",
-        "Défais tes changements dans ces fichiers : `git diff -- <chemin>` te les montre, et "
-        "`rm <chemin>` retire un fichier que tu as créé. Un fichier hors de ton périmètre fait "
+        "Défais tes changements dans ces fichiers avec l'outil Edit (ou Write) : relis le fichier, "
+        "remets-le tel qu'il était, et pour un fichier que tu as créé, vide-le ou dis-le dans ton "
+        "compte rendu s'il faut le supprimer. N'emploie aucune commande git pour cela "
+        "(`git checkout`, `git restore`) : elle ouvrirait une carte d'autorisation et pourrait "
+        "défaire plus que ce que tu veux. Un fichier hors de ton périmètre fait "
         "refuser le livrable quoi qu'il contienne. Si une règle du projet te demandait d'y "
         "écrire, mets plutôt dans ta fiche de relais ce que tu y aurais mis ; si la tâche en a "
         "vraiment besoin, dis-le dans ton compte rendu.",
@@ -366,6 +369,9 @@ vérification entière sans rien t'apprendre. Ta vérification porte sur la corr
 montre tout le livrable, pas seulement la correction : sers-toi du verdict pour savoir où regarder.
 1. Pour chaque point recalé, vérifie par toi-même qu'il est corrigé, en exécutant réellement le \
 code quand c'est possible.
+Un verdict précédent borné (une vérification qui ne cherche que ce qui bloquerait) peut porter \
+des remarques en plus de ses points recalés : ce ne sont pas des points recalés, l'agent n'avait \
+pas à les corriger, et tu n'as pas à les contrôler comme tels.
 2. Vérifie que ces corrections n'ont rien défait : relis le code qu'elles touchent et ce qui en \
 dépend, et lance les tests qui portent dessus. Si une correction ajoute ou change un test, \
 vérifie qu'il peut échouer. {essais}
@@ -486,8 +492,9 @@ d'assemblage ou de branchement, où l'on inscrit chaque nouveau morceau) sortent
 Confie-les à une tâche finale de raccord, qui dépend des autres et fait ces ajouts en une fois.
 - Quand une règle du projet demande que chaque tâche touche un même fichier (une ligne au \
 journal des décisions par tâche, par exemple), ce fichier n'entre dans le périmètre d'aucune \
-tâche : sinon elles passeraient toutes l'une après l'autre. Chaque ouvrier écrit à la place, \
-dans sa fiche de relais (`chantier/relais/<id de la tâche>.md`), ce qu'il y aurait mis : ce \
+autre tâche que celle de raccord : sinon elles passeraient toutes l'une après l'autre. Chaque \
+ouvrier écrit à la place, dans sa fiche de relais (`chantier/relais/<id de la tâche>.md`), \
+ce qu'il y aurait mis : ce \
 dossier est toujours permis, et la fiche entre dans la branche principale avec le travail de la \
 tâche. La tâche de raccord dépend de ces tâches et recopie ces lignes dans le fichier ; \
 écris-le dans ses critères, en nommant le fichier et les fiches à relire.

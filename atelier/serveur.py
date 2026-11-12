@@ -464,12 +464,22 @@ LANCEURS_GENERAUX = frozenset(
         "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "pwsh",
         "powershell", "cmd", "env", "eval", "exec", "command", "builtin", "xargs", "time",
         "nohup", "nice", "timeout", "setsid", "stdbuf", "busybox", "parallel", "watch",
-        "script", "sudo", "doas", "su", "npx", "pnpx", "bunx", "uvx",
+        "script", "sudo", "doas", "su", "npx", "pnpx", "bunx", "uvx", "pkexec", "runuser", "chroot",
+        "rbash", "nu", "xonsh", "expect", "strace", "toybox", "ssh", "wsl", "awk", "gawk", "mawk",
+        "nawk",
     }
 )  # fmt: skip
 INTERPRETE = re.compile(
-    r"(python|pypy|node|nodejs|perl|ruby|php|deno|bun|lua|luajit|rscript|osascript|tclsh)[\d.]*"
+    r"(python|pythonw|py|pypy|node|nodejs|perl|ruby|php|deno|bun|lua|luajit|rscript|r|julia"
+    r"|osascript|tclsh)[\d.]*"
 )
+# Un shell dont le nom porte un suffixe de version : « ksh93 », « zsh-5.9 », « bash5 ».
+SHELL_VERSIONNE = re.compile(
+    r"(sh|bash|zsh|dash|ksh|mksh|ash|fish|csh|tcsh|rbash)([\d.]+|-[\d.]+)"
+)
+# Un lanceur de paquets n'en est un que suivi de son sous-mot : « yarn dlx », « bun x »...
+LANCEURS_DE_PAQUETS = (("yarn", "dlx"), ("bun", "x"), ("uv", "tool", "run"), ("pipx", "run"))
+OPTIONS_FIND_QUI_LANCENT = frozenset({"-exec", "-execdir", "-ok", "-okdir"})
 OPTION_DE_CODE = re.compile(r"-[a-z]*[cepr]|--(eval|print|command|exec)(=.*)?")
 # Un premier mot proposé à la validation doit être un nom de commande simple : pas une variable
 # posée devant, pas une option, pas une parenthèse.
@@ -488,7 +498,11 @@ def lanceur_general(commande: str) -> bool:
     option qui exécute du code. Le seul filtre des lanceurs, pour la validation et le diagnostic."""
     noms = [nom_de_base(m) for m in str(commande).split()]
     for rang, nom in enumerate(noms):
-        if nom in LANCEURS_GENERAUX:
+        if nom in LANCEURS_GENERAUX or SHELL_VERSIONNE.fullmatch(nom):
+            return True
+        if any(tuple(noms[rang : rang + len(p)]) == p for p in LANCEURS_DE_PAQUETS):
+            return True
+        if nom == "find" and any(o in OPTIONS_FIND_QUI_LANCENT for o in noms[rang:]):
             return True
         if INTERPRETE.fullmatch(nom) and any(OPTION_DE_CODE.fullmatch(o) for o in noms[rang + 1 :]):
             return True
@@ -865,7 +879,7 @@ class Atelier:
         if str(outils.get("pourquoi") or "").strip():
             parties.append(f"Pourquoi : {str(outils['pourquoi']).strip()}")
         en_plus = {}
-        if blocage is not None:
+        if blocage is not None and blocage.get("reponse") is None:
             parties.append(
                 f"{DEBLOQUE}{blocage['tache']} : si tu l'acceptes, je la relance seul, au même "
                 "niveau."

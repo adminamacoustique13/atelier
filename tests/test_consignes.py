@@ -80,6 +80,13 @@ def test_la_reprise_apres_un_debord_nomme_les_fichiers_hors_perimetre():
     assert "Fichiers modifiés : c.py." in en_texte
 
 
+def test_la_reprise_apres_un_debord_dit_de_defaire_avec_l_outil_d_edition_pas_avec_git():
+    texte = consigne_reprise(tache(), "perimetre", ["c.py"], PROFIL)
+    assert "avec l'outil Edit" in texte
+    assert "N'emploie aucune commande git" in texte and "`git checkout`" in texte
+    assert "`git diff -- <chemin>`" not in texte and "`rm <chemin>`" not in texte
+
+
 def test_la_reprise_apres_des_controles_rouges_porte_leur_sortie():
     sortie = "FAILED tests/test_b.py::test_refuse - AssertionError\n1 failed, 3 passed"
     texte = consigne_reprise(tache(), "controles", sortie, PROFIL)
@@ -117,6 +124,12 @@ def test_la_reverification_recoit_le_verdict_precedent_en_entier_et_ne_refait_pa
     assert "ces corrections n'ont rien défait" in texte
     assert "Ne refais pas le reste de la vérification" in texte
     assert ("copie jetable" in texte) is copie_jetable
+
+
+def test_la_reverification_dit_que_les_remarques_d_un_verdict_borne_ne_sont_pas_des_recalages():
+    texte = consigne_reverification(tache(), CONTRAT, PROFIL, "Remarque : un nom à revoir.")
+    assert "ce ne sont pas des points recalés" in texte
+    assert "tu n'as pas à les contrôler comme tels" in texte
 
 
 def test_la_reverification_rend_le_meme_verdict_que_la_verification_complete():
@@ -206,7 +219,10 @@ def test_les_commandes_simples_sont_chez_l_ouvrier_et_chez_les_verificateurs():
 
 
 def test_le_decoupage_sort_le_fichier_commun_des_taches_et_le_confie_au_raccord():
-    assert "ce fichier n'entre dans le périmètre d'aucune" in REGLES_DECOUPAGE
+    assert (
+        "ce fichier n'entre dans le périmètre d'aucune autre tâche que celle de raccord"
+        in REGLES_DECOUPAGE
+    )
     assert "`chantier/relais/<id de la tâche>.md`" in REGLES_DECOUPAGE
     assert "La tâche de raccord dépend de ces tâches et recopie ces lignes" in REGLES_DECOUPAGE
     assert "écris-le dans ses critères" in REGLES_DECOUPAGE

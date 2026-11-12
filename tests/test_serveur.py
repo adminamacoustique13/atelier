@@ -3061,7 +3061,55 @@ def test_un_signal_mal_forme_ne_leve_pas_et_une_tache_inconnue_est_dite(tmp_path
 
 # --- seconde passe : les lanceurs généraux, et la demande liée qui survit à un nouveau plan ----
 
-LANCEURS = sorted(LANCEURS_GENERAUX)
+# La liste des lanceurs à écarter, écrite en dur : un test paramétré sur `LANCEURS_GENERAUX`
+# lui-même ne verrait jamais un nom qu'on en retire.
+LANCEURS = [
+    "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "pwsh",
+    "powershell", "cmd", "env", "eval", "exec", "command", "builtin", "xargs", "time",
+    "nohup", "nice", "timeout", "setsid", "stdbuf", "busybox", "parallel", "watch",
+    "script", "sudo", "doas", "su", "npx", "pnpx", "bunx", "uvx",
+    "pkexec", "runuser", "chroot", "rbash", "nu", "xonsh", "expect", "strace", "toybox",
+    "ssh", "wsl", "awk",
+]  # fmt: skip
+SANS_LANCEUR_COMMUN = ["ksh93", "zsh-5.9", "bash5", "sh4.4", "dash-0.5"]  # shells versionnés
+
+
+def test_la_liste_en_dur_est_couverte_par_la_constante():
+    assert set(LANCEURS) <= LANCEURS_GENERAUX
+
+
+def test_retirer_un_nom_de_la_constante_fait_echouer_la_liste_en_dur(monkeypatch):
+    import atelier.serveur as serveur
+
+    monkeypatch.setattr(serveur, "LANCEURS_GENERAUX", LANCEURS_GENERAUX - {"pkexec"})
+    assert not serveur.lanceur_general("pkexec")
+    assert not set(LANCEURS) <= serveur.LANCEURS_GENERAUX
+
+
+@pytest.mark.parametrize("nom", SANS_LANCEUR_COMMUN)
+@pytest.mark.parametrize("forme", ["{}", "/usr/bin/{}"])
+def test_un_shell_a_suffixe_de_version_est_un_lanceur(nom, forme):
+    assert lanceur_general(forme.format(nom))
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["py -c", "pythonw -c", "R -e", "/usr/bin/R -e", "julia -e", "find . -name x -exec rm {} ;",
+     "find . -execdir sh ;", "yarn dlx cowsay", "bun x cowsay", "uv tool run ruff",
+     "pipx run black", "/usr/bin/awk", "gawk"],
+)  # fmt: skip
+def test_les_autres_lanceurs_de_code_ou_de_paquets_sont_ecartes(commande):
+    assert lanceur_general(commande)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["yarn", "yarn install", "bun", "bun install", "uv tool install ruff", "pipx install black",
+     "find . -name x", "py", "R", "julia", "npm", "npm test", "git", "git status",
+     "python3 -m pytest", "pytest -q", "make test", "cargo test", "uv run pytest", "ruff check ."],
+)  # fmt: skip
+def test_les_outils_ordinaires_employes_normalement_ne_sont_pas_ecartes(commande):
+    assert not lanceur_general(commande)
 SOUS_SON_NOM_OU_SON_CHEMIN = ["{}", "/usr/bin/{}"]
 
 
@@ -3205,3 +3253,18 @@ def test_une_demande_d_outils_ne_relance_que_le_blocage_qui_l_a_fait_naitre(tmp_
         "Outils réglés. Commandes permises aux agents : python3, uv. Je ne relance rien : le "
         "blocage n'attend plus ta réponse."
     )
+
+
+def test_un_blocage_deja_repondu_pendant_le_diagnostic_ne_promet_pas_de_relancer(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte, reponses=[DIAGNOSTIC_UV])
+    demande = bloquer(atelier, "B")
+    assert attendre(lambda: atelier.moteur.agent.messages)
+    atelier.decider(demande["id"], ABANDONNER)  # la personne tranche avant la fin du diagnostic
+    porte.set()
+    assert diagnostic_rendu(atelier)
+
+    (reglage,) = reglages_d_outils(atelier)
+    assert DEBLOQUE not in reglage["question"] and "relance" not in reglage["question"]
+    assert "pour_blocage" not in reglage
+    assert reglage["question"].endswith("Pourquoi : Les tests se lancent avec uv.")
