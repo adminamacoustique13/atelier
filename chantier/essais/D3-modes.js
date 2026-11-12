@@ -368,7 +368,7 @@ async function main() {
     page.on("request", (q) => { if (q.method() === "POST") requetes.push(q.url()); });
     await page.goto(`file://${fichier}`);
     const nombre = await page.evaluate(() => INSTANTANES.length);
-    verifier("la page rejoue ses 42 vues enregistrées", nombre === 42, nombre);
+    verifier("la page rejoue ses 46 vues enregistrées", nombre === 46, nombre);
     verifier("les vues enregistrées portent le menu", await page.evaluate(() => INSTANTANES.every((v) => v.mode_ouvriers && v.mode_ouvriers.choix.length === 5)));
     await aller(page, "chantier");
     await page.waitForSelector("#mode-ouvriers button.mode-btn");

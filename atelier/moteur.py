@@ -1,8 +1,8 @@
 """Le moteur : un chef de chantier en code.
 
-Il lance les ouvriers, contrôle leur travail, fait passer le vérificateur, monte d'un cran
-après un échec et s'arrête quand il sort du contrat. Aucun modèle ne décide de ces étapes :
-elles se déroulent de la même façon à chaque fois.
+Il lance les ouvriers, contrôle leur travail, fait passer le vérificateur, redonne la main à
+l'ouvrier refusé dans sa session, monte d'un cran après un échec et s'arrête quand il sort du
+contrat. Aucun modèle ne décide de ces étapes : elles se déroulent de la même façon à chaque fois.
 """
 
 from __future__ import annotations
@@ -12,11 +12,15 @@ import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import suppress
+from dataclasses import dataclass, replace
 
 from atelier import dosage
+from atelier.agents import REPRISE_IMPOSSIBLE
 from atelier.consignes import (
     consigne_ouvrier,
     consigne_planification,
+    consigne_reprise,
+    consigne_reverification,
     consigne_verificateur,
     dernier_json,
     lire_verdict,
@@ -45,6 +49,43 @@ DETAIL_ARRET = "Arrêtée par la personne responsable."
 RELANCES_AUTO = 1
 MAX_REPARATIONS = 2
 PREFIXE_REPARATION = "REPARATION-"
+# La reprise à chaud : après un refus du vérificateur, du contrôle du périmètre ou des contrôles,
+# l'ouvrier reprend la main dans sa session et sa copie, avec le refus en entier. Elle ne compte
+# pas parmi les tentatives (qui bornent les départs neufs) : elle a sa borne, par départ neuf.
+REPRISES_PAR_DEPART = 1
+MOTIFS_REPRIS = ("bacle", "ne_sait_pas")  # un verdict « consigne » revient à la personne
+VERDICT_GARDE = 8000  # les derniers caractères du texte du vérificateur, gardés et transmis
+SORTIE_REPRISE = 4000  # les derniers caractères de la sortie des contrôles, pour la reprise
+# D'où vient un refus, écrit dans l'entrée d'historique (`origine`) ; "" pour une tentative
+# acceptée, arrêtée ou coupée par une panne.
+ORIGINES = ("agent", "perimetre", "controles", "verdict", "integration")
+
+
+@dataclass(frozen=True)
+class Jugement:
+    """Ce que le moteur conclut d'une passe de l'ouvrier : accepté (`motif` None) ou refusé.
+
+    `complet` est ce que reçoit l'ouvrier repris : le verdict entier, la liste des fichiers hors
+    périmètre, ou la fin de la sortie des contrôles. `verdict` est le texte du vérificateur de
+    cette passe (ses `VERDICT_GARDE` derniers caractères), s'il a fini son tour. `reprenable` dit
+    si l'ouvrier peut reprendre la main ; `reprise`, si la passe jugée était une reprise.
+    """
+
+    motif: str | None
+    detail: str
+    origine: str = ""
+    complet: str | list[str] = ""
+    verdict: str = ""
+    reprenable: bool = False
+    reprise: bool = False
+
+    def pour_la_suite(self) -> str:
+        """Ce que reçoit le départ neuf qui suit : le verdict entier s'il y en a un, sinon le
+        détail du refus."""
+        return self.verdict if self.origine == "verdict" and self.verdict.strip() else self.detail
+
+
+ARRET = Jugement(ARRETEE, DETAIL_ARRET)
 
 
 class ContratNonValide(Exception):
@@ -86,6 +127,7 @@ def taches_du_plan(plan: dict, profil: dict) -> list[Tache]:
 PHASES = {
     "preparation": "Préparation de sa copie de travail",
     "ouvrier": "L'ouvrier travaille (tentative {})",
+    "reprise": "L'ouvrier reprend son travail après un refus (tentative {})",
     "perimetre": "Contrôle du périmètre",
     "controles": "Contrôles automatiques : ",
     "verificateur": "Le vérificateur relit ({})",
@@ -203,7 +245,16 @@ class Moteur:
             self.chantier.cout_usd += resultat.cout_usd
             self.chantier.tokens += resultat.tokens
 
-    def _tracer(self, tache: Tache, issue: str, detail: str, decalage: int = 0) -> None:
+    def _tracer(
+        self,
+        tache: Tache,
+        issue: str,
+        detail: str,
+        decalage: int = 0,
+        origine: str = "",
+        reprise: bool = False,
+        verdict: str = "",
+    ) -> None:
         """Sous le verrou : ajoute à l'historique de la tâche l'entrée d'une tentative.
 
         Le décalage vaut 1 pour une tentative arrêtée avant son départ, qui n'a pas encore été
@@ -212,6 +263,10 @@ class Moteur:
         L'entrée porte aussi `durees` : les secondes de chaque phase de la tentative, par clé de
         `PHASES`, et `attente` pour la première tentative d'un départ. La phase en cours est
         close ici ; une tentative jugée valide marque le moment où la tâche est vérifiée.
+
+        Elle porte enfin `origine` (d'où vient le refus, parmi `ORIGINES`, "" sinon), `reprise`
+        (vrai pour la passe d'une reprise à chaud, qui garde le numéro de son départ) et
+        `verdict` (le texte du vérificateur de cette passe, "" s'il n'a rien rendu).
         """
         maintenant = self.horloge()
         self._clore_mesure(tache.id, maintenant)
@@ -227,6 +282,9 @@ class Moteur:
                 "effort": tache.effort,
                 "issue": issue,
                 "detail": detail,
+                "origine": origine,
+                "reprise": reprise,
+                "verdict": verdict,
                 "durees": {cle: round(secondes, 3) for cle, secondes in durees.items()},
             }
         )
@@ -399,6 +457,11 @@ class Moteur:
                     mesures.pop(tache.id, None)
 
     def _boucle(self, tache: Tache) -> None:
+        """Mène la tâche de départ neuf en départ neuf, jusqu'à ce qu'elle soit vérifiée ou rendue.
+
+        Chaque départ a sa reprise à chaud : la copie de travail n'est jetée (`annuler`) que pour
+        repartir de zéro ou rendre la tâche.
+        """
         remarques = ""
         while True:
             if self._arretee(tache):  # arrêt demandé avant le départ de l'ouvrier
@@ -408,30 +471,117 @@ class Moteur:
             if resultat is None:  # arrêt demandé pendant la préparation : l'ouvrier n'est pas parti
                 self.controles.annuler(tache, dossier)
                 return self._arret_avant_depart(tache)
-            motif, detail = self._juger(tache, resultat, dossier)
-            if motif is None:
-                with self.verrou:  # dernier mot : un arrêt demandé jusqu'ici l'emporte
-                    if self._arretee(tache):
-                        motif, detail = ARRETEE, DETAIL_ARRET
-                    else:
-                        self._enregistrement.add(tache.id)
-            if motif is None:
-                self._phase(tache, PHASES["enregistrement"])
-                probleme = self.controles.enregistrer(tache, dossier)
-                if probleme:  # conflit, ou contrôles rouges une fois mêlé à la branche principale
-                    with self.verrou:
-                        self._enregistrement.discard(tache.id)
-                    motif, detail = "ne_sait_pas", probleme
-            with self.verrou:
-                self._tracer(tache, motif or "valide", detail)
-            if motif is None:
+            jugement = self._passe(tache, dossier, resultat)
+            jugement = self._reprises(tache, dossier, resultat.session, jugement)
+            if jugement.motif is None:
                 with self.verrou:
                     tache.etat = "verifie"
                 return self._noter("Vérifiée et enregistrée.", tache)
             self.controles.annuler(tache, dossier)
-            remarques = detail
-            if not self._apres_echec(tache, motif, detail):
+            remarques = jugement.pour_la_suite()
+            if not self._apres_echec(tache, jugement.motif, jugement.detail, jugement.reprise):
                 return None
+
+    def _passe(
+        self, tache: Tache, dossier, resultat, precedent: Jugement | None = None
+    ) -> Jugement:
+        """Juge une passe de l'ouvrier, fait entrer son travail s'il est accepté, et la trace.
+
+        `precedent` est le refus qui a conduit à une reprise à chaud : la passe jugée est alors
+        cette reprise, tracée au numéro de son départ avec `reprise: true`.
+        """
+        jugement = self._juger(tache, resultat, dossier, precedent)
+        if jugement.motif is None:
+            jugement = self._enregistrer(tache, dossier, jugement)
+        jugement = replace(jugement, reprise=precedent is not None)
+        with self.verrou:
+            self._tracer(
+                tache,
+                jugement.motif or "valide",
+                jugement.detail,
+                origine=jugement.origine,
+                reprise=jugement.reprise,
+                verdict=jugement.verdict,
+            )
+        return jugement
+
+    def _enregistrer(self, tache: Tache, dossier, jugement: Jugement) -> Jugement:
+        """Fait entrer le livrable accepté dans la branche principale ; rend le jugement final."""
+        with self.verrou:  # dernier mot : un arrêt demandé jusqu'ici l'emporte
+            if self._arretee(tache):
+                return ARRET
+            self._enregistrement.add(tache.id)
+        self._phase(tache, PHASES["enregistrement"])
+        probleme = self.controles.enregistrer(tache, dossier)
+        if not probleme:
+            return jugement
+        with self.verrou:  # conflit, ou contrôles rouges une fois mêlé à la branche principale
+            self._enregistrement.discard(tache.id)
+        return replace(jugement, motif="ne_sait_pas", detail=probleme, origine="integration")
+
+    # --- la reprise à chaud ---------------------------------------------------------
+
+    def _reprises(self, tache: Tache, dossier, session: str, jugement: Jugement) -> Jugement:
+        """Redonne la main à l'ouvrier refusé, au plus `REPRISES_PAR_DEPART` fois pour ce départ.
+
+        Rend le jugement de la dernière passe : celui de la reprise, ou le refus d'origine si
+        aucune reprise n'a pu partir (refus qui ne se reprend pas, session perdue).
+        """
+        for _ in range(REPRISES_PAR_DEPART):
+            if not jugement.reprenable:
+                break
+            jugement = self._reprise(tache, dossier, session, jugement)
+        return jugement
+
+    def _reprise(self, tache: Tache, dossier, session: str, refus: Jugement) -> Jugement:
+        """Une reprise à chaud : l'ouvrier refusé corrige dans sa session et sa copie, puis sa
+        passe est jugée comme les autres (périmètre, contrôles, vérificateur)."""
+        self._noter(
+            f"Refusée. {refus.detail} Je redonne la main au même ouvrier, dans sa copie et sa "
+            "session, pour qu'il corrige.",
+            tache,
+        )
+        resultat = self._lancer_reprise(tache, dossier, session, refus)
+        if resultat is None:  # arrêt demandé entre le refus et la reprise : elle ne part pas
+            with self.verrou:
+                self._tracer(tache, ARRETEE, DETAIL_ARRET, reprise=True)
+            return replace(ARRET, reprise=True)
+        if resultat.erreur == REPRISE_IMPOSSIBLE:  # ni entrée d'historique ni tentative de plus
+            self._noter(
+                "La session de l'ouvrier ne peut pas être reprise : je jette sa copie, et la "
+                "suite est celle d'un refus sans reprise.",
+                tache,
+            )
+            return replace(refus, reprenable=False)
+        return self._passe(tache, dossier, resultat, precedent=refus)
+
+    def _lancer_reprise(self, tache: Tache, dossier, session: str, refus: Jugement):
+        """Relance l'ouvrier dans sa session, sur sa copie, avec le refus ; rend son résultat.
+
+        None si l'arrêt a été demandé avant : l'agent n'est pas lancé. La reprise compte parmi
+        les agents lancés, jamais parmi les tentatives ; une session qu'on ne peut pas reprendre
+        ne compte pas non plus parmi les agents, et sa durée n'est pas gardée.
+        """
+        with self.verrou:
+            tache.etat = "en_cours"
+        if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
+            return None
+        self._prendre_agent()
+        self._phase(tache, PHASES["reprise"].format(tache.tentatives))
+        resultat = self.agent.executer(
+            consigne_reprise(tache, refus.origine, refus.complet, self.profil),
+            tache.modele,
+            tache.effort,
+            dossier,
+            contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
+            reprendre=session,
+        )
+        self._compter(tache, resultat)
+        if resultat.erreur == REPRISE_IMPOSSIBLE:
+            with self.verrou:
+                self.chantier.agents_lances -= 1
+                self._mesure.pop(tache.id, None)
+        return resultat
 
     def _lancer_ouvrier(self, tache: Tache, remarques: str):
         """Prépare le travail et lance l'ouvrier ; rend (dossier, résultat).
@@ -471,45 +621,80 @@ class Moteur:
             self._tracer(tache, ARRETEE, DETAIL_ARRET, decalage=1)
         self._rendre(tache, MOTIF_ARRET)
 
-    def _juger(self, tache: Tache, resultat, dossier) -> tuple[str | None, str]:
-        """Rend (None, résumé) si le livrable est accepté, sinon (motif, détail)."""
+    def _juger(
+        self, tache: Tache, resultat, dossier, precedent: Jugement | None = None
+    ) -> Jugement:
+        """Juge une passe de l'ouvrier : périmètre, contrôles, puis vérificateur.
+
+        Rend un `Jugement` sans motif si le livrable est accepté. `precedent` est le refus qui a
+        conduit à une reprise : venu du vérificateur, il appelle une vérification restreinte.
+        """
         if self._arretee(tache, resultat):
-            return ARRETEE, DETAIL_ARRET
+            return ARRET
         if not resultat.ok:
-            return "ne_sait_pas", f"L'agent s'est arrêté sur une erreur : {resultat.erreur}"
+            detail = f"L'agent s'est arrêté sur une erreur : {resultat.erreur}"
+            return Jugement("ne_sait_pas", detail, "agent")
+        refus = self._controler(tache, dossier, resultat)
+        if refus is not None:
+            return refus
+        if self._arretee(tache):  # aucun agent n'est en marche : le vérificateur ne part pas
+            return ARRET
+        return self._verifier(tache, dossier, precedent)
+
+    def _controler(self, tache: Tache, dossier, resultat) -> Jugement | None:
+        """Contrôle le périmètre puis lance les contrôles ; rend le refus, ou None s'ils passent.
+
+        Ces deux refus se reprennent à chaud : l'ouvrier a fini son tour et le message existe.
+        """
         self._phase(tache, PHASES["perimetre"])
         modifies = self.controles.fichiers_modifies(tache, dossier, resultat)
         dehors = hors_perimetre(modifies, tache.perimetre)
         if dehors:
-            return "deborde", "Fichiers modifiés hors périmètre : " + ", ".join(dehors) + "."
+            detail = "Fichiers modifiés hors périmètre : " + ", ".join(dehors) + "."
+            return Jugement("deborde", detail, "perimetre", list(dehors), reprenable=True)
         commandes = getattr(self.controles, "commandes", None) or []
         if commandes:
             self._phase(tache, PHASES["controles"] + " ; ".join(commandes))
         passe, sortie = self.controles.mecaniques(tache, dossier)
-        if not passe:
-            return "ne_sait_pas", "Les contrôles automatiques échouent :\n" + sortie[-1500:]
-        if self._arretee(tache):  # aucun agent n'est en marche : le vérificateur ne part pas
-            return ARRETEE, DETAIL_ARRET
+        if passe:
+            return None
+        detail = "Les contrôles automatiques échouent :\n" + sortie[-1500:]
+        fin = sortie[-SORTIE_REPRISE:]
+        return Jugement("ne_sait_pas", detail, "controles", fin, reprenable=True)
+
+    def _verifier(self, tache: Tache, dossier, precedent: Jugement | None) -> Jugement:
+        """Fait relire le livrable par un vérificateur neuf et lit son verdict.
+
+        Seul un verdict lisible qui recale pour « bâclé » ou « ne sait pas » se reprend à chaud :
+        un vérificateur en erreur ou illisible, ou une consigne mal posée, ne se reprend pas.
+        """
         self._prendre_agent()
-        avis = self._lancer_verificateur(tache, dossier)
+        avis = self._lancer_verificateur(tache, dossier, precedent)
         if avis is None or self._arretee(tache, avis):
-            return ARRETEE, DETAIL_ARRET
+            return ARRET
         verdict = lire_verdict(avis.texte) if avis.ok else lire_verdict("")
+        texte = (avis.texte or "")[-VERDICT_GARDE:] if avis.ok else ""
         with self.verrou:
             tache.verdict = verdict["resume"]
         if verdict["valide"]:
-            return None, verdict["resume"]
-        return verdict["motif"], verdict["resume"]
+            return Jugement(None, verdict["resume"], verdict=texte)
+        lisible = avis.ok and "valide" in (dernier_json(avis.texte or "") or {})
+        reprenable = lisible and verdict["motif"] in MOTIFS_REPRIS
+        return Jugement(verdict["motif"], verdict["resume"], "verdict", texte, texte, reprenable)
 
-    def _lancer_verificateur(self, tache: Tache, dossier):
+    def _lancer_verificateur(self, tache: Tache, dossier, precedent: Jugement | None = None):
         """Lance le vérificateur ; rend son avis, ou None si l'arrêt a été demandé avant son départ.
 
-        Dans ce cas l'agent n'est pas lancé et ne compte pas parmi les agents lancés.
+        Dans ce cas l'agent n'est pas lancé et ne compte pas parmi les agents lancés. Après la
+        reprise d'un refus du vérificateur, c'est un vérificateur neuf, au même dosage, avec la
+        consigne restreinte : le verdict précédent en entier, et seulement les points recalés.
         """
         with self.verrou:
             tache.etat = "en_verification"
         modele, effort = dosage.verificateur(tache.modele, tache.effort)
-        self._noter(f"Vérificateur lancé ({dosage.libelle(modele, effort)}).", tache)
+        restreinte = precedent is not None and precedent.origine == "verdict"
+        objet = " sur la correction" if restreinte else ""
+        self._noter(f"Vérificateur lancé{objet} ({dosage.libelle(modele, effort)}).", tache)
         if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
             with self.verrou:
                 self.chantier.agents_lances -= 1
@@ -519,7 +704,7 @@ class Moteur:
         en_plus = {"copie_jetable": True} if copie else {}
         try:
             avis = self.agent.executer(
-                consigne_verificateur(tache, self.chantier.contrat, self.profil, bool(copie)),
+                self._consigne_de_verification(tache, precedent if restreinte else None, copie),
                 modele,
                 effort,
                 copie or dossier,
@@ -533,6 +718,13 @@ class Moteur:
         self._compter(tache, avis)
         return avis
 
+    def _consigne_de_verification(self, tache: Tache, precedent: Jugement | None, copie) -> str:
+        """La consigne complète, ou la consigne restreinte qui suit la reprise d'un verdict."""
+        contrat, jetable = self.chantier.contrat, bool(copie)
+        if precedent is None:
+            return consigne_verificateur(tache, contrat, self.profil, jetable)
+        return consigne_reverification(tache, contrat, self.profil, precedent.verdict, jetable)
+
     def _copie_de_verification(self, tache: Tache, dossier):
         """La copie jetable où le vérificateur fait ses essais, ou None : il relit alors la
         copie de l'ouvrier, sans rien y écrire, comme avant (contrôles simulés, échec de git)."""
@@ -545,8 +737,13 @@ class Moteur:
             self._noter(f"Copie du vérificateur impossible, il relit seulement : {erreur}", tache)
             return None
 
-    def _apres_echec(self, tache: Tache, motif: str, detail: str) -> bool:
-        """Décide de la suite après un refus. Rend False si la tâche s'arrête là."""
+    def _apres_echec(self, tache: Tache, motif: str, detail: str, repris: bool = False) -> bool:
+        """Décide de la suite après un refus. Rend False si la tâche s'arrête là.
+
+        `repris` : le refus vient de la reprise à chaud de ce départ. Elle tient lieu de seconde
+        chance au même niveau : le départ neuf qui suit monte d'un cran si le contrat le permet,
+        sinon repart au même niveau si c'était le premier départ, sinon la tâche revient.
+        """
         contrat = self.chantier.contrat
         if motif == ARRETEE:  # ni seconde chance ni montée : la personne reprend la main
             self._rendre(tache, MOTIF_ARRET)
@@ -559,20 +756,37 @@ class Moteur:
                 return True
             self._rendre(tache, f"{tache.tentatives} tentatives sans succès. {detail}")
             return False
-        if tache.tentatives - tache.rallonge == 1:
+        premier = tache.tentatives - tache.rallonge == 1
+        if premier and not repris:
             self._noter(f"Refusée. {detail} Seconde chance au même niveau.", tache)
             return True
+        return self._monter(tache, motif, detail, repris, premier)
+
+    def _monter(self, tache: Tache, motif: str, detail: str, repris: bool, premier: bool) -> bool:
+        """Monte d'un cran pour le départ suivant, si le contrat le permet.
+
+        Sinon, après la reprise refusée d'un premier départ, la tâche repart au même niveau ;
+        dans les autres cas, elle revient à la personne responsable.
+        """
+        refusee = "Refusée après sa reprise." if repris else "Refusée."
         suivant = dosage.monter(tache.modele, tache.effort, motif)
         with self.verrou:
-            trop_de_montees = self.chantier.montees >= contrat.max_montees
+            trop_de_montees = self.chantier.montees >= self.chantier.contrat.max_montees
         if trop_de_montees or not self._sous_plafond(suivant):
+            if premier:
+                self._noter(
+                    f"{refusee} {detail} Le contrat ne permet pas de monter d'un cran : je "
+                    "repars de zéro au même niveau.",
+                    tache,
+                )
+                return True
             self._rendre(tache, f"le plafond d'escalade du contrat est atteint. {detail}")
             return False
         with self.verrou:
             tache.modele, tache.effort = suivant
             tache.montees += 1
             self.chantier.montees += 1
-        self._noter(f"Refusée. {detail} Je monte d'un cran : {dosage.libelle(*suivant)}.", tache)
+        self._noter(f"{refusee} {detail} Je monte d'un cran : {dosage.libelle(*suivant)}.", tache)
         return True
 
     def _relancer_seul(self, tache: Tache, motif: str, detail: str) -> bool:

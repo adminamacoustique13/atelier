@@ -3,11 +3,18 @@ import threading
 
 import pytest
 
-from atelier.agents import AgentSimule
+from atelier.agents import AgentSimule, Resultat
 from atelier.consignes import consigne_ouvrier, lire_verdict
 from atelier.controles import ControlesGit, ControlesSimules, hors_perimetre, se_chevauchent
 from atelier.modele import Chantier, Contrat, Tache
-from atelier.moteur import ABANDONNER, RELANCER, RELANCER_TEL, ContratNonValide, Moteur
+from atelier.moteur import (
+    ABANDONNER,
+    ORIGINES,
+    RELANCER,
+    RELANCER_TEL,
+    ContratNonValide,
+    Moteur,
+)
 
 
 def chantier(taches, **contrat):
@@ -24,6 +31,17 @@ def tache(identifiant, **champs):
 def moteur(c, scenario=None):
     agent = AgentSimule(scenario or {}, perimetres={t.id: t.perimetre for t in c.taches})
     return Moteur(c, agent, ControlesSimules()), agent
+
+
+def departs(agent):
+    """Le dosage de chaque départ neuf d'un ouvrier, sans les reprises à chaud."""
+    return [(x["modele"], x["effort"]) for x in agent.appels
+            if x["role"] == "ouvrier" and "reprise" not in x]  # fmt: skip
+
+
+def traces(t):
+    """L'historique d'une tâche, réduit au numéro, à l'issue et à la marque de reprise."""
+    return [(e["tentative"], e["issue"], e["reprise"]) for e in t.historique]
 
 
 def test_sans_contrat_valide_rien_ne_demarre():
@@ -90,8 +108,9 @@ def test_chaque_agent_recoit_son_dosage_et_le_verificateur_est_au_dessus():
 
 
 def test_seconde_chance_puis_montee_d_un_cran():
+    """Une erreur d'agent ne se reprend pas : seconde chance au même niveau, puis un cran."""
     c = chantier([tache("A")])
-    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ok"]})
+    m, agent = moteur(c, {"A": ["erreur", "erreur", "ok"]})
     m.executer()
     a = c.tache("A")
     assert a.etat == "verifie"
@@ -100,11 +119,12 @@ def test_seconde_chance_puis_montee_d_un_cran():
     assert c.montees == 1
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
     assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low")]
+    assert agent.reprises == []
 
 
 def test_un_travail_bacle_monte_l_effort_pas_le_modele():
     c = chantier([tache("A")])
-    m, _ = moteur(c, {"A": ["bacle", "bacle", "ok"]})
+    m, _ = moteur(c, {"A": ["bacle", "ok"]})  # refusée, reprise refusée, puis un cran
     m.executer()
     assert (c.tache("A").modele, c.tache("A").effort) == ("sonnet", "medium")
 
@@ -152,11 +172,16 @@ def test_abandonner_ferme_la_tache():
 
 def test_une_sortie_de_perimetre_est_refusee_sans_passer_par_le_verificateur():
     c = chantier([tache("A")])
-    m, agent = moteur(c, {"A": ["deborde", "ok"]})
+    m, agent = moteur(c, {"A": ["deborde", "ok"]})  # la reprise rejoue le débord
     m.executer()
     assert c.tache("A").historique[0]["issue"] == "deborde"
     assert "hors_perimetre.txt" in c.tache("A").historique[0]["detail"]
-    assert [a["role"] for a in agent.appels] == ["ouvrier", "ouvrier", "verificateur"]
+    assert [(e["issue"], e["reprise"]) for e in c.tache("A").historique] == [
+        ("deborde", False), ("deborde", True), ("valide", False),
+    ]  # fmt: skip
+    assert [(a["role"], "reprise" in a) for a in agent.appels] == [
+        ("ouvrier", False), ("ouvrier", True), ("ouvrier", False), ("verificateur", False),
+    ]  # fmt: skip
 
 
 def test_une_consigne_mal_posee_revient_tout_de_suite():
@@ -232,11 +257,12 @@ def test_avec_un_vrai_depot_git_le_travail_verifie_est_fusionne_et_le_reste_jete
     verifications, executer = [], agent.executer
 
     def executer_en_notant(consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
-                           copie_jetable=False):  # fmt: skip
+                           copie_jetable=False, reprendre=None):  # fmt: skip
         if lecture_seule:
             verifications.append((dossier, copie_jetable, "copie jetable" in consigne))
             (dossier / "mutation.py").write_text("raise SystemExit(1)\n", "utf-8")
-        return executer(consigne, modele, effort, dossier, lecture_seule, contexte)
+        return executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                        reprendre=reprendre)  # fmt: skip
 
     agent.executer = executer_en_notant
     Moteur(c, agent, controles).executer()
@@ -612,18 +638,28 @@ def test_une_tache_epuisee_est_relancee_seule_un_cran_plus_haut():
     a = c.tache("A")
     assert a.etat == "verifie" and c.demandes == [] and c.termine
     assert a.relances_auto == 1 and a.tentatives == 4
-    ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
-    assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low"), ("fable", "low")]
-    assert any("Je relance seul un cran plus haut : Fable" in e["texte"] for e in c.evenements)
+    # Chaque départ a sa reprise, au même dosage, qui tient lieu de seconde chance.
+    assert departs(agent) == [("sonnet", "low"), ("opus", "low"), ("fable", "low"),
+                              ("fable", "medium")]  # fmt: skip
+    assert [r["tentative"] for r in agent.reprises] == [1, 2, 3]
+    texte = "Je relance seul un cran plus haut : Fable, effort moyen"
+    assert any(texte in e["texte"] for e in c.evenements)
 
 
 def test_la_relance_seule_n_a_lieu_qu_une_fois_puis_la_tache_revient():
-    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
-    m, _ = moteur(c, {"A": ["ne_sait_pas"]})
+    """Le plafond (Fable, effort max) laisse des crans libres : seule la borne des relances
+    seules rend la tâche, après ses tentatives et non au plafond."""
+    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="max", max_tentatives=2)
+    m, agent = moteur(c, {"A": ["bacle"]})
     m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and len(c.demandes) == 1 and a.relances_auto == 1
     assert not c.termine
+    # Une montée, la relance seule (une seule), une montée, puis le retour à la personne.
+    assert departs(agent) == [("sonnet", "low"), ("sonnet", "medium"), ("sonnet", "high"),
+                              ("sonnet", "xhigh")]  # fmt: skip
+    assert a.tentatives == 4 and "4 tentatives sans succès" in c.demandes[0]["question"]
+    assert sum("Je relance seul" in t for t in textes_du_fil(c)) == 1
 
 
 def test_au_plafond_aucune_relance_seule():
@@ -744,8 +780,9 @@ def test_chaque_tentative_jugee_est_tracee_sous_le_verrou_du_moteur():
     m, _ = moteur(c, {"A": ["ne_sait_pas", "ok"]})
     historique = surveiller(m, c.tache("A"))
     m.executer()
-    assert [e["issue"] for e in historique] == ["ne_sait_pas", "valide"]
-    assert historique.sous_verrou == [True, True]
+    assert [e["issue"] for e in historique] == ["ne_sait_pas", "ne_sait_pas", "valide"]
+    assert [e["reprise"] for e in historique] == [False, True, False]
+    assert historique.sous_verrou == [True, True, True]
 
 
 def test_un_arret_avant_le_depart_de_l_ouvrier_est_trace_sous_le_verrou_avec_son_numero():
@@ -790,19 +827,20 @@ def test_tout_en_haut_de_l_echelle_la_tache_revient_au_plafond_sans_panne():
     m.executer()
     p = c.tache("P")
     assert p.etat == "revenu" and p.tentatives == 2
-    assert [e["issue"] for e in p.historique] == ["ne_sait_pas", "ne_sait_pas"]
+    assert traces(p) == [(1, "ne_sait_pas", False), (1, "ne_sait_pas", True),
+                         (2, "ne_sait_pas", False), (2, "ne_sait_pas", True)]  # fmt: skip
     assert "le plafond d'escalade du contrat est atteint" in c.demandes[-1]["question"]
 
 
 def test_la_relance_seule_ne_depasse_jamais_le_plafond_du_contrat():
-    c = chantier([tache("A")], plafond_modele="opus", plafond_effort="low")
+    c = chantier([tache("A")], plafond_modele="opus", plafond_effort="low", max_tentatives=2)
     m, agent = moteur(c, {"A": ["ne_sait_pas"]})
     m.executer()
     a = c.tache("A")
-    assert a.etat == "revenu" and a.relances_auto == 0 and a.tentatives == 3
+    assert a.etat == "revenu" and a.relances_auto == 0 and a.tentatives == 2
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
-    assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low")]
-    assert "3 tentatives sans succès" in c.demandes[-1]["question"]
+    assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low"), ("opus", "low")]
+    assert "2 tentatives sans succès" in c.demandes[-1]["question"]
 
 
 # --- la mesure du temps : chaque phase de chaque tentative, l'attente avant le départ ---------
@@ -843,9 +881,11 @@ def moteur_chronometre(c, scenario=None, paralleles=3):
             horloge.t += PAS["annuler"]
 
     class Agent(AgentSimule):
-        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None):
+        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                     copie_jetable=False, reprendre=None):  # fmt: skip
             horloge.t += PAS[contexte["role"]]
-            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte)
+            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
 
     agent = Agent(scenario or {}, perimetres={t.id: t.perimetre for t in c.taches})
     profil = {"paralleles": paralleles}
@@ -866,15 +906,25 @@ def test_chaque_phase_d_une_tentative_garde_sa_duree():
     assert entree["durees"] == {"attente": 0.0, **DUREES_ACCEPTEE}
 
 
-def test_une_tentative_refusee_puis_une_acceptee_donnent_deux_jeux_de_durees():
+def test_une_tentative_refusee_sa_reprise_et_la_suivante_ont_chacune_leurs_durees():
     c = chantier([tache("A")])
     m, _ = moteur_chronometre(c, {"A": ["bacle", "ok"]})
     m.executer()
-    refusee, acceptee = c.tache("A").historique
-    assert (refusee["issue"], acceptee["issue"]) == ("bacle", "valide")
+    refusee, reprise, acceptee = c.tache("A").historique
+    assert [(e["tentative"], e["issue"], e["reprise"]) for e in (refusee, reprise, acceptee)] == [
+        (1, "bacle", False), (1, "bacle", True), (2, "valide", False),
+    ]  # fmt: skip
     sans_enregistrement = {k: v for k, v in DUREES_ACCEPTEE.items() if k != "enregistrement"}
     assert refusee["durees"] == {"attente": 0.0, **sans_enregistrement}
+    # La reprise n'a pas de préparation : la copie est gardée ; elle a sa phase, mesurée.
+    assert reprise["durees"] == {"reprise": PAS["ouvrier"], "perimetre": 0.0, "controles": 3.0,
+                                 "verificateur": 20.0}  # fmt: skip
     assert acceptee["durees"] == DUREES_ACCEPTEE  # l'attente n'appartient qu'au départ
+    from atelier import archives
+
+    temps = archives.temps_par_groupe(c.tache("A"))  # la reprise compte dans « écrire »
+    assert temps["ecrire"] == 2 * (PAS["preparer"] + PAS["ouvrier"]) + PAS["ouvrier"]
+    assert temps["autre"] == 0
 
 
 def test_une_tache_qui_attend_sa_dependance_ne_compte_son_attente_qu_apres_sa_verification():
@@ -912,8 +962,9 @@ def test_une_relance_decidee_par_la_personne_compte_son_attente_depuis_la_decisi
     horloge.t += 4
     m.executer()
     entrees = c.tache("A").historique
-    assert [e["issue"] for e in entrees] == ["ne_sait_pas", "ne_sait_pas", "valide"]
-    assert entrees[2]["durees"]["attente"] == 0.0  # le moteur relancé part aussitôt
+    assert [e["issue"] for e in entrees] == ["ne_sait_pas"] * 4 + ["valide"]
+    assert [e["reprise"] for e in entrees] == [False, True, False, True, False]
+    assert entrees[4]["durees"]["attente"] == 0.0  # le moteur relancé part aussitôt
 
 
 def test_un_arret_pendant_la_preparation_garde_la_duree_de_la_preparation():
@@ -969,7 +1020,7 @@ def test_les_durees_survivent_a_l_arret_et_un_etat_sans_durees_se_relit(tmp_path
         for entree in t["historique"]:
             del entree["durees"]  # un état écrit avant les mesures
     vieux = Chantier.depuis_dict(ancien)
-    assert [e["issue"] for e in vieux.tache("A").historique] == ["bacle", "valide"]
+    assert [e["issue"] for e in vieux.tache("A").historique] == ["bacle", "bacle", "valide"]
     vieux.taches.append(tache("B"))
     moteur(vieux)[0].executer()  # et le moteur repart dessus
     assert vieux.tache("B").etat == "verifie" and "durees" in vieux.tache("B").historique[0]
@@ -989,3 +1040,499 @@ def test_la_mesure_ne_change_rien_a_ce_que_le_moteur_fait():
         return appels, [e["texte"] for e in c.evenements], [t.etat for t in c.taches], sans
 
     assert deroule(True) == deroule(False)
+
+
+# --- la reprise à chaud après un refus ------------------------------------------------------
+
+ESSAIS = "Détail de mes essais : " + "rien de plus. " * 40
+VERDICT_LONG = (
+    "Je recale ce livrable pour deux points.\n"
+    "1. Le critère 1 n'est pas tenu : la fonction ne gère pas la liste vide.\n"
+    "2. Le test ajouté ne peut pas échouer : il compare la sortie à elle-même.\n"
+    f"{ESSAIS}\n"
+    '{"valide": false, "motif": "bacle", "resume": "Deux points ne sont pas tenus."}'
+)
+
+
+class AgentParRang(AgentSimule):
+    """Lit l'issue au rang de l'appel, par tâche et par rôle, reprises comprises.
+
+    L'agent simulé rejoue à la reprise l'issue de sa tentative : celui-ci peut faire finir une
+    reprise autrement que la passe refusée. Il garde chaque consigne reçue et note chaque agent
+    dans `journal` ; un vérificateur rend, appel après appel, le texte de `textes` s'il y en a un.
+    """
+
+    def __init__(self, issues=None, textes=None, journal=None, **champs):
+        super().__init__(**champs)
+        self.issues, self.textes = issues or {}, {k: list(v) for k, v in (textes or {}).items()}
+        self.journal = journal if journal is not None else []
+        self.rangs, self.consignes = {}, []
+
+    def _issue(self, contexte):
+        cle = (contexte.get("tache", ""), contexte.get("role", ""))
+        rang = self.rangs.get(cle, 0)
+        self.rangs[cle] = rang + 1
+        suite = self.issues.get(cle) or ["ok"]
+        return suite[min(rang, len(suite) - 1)]
+
+    def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                 copie_jetable=False, reprendre=None):  # fmt: skip
+        role = (contexte or {}).get("role")
+        self.consignes.append((role, reprendre is not None, consigne))
+        self.journal.append("reprise" if reprendre is not None else role)
+        resultat = super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+        textes = self.textes.get((contexte or {}).get("tache"))
+        if role == "verificateur" and textes:
+            texte = textes.pop(0)
+            resultat.texte = resultat.texte if texte is None else texte
+        return resultat
+
+
+class ControlesComptes(ControlesSimules):
+    """Des contrôles simulés qui notent chaque étape, et chaque copie préparée ou jetée.
+
+    `sorties` : ce que rendent les contrôles automatiques, appel après appel, puis ils passent.
+    """
+
+    commandes = ["pytest -q"]
+
+    def __init__(self, sorties=(), journal=None):
+        self.sorties = list(sorties)
+        self.journal = journal if journal is not None else []
+        self.preparees, self.annulees, self.tentatives_vues = [], [], []
+
+    def preparer(self, t):
+        self.preparees.append(t.id)
+
+    def fichiers_modifies(self, t, dossier, resultat):
+        self.journal.append("perimetre")
+        self.tentatives_vues.append(t.tentatives)
+        return super().fichiers_modifies(t, dossier, resultat)
+
+    def mecaniques(self, t, dossier):
+        self.journal.append("controles")
+        return self.sorties.pop(0) if self.sorties else (True, "")
+
+    def annuler(self, t, dossier):
+        self.annulees.append(t.id)
+
+
+def moteur_a_reprises(taches, issues=None, textes=None, sorties=(), agent_cls=AgentParRang,
+                      **contrat):  # fmt: skip
+    journal = []
+    c = chantier(taches, **contrat)
+    agent = agent_cls(issues, textes, journal, perimetres={t.id: t.perimetre for t in taches})
+    controles = ControlesComptes(sorties, journal)
+    return c, Moteur(c, agent, controles), agent, controles
+
+
+def textes_du_fil(c):
+    return [e["texte"] for e in c.evenements]
+
+
+def consignes_de(agent, role):
+    return [consigne for r, _, consigne in agent.consignes if r == role]
+
+
+def test_un_refus_du_verificateur_est_repris_a_chaud_et_le_livrable_entre():
+    c, m, agent, controles = moteur_a_reprises(
+        [tache("A")], {("A", "verificateur"): ["bacle", "ok"]}, {"A": [VERDICT_LONG]}
+    )
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and c.termine
+    assert a.tentatives == 1 and c.agents_lances == 4  # un départ, quatre agents
+    assert controles.preparees == ["A"] and controles.annulees == []  # la même copie, gardée
+    assert controles.tentatives_vues == [1, 1]  # la reprise ne compte pas de tentative
+    (reprise,) = agent.reprises
+    assert (reprise["session"], reprise["role"], reprise["tentative"]) == (
+        "session-simulee-1", "ouvrier", 1,
+    )  # fmt: skip
+    assert VERDICT_LONG in reprise["message"]  # le verdict en entier, pas son résumé
+    # Périmètre puis contrôles sont rejoués avant le second vérificateur, au même dosage.
+    assert controles.journal == ["ouvrier", "perimetre", "controles", "verificateur",
+                                 "reprise", "perimetre", "controles", "verificateur"]  # fmt: skip
+    verificateurs = [(x["modele"], x["effort"]) for x in agent.appels
+                     if x["role"] == "verificateur"]  # fmt: skip
+    assert verificateurs == [("opus", "medium")] * 2
+    premiere, seconde = consignes_de(agent, "verificateur")
+    assert "[début du verdict précédent]" not in premiere
+    assert "[début du verdict précédent]" in seconde and VERDICT_LONG in seconde
+    assert traces(a) == [(1, "bacle", False), (1, "valide", True)]
+    assert [e["origine"] for e in a.historique] == ["verdict", ""]
+    assert a.historique[0]["verdict"] == VERDICT_LONG
+    assert '"valide": true' in a.historique[1]["verdict"]
+    fil = " ".join(textes_du_fil(c))
+    assert "Je redonne la main au même ouvrier" in fil and "Seconde chance" not in fil
+    assert "Vérificateur lancé sur la correction (Opus, effort moyen)." in textes_du_fil(c)
+
+
+def test_une_reprise_refusee_jette_la_copie_une_fois_et_monte_d_un_cran():
+    c, m, agent, controles = moteur_a_reprises(
+        [tache("A")], {("A", "verificateur"): ["bacle", "bacle", "ok"]}, {"A": [None, VERDICT_LONG]}
+    )
+    suites, apres_echec = [], m._apres_echec
+    m._apres_echec = lambda *arguments: suites.append(arguments) or apres_echec(*arguments)
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 2 and c.montees == 1
+    assert controles.annulees == ["A"] and controles.preparees == ["A", "A"]
+    assert len(suites) == 1 and suites[0][-1] is True  # une seule décision, après la reprise
+    assert departs(agent) == [("sonnet", "low"), ("sonnet", "medium")]
+    assert traces(a) == [(1, "bacle", False), (1, "bacle", True), (2, "valide", False)]
+    # Le départ neuf reçoit le verdict entier de la seconde vérification.
+    depart_neuf = [cons for role, repris, cons in agent.consignes if role == "ouvrier"][-1]
+    assert VERDICT_LONG in depart_neuf
+    assert any(t.startswith("Refusée après sa reprise.") and "Je monte d'un cran : Sonnet, "
+               "effort moyen." in t for t in textes_du_fil(c))  # fmt: skip
+
+
+def test_un_debord_est_repris_avec_la_liste_des_fichiers_hors_perimetre():
+    c, m, agent, controles = moteur_a_reprises([tache("A")], {("A", "ouvrier"): ["deborde", "ok"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 1
+    (reprise,) = agent.reprises
+    assert "- `hors_perimetre.txt`" in reprise["message"]
+    assert "Le contrôle du périmètre a refusé ton livrable" in reprise["message"]
+    assert [(role, repris) for role, repris, _ in agent.consignes] == [
+        ("ouvrier", False), ("ouvrier", True), ("verificateur", False),
+    ]  # fmt: skip
+    (verification,) = consignes_de(agent, "verificateur")
+    assert "[début du verdict précédent]" not in verification  # la vérification complète
+    assert traces(a) == [(1, "deborde", False), (1, "valide", True)]
+    assert [e["origine"] for e in a.historique] == ["perimetre", ""]
+    assert controles.preparees == ["A"] and controles.annulees == []
+
+
+def test_des_controles_rouges_sont_repris_avec_la_fin_de_leur_sortie():
+    sortie = "DEBUT-COUPE " + "x" * 5000 + " FAILED tests/test_a.py::test_rend"
+    c, m, agent, controles = moteur_a_reprises([tache("A")], sorties=[(False, sortie)])
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 1
+    (reprise,) = agent.reprises
+    assert sortie[-4000:] in reprise["message"] and "DEBUT-COUPE" not in reprise["message"]
+    assert controles.journal == ["ouvrier", "perimetre", "controles",
+                                 "reprise", "perimetre", "controles", "verificateur"]  # fmt: skip
+    (verification,) = consignes_de(agent, "verificateur")
+    assert "[début du verdict précédent]" not in verification
+    assert traces(a) == [(1, "ne_sait_pas", False), (1, "valide", True)]
+    assert [e["origine"] for e in a.historique] == ["controles", ""]
+
+
+class AgentOublieux(AgentParRang):
+    """Perd la session de l'ouvrier avant sa reprise : oubliée, ou jamais connue."""
+
+    maniere = "oubliee"
+
+    def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                 copie_jetable=False, reprendre=None):  # fmt: skip
+        resultat = super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+        if self.maniere == "oubliee" and contexte["role"] == "verificateur":
+            self.oublier_sessions()
+        if self.maniere == "inconnue" and contexte["role"] == "ouvrier":
+            resultat.session = ""
+        return resultat
+
+
+@pytest.mark.parametrize("maniere", ["oubliee", "inconnue"])
+def test_une_session_perdue_garde_la_suite_d_un_refus_sans_reprise(maniere):
+    c, m, agent, controles = moteur_a_reprises(
+        [tache("A")], {("A", "verificateur"): ["bacle", "ok"]}, {"A": [VERDICT_LONG]},
+        agent_cls=AgentOublieux,
+    )  # fmt: skip
+    agent.maniere = maniere
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 2  # le seul départ de plus : la seconde chance
+    assert agent.reprises == []  # demandée, mais impossible
+    assert [x.get("reprise") for x in agent.appels if x["role"] == "ouvrier"][1] is not None
+    assert c.agents_lances == 4  # la reprise impossible ne compte pas
+    assert traces(a) == [(1, "bacle", False), (2, "valide", False)]  # ni entrée de plus
+    assert "reprise" not in a.historique[1]["durees"]
+    assert controles.annulees == ["A"] and controles.preparees == ["A", "A"]
+    fil = textes_du_fil(c)
+    assert sum("ne peut pas être reprise" in t for t in fil) == 1
+    assert any("Seconde chance au même niveau" in t for t in fil)
+    assert VERDICT_LONG in consignes_de(agent, "ouvrier")[-1]  # le départ neuf a le verdict
+
+
+def test_au_plafond_la_reprise_refusee_d_un_premier_depart_repart_au_meme_niveau():
+    c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
+    m, agent = moteur(c, {"A": ["bacle", "ok"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 2 and c.montees == 0
+    assert departs(agent) == [("sonnet", "low"), ("sonnet", "low")]
+    assert any("je repars de zéro au même niveau" in t for t in textes_du_fil(c))
+
+
+def test_au_plafond_un_second_depart_refuse_apres_sa_reprise_revient():
+    c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
+    m, agent = moteur(c, {"A": ["bacle"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.tentatives == 2 and len(c.demandes) == 1
+    assert departs(agent) == [("sonnet", "low"), ("sonnet", "low")]
+    assert [r["tentative"] for r in agent.reprises] == [1, 2]
+    assert "le plafond d'escalade du contrat est atteint" in c.demandes[0]["question"]
+
+
+def test_avec_un_vrai_depot_la_reprise_retrouve_le_travail_de_la_premiere_passe(tmp_path):
+    def git(*arguments):
+        subprocess.run(["git", *arguments], cwd=tmp_path, check=True, capture_output=True)
+
+    git("init", "-q", "-b", "main")
+    git("config", "user.name", "Essai")
+    git("config", "user.email", "essai@example.invalid")
+    (tmp_path / "LISEZMOI.md").write_text("socle\n", "utf-8")
+    git("add", "-A")
+    git("commit", "-q", "-m", "socle")
+    vus, dossiers, preparees, annulees = [], [], [], []
+
+    class Agent(AgentParRang):
+        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                     copie_jetable=False, reprendre=None):  # fmt: skip
+            if contexte["role"] == "ouvrier" and reprendre is None:
+                dossiers.append(dossier)
+                (dossier / "a_premiere.py").write_text("# première passe\n", "utf-8")
+            if reprendre is not None:
+                vus.append((dossier, (dossier / "a_premiere.py").read_text("utf-8")))
+            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+
+    class Controles(ControlesGit):
+        def preparer(self, t):
+            preparees.append(t.id)
+            return super().preparer(t)
+
+        def annuler(self, t, dossier):
+            annulees.append(t.id)
+            return super().annuler(t, dossier)
+
+    c = chantier([tache("A", perimetre=["a.py", "a_premiere.py"])])
+    agent = Agent({("A", "verificateur"): ["bacle", "ok"]}, perimetres={"A": ["a.py"]})
+    Moteur(c, agent, Controles(tmp_path, commandes=["test -f a_premiere.py"])).executer()
+    assert vus == [(dossiers[0], "# première passe\n")]  # même dossier, travail encore là
+    assert preparees == ["A"] and annulees == []
+    assert c.tache("A").etat == "verifie"
+    assert traces(c.tache("A")) == [(1, "bacle", False), (1, "valide", True)]
+    assert (tmp_path / "a_premiere.py").read_text("utf-8") == "# première passe\n"
+    assert (tmp_path / "a.py").exists()
+
+
+def test_un_ouvrier_repris_qui_deborde_est_refuse_sans_seconde_verification():
+    issues = {("A", "verificateur"): ["bacle", "ok"], ("A", "ouvrier"): ["ok", "deborde", "ok"]}
+    c, m, agent, controles = moteur_a_reprises([tache("A")], issues)
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 2
+    assert [(role, repris) for role, repris, _ in agent.consignes] == [
+        ("ouvrier", False), ("verificateur", False), ("ouvrier", True),
+        ("ouvrier", False), ("verificateur", False),
+    ]  # fmt: skip
+    assert traces(a) == [(1, "bacle", False), (1, "deborde", True), (2, "valide", False)]
+    assert [e["origine"] for e in a.historique] == ["verdict", "perimetre", ""]
+    assert {e["origine"] for e in a.historique} <= {"", *ORIGINES}
+    assert controles.annulees == ["A"]
+    assert departs(agent) == [("sonnet", "low"), ("opus", "low")]
+    assert "[début du verdict précédent]" not in consignes_de(agent, "verificateur")[-1]
+
+
+def test_des_controles_rouges_apres_la_reprise_retiennent_le_verificateur():
+    sorties = [(True, ""), (False, "FAILED après la correction")]
+    c, m, agent, controles = moteur_a_reprises(
+        [tache("A")], {("A", "verificateur"): ["bacle", "ok"]}, sorties=sorties
+    )
+    m.executer()
+    a = c.tache("A")
+    assert controles.journal == [
+        "ouvrier", "perimetre", "controles", "verificateur",
+        "reprise", "perimetre", "controles",
+        "ouvrier", "perimetre", "controles", "verificateur",
+    ]  # fmt: skip
+    assert traces(a) == [(1, "bacle", False), (1, "ne_sait_pas", True), (2, "valide", False)]
+    assert [e["origine"] for e in a.historique] == ["verdict", "controles", ""]
+    assert "FAILED après la correction" in a.historique[1]["detail"]
+
+
+def test_un_arret_pendant_la_reprise_rend_la_tache_et_jette_la_copie():
+    c, m, agent, controles = moteur_a_reprises([tache("A")], {("A", "verificateur"): ["bacle"]})
+    arrets = []
+
+    def entendre(evenement):  # l'ouvrier repris vient de prendre son poste
+        if agent.reprises and evenement["type"] == "outil" and not arrets:
+            arrets.append(m.arreter("A"))
+
+    agent.sur_evenement = entendre
+    m.executer()
+    a = c.tache("A")
+    assert arrets == [True]
+    assert a.etat == "revenu" and a.tentatives == 1 and a.montees == 0
+    assert [(role, repris) for role, repris, _ in agent.consignes] == [
+        ("ouvrier", False), ("verificateur", False), ("ouvrier", True),
+    ]  # fmt: skip
+    assert traces(a) == [(1, "bacle", False), (1, "arretee", True)]
+    assert controles.annulees == ["A"]
+    (demande,) = c.demandes
+    assert demande["question"].endswith("arrêtée par toi.")
+    fil = " ".join(textes_du_fil(c))
+    assert "Seconde chance" not in fil and "monte d'un cran" not in fil
+    assert m._arretees == set()
+
+
+def test_un_arret_entre_le_refus_et_la_reprise_l_empeche_de_partir():
+    reponses = []
+
+    def rappel():
+        dernier = c.evenements[-1]["texte"] if c.evenements else ""
+        if not reponses and "Je redonne la main" in dernier:
+            reponses.append(m.arreter("A"))
+
+    c = chantier([tache("A")])
+    agent, controles = AgentSimule({"A": ["bacle"]}, perimetres={"A": ["a.py"]}), ControlesComptes()
+    m = Moteur(c, agent, controles, sur_changement=rappel)
+    historique = surveiller(m, c.tache("A"))
+    m.executer()
+    a = c.tache("A")
+    assert reponses == [True] and agent.reprises == []
+    assert [x["role"] for x in agent.appels] == ["ouvrier", "verificateur"]
+    assert c.agents_lances == 2 and a.tentatives == 1 and a.montees == 0
+    assert traces(a) == [(1, "bacle", False), (1, "arretee", True)]
+    assert historique.sous_verrou == [True, True]
+    assert controles.annulees == ["A"] and a.etat == "revenu"
+    assert c.demandes[-1]["question"].endswith("arrêtée par toi.")
+    fil = " ".join(textes_du_fil(c))
+    assert "Seconde chance" not in fil and "monte d'un cran" not in fil
+
+
+class AgentReprisEnEchec(AgentParRang):
+    """L'ouvrier repris finit sur une erreur donnée : délai dépassé, par exemple."""
+
+    erreur = ""
+
+    def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                 copie_jetable=False, reprendre=None):  # fmt: skip
+        resultat = super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+        if reprendre is not None and self.erreur:
+            return Resultat(ok=False, erreur=self.erreur, session=resultat.session)
+        return resultat
+
+
+@pytest.mark.parametrize("erreur", ["", "Claude Code n'a pas répondu dans le délai de 3600 s."])
+def test_un_ouvrier_repris_qui_finit_en_erreur_ou_au_delai_vaut_reprise_refusee(erreur):
+    issues = {("A", "verificateur"): ["bacle", "ok"], ("A", "ouvrier"): ["ok", "erreur", "ok"]}
+    c, m, agent, controles = moteur_a_reprises([tache("A")], issues, agent_cls=AgentReprisEnEchec)
+    agent.erreur = erreur
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 2
+    assert traces(a) == [(1, "bacle", False), (1, "ne_sait_pas", True), (2, "valide", False)]
+    assert [e["origine"] for e in a.historique] == ["verdict", "agent", ""]
+    assert (erreur or "Arrêt simulé de l'agent.") in a.historique[1]["detail"]
+    assert controles.journal.count("verificateur") == 2  # aucun après la reprise en erreur
+    assert controles.annulees == ["A"] and departs(agent) == [("sonnet", "low"), ("opus", "low")]
+
+
+def test_jamais_deux_reprises_pour_un_meme_depart():
+    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
+    m, agent = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.tentatives >= 4
+    # Une reprise par départ, ni plus ni moins, chacune au numéro de son départ.
+    assert [r["tentative"] for r in agent.reprises] == list(range(1, a.tentatives + 1))
+    assert sum(e["reprise"] for e in a.historique) == a.tentatives
+
+
+def test_apres_un_redemarrage_en_pleine_reprise_la_tache_repart_d_une_copie_propre():
+    c = chantier([tache("A")])
+    instantanes = []
+
+    class Agent(AgentSimule):
+        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                     copie_jetable=False, reprendre=None):  # fmt: skip
+            if reprendre is not None and not instantanes:
+                instantanes.append(c.en_dict())  # l'état sauvé pendant la reprise
+            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+
+    agent = Agent({"A": ["bacle", "ok"]}, perimetres={"A": ["a.py"]})
+    Moteur(c, agent, ControlesSimules()).executer()
+    relu = Chantier.depuis_dict(instantanes[0])
+    t = relu.tache("A")
+    assert t.etat == "en_cours" and traces(t) == [(1, "bacle", False)]
+    neuf, controles = AgentSimule(perimetres={"A": ["a.py"]}), ControlesComptes()
+    m = Moteur(relu, neuf, controles)  # le redémarrage : la tâche revient à la personne
+    assert t.etat == "revenu" and traces(t)[-1] == (1, "panne", False)
+    assert neuf.appels == []  # rien n'est relancé seul
+    m.repondre(relu.demandes[-1]["id"], RELANCER_TEL)
+    m.executer()
+    assert t.etat == "verifie" and t.tentatives == 2
+    assert controles.preparees == ["A"]  # une copie propre
+    assert "reprise" not in neuf.appels[0] and neuf.reprises == []  # une session neuve
+
+
+class AgentVerificateurEnErreur(AgentParRang):
+    """Le premier vérificateur s'arrête sur une erreur, même s'il a écrit un verdict."""
+
+    def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                 copie_jetable=False, reprendre=None):  # fmt: skip
+        resultat = super().executer(consigne, modele, effort, dossier, lecture_seule, contexte,
+                                    copie_jetable, reprendre)  # fmt: skip
+        premier = sum(role == "verificateur" for role, _, _ in self.consignes) == 1
+        if contexte["role"] == "verificateur" and premier:
+            texte = '{"valide": false, "motif": "bacle", "resume": "Inachevé."}'
+            return Resultat(ok=False, erreur="Panne du vérificateur.", texte=texte)
+        return resultat
+
+
+CAS_SANS_REPRISE = ["erreur_agent", "consigne", "verdict_illisible", "verificateur_en_erreur"]
+CAS_SANS_REPRISE += ["integration"]
+
+
+@pytest.mark.parametrize("cas", CAS_SANS_REPRISE)
+def test_ces_refus_ne_se_reprennent_pas(cas):
+    perimetres, agent_cls, controles = {"A": ["a.py"]}, AgentParRang, ControlesComptes()
+    issues, textes = {}, {}
+    if cas == "erreur_agent":
+        issues = {("A", "ouvrier"): ["erreur", "ok"]}
+    elif cas == "consigne":
+        issues = {("A", "verificateur"): ["consigne"]}
+    elif cas == "verdict_illisible":
+        textes = {"A": ["J'ai relu, mais je n'ai pas eu le temps de conclure."]}
+    elif cas == "verificateur_en_erreur":
+        agent_cls = AgentVerificateurEnErreur
+    else:
+        controles = ControlesReglables(enregistrements=["Conflit avec la branche principale."])
+    agent = agent_cls(issues, textes, perimetres=perimetres)
+    c = chantier([tache("A")])
+    Moteur(c, agent, controles).executer()
+    assert agent.reprises == []
+    assert not any("reprise" in x for x in agent.appels)
+    fil = " ".join(textes_du_fil(c))
+    assert "Je redonne la main" not in fil
+    if cas == "consigne":
+        assert c.tache("A").etat == "revenu" and c.tache("A").tentatives == 1
+    else:
+        assert "Seconde chance au même niveau" in fil and c.tache("A").etat == "verifie"
+        assert c.tache("A").tentatives == 2
+
+
+def test_le_verdict_garde_et_transmis_est_borne_a_ses_8000_derniers_caracteres():
+    long = "DEBUT-COUPE " + "constat " * 1500
+    long += '\n{"valide": false, "motif": "bacle", "resume": "Trop long."}'
+    c, m, agent, _ = moteur_a_reprises(
+        [tache("A")], {("A", "verificateur"): ["bacle", "ok"]}, {"A": [long]}
+    )
+    m.executer()
+    assert len(long) > 8000
+    assert c.tache("A").historique[0]["verdict"] == long[-8000:]
+    message = agent.reprises[0]["message"]
+    assert long[-8000:].strip() in message and "DEBUT-COUPE" not in message
+    seconde = consignes_de(agent, "verificateur")[1]
+    assert long[-8000:].strip() in seconde and "DEBUT-COUPE" not in seconde

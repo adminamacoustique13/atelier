@@ -35,7 +35,7 @@ def cout_fr(montant: float) -> str:
 GROUPES = (
     ("attendre", "Temps passé à attendre", ("attente",)),
     ("ecrire", "Temps passé à écrire (préparation de la copie comprise)",
-     ("preparation", "ouvrier")),
+     ("preparation", "ouvrier", "reprise")),
     ("controler", "Temps passé à contrôler", ("perimetre", "controles")),
     ("verifier", "Temps passé à vérifier", ("verificateur",)),
     ("enregistrer", "Temps passé à enregistrer", ("enregistrement",)),

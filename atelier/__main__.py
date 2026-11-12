@@ -65,7 +65,7 @@ def plan_de_demonstration() -> tuple[dict, dict]:
         ],
     }
     scenario = {
-        "C": ["ne_sait_pas", "ne_sait_pas", "ok"],
+        "C": ["ne_sait_pas", "ok"],
         "D": ["deborde", "ok"],
         "E": ["bacle", "bacle", "ok"],
     }

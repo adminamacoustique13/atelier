@@ -27,7 +27,8 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | V1. Vitesse : un plan large, et sa largeur calculée | vérifié | Opus | complète, Fable : accepté | 1 | 873 tests ; vagues calculées identiques à celles du vrai moteur sur 36 plans |
 | V2. Vitesse : les niveaux de vérification et le dosage de départ | vérifié | Opus | bornée, Opus : recalé puis corrigé | 2 | 844 tests ; le test du plafond de la relance seule éprouve de nouveau sa garde |
 | V5. Vitesse : le pont lit les limites de l'abonnement et sait reprendre une session | vérifié | Opus | complète, Fable : recalé puis seconde vérification bornée acceptée | 2 | 68 scénarios identiques à l'ancien pont ; la règle du dépassement payant reproduit celle de Claude Code ; 37 casses vues |
-| V3. Vitesse, moteur : vérification proportionnée, reprise à chaud, places et régulateur | à lancer, après V0, V2, V5 | Opus | complète, Fable | | |
+| V3a. Moteur : reprise à chaud après un refus | vérifié | Opus | complète, Fable : recalé sur un test, seconde passe mécanique | 2 | 1 250 tests ; 26 scénarios conformes, 29 identiques à l'ancien moteur |
+| V3b. Moteur et serveur : refus répété, empêchement, diagnostic | en cours | Opus | complète, Fable | 1 | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | vérifié | Opus | bornée, Opus, par casses : accepté | 1 | 786 tests (14 nouveaux) ; les 12 casses de la consigne et 6 des 7 casses du vérificateur font échouer un test nouveau |
 | M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
 | M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | vérifié | Opus | bornée, Fable : recalé puis seconde passe mécanique | 2 | essai nouveau PANNES-reseau 34 sur 34 (9 ECHEC sur la première passe) ; les sept autres essais à leurs comptes, CODE-carte excepté (instable, diagnostiqué) |
@@ -109,6 +110,13 @@ Mesuré par le second vérificateur : 0 faux positif sur 3 046 paires de refus r
 - Reprise après un débord : dire de défaire la modification avec l'outil d'édition, pas par git (qui ouvrirait une carte).
 - La re-vérification ne dit pas que les remarques d'un verdict borné ne sont pas des points recalés.
 - Pour V3e : la règle « mécanique seule sans fichier modifié » doit compter les fichiers hors de `chantier/relais/`.
+
+### V3a : remarques du vérificateur, pour V3d
+- Un simple débord ou un conflit d'intégration après une reprise acceptée coûte un cran : les montées se consomment deux fois plus vite par tâche.
+- `_monter` peut aussi repartir au même niveau ou rendre la tâche : le nom trompe ; `repris, premier` sont des drapeaux.
+- Après une reprise qui finit en erreur, déborde ou casse les contrôles, le départ neuf reçoit le dernier refus, pas le verdict d'origine.
+- La panne pendant une reprise est tracée `reprise: false` ; les statistiques comptent la reprise comme un refus.
+- La démonstration enregistre 46 vues au lieu de 42 (quatre étapes de reprise) ; les trois essais concernés sont accordés.
 
 ### Restes relevés par les vérificateurs de V0, V1 et M8
 - V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.

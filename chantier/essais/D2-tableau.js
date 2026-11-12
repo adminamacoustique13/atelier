@@ -510,7 +510,7 @@ async function main() {
     page.on("pageerror", (e) => erreurs.push(String(e)));
     await page.goto(`file://${fichier}`);
     const nombre = await page.evaluate(() => INSTANTANES.length);
-    verifier("la page rejoue ses 42 vues enregistrées", nombre === 42, nombre);
+    verifier("la page rejoue ses 46 vues enregistrées", nombre === 46, nombre);
     verifier("une vue enregistrée porte une autorisation ouverte", await page.evaluate(() => INSTANTANES.some((v) => (v.autorisations || []).length > 0)));
     await page.fill("#message", "Un objectif.");
     await page.click("#envoi");

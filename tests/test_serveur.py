@@ -735,14 +735,17 @@ def test_un_arret_pendant_la_note_du_verificateur_l_empeche_de_partir():
 
 def test_un_arret_apres_un_refus_garde_aussi_sa_trace_dans_l_historique():
     controles = ControlesEspions("annuler")
-    agent = AgentSimule({"A": ["bacle", "ok"]})
+    agent = AgentSimule({"A": ["bacle", "ok"]})  # la reprise à chaud rejoue le refus
     moteur = moteur_de([tache("A")], agent=agent, controles=controles)
     controles.moteur = moteur
     moteur.executer()
     t = moteur.chantier.tache("A")
-    assert [h["issue"] for h in t.historique] == ["bacle", "arretee"]
-    assert [h["tentative"] for h in t.historique] == [1, 2]
-    assert [a["role"] for a in agent.appels] == ["ouvrier", "verificateur"]
+    # La copie n'est jetée qu'après la reprise refusée : c'est là que l'arrêt est demandé.
+    assert controles.annulees == ["A"]
+    assert [h["issue"] for h in t.historique] == ["bacle", "bacle", "arretee"]
+    assert [h["tentative"] for h in t.historique] == [1, 1, 2]
+    assert [h["reprise"] for h in t.historique] == [False, True, False]
+    assert [a["role"] for a in agent.appels] == ["ouvrier", "verificateur"] * 2
     assert t.etat == "revenu" and t.tentatives == 1
     assert moteur.chantier.demandes[-1]["question"].endswith("arrêtée par toi.")
 
