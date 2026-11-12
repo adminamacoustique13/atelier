@@ -61,7 +61,7 @@ def test_le_moteur_dit_ou_en_est_chaque_tache_active():
         "Préparation de sa copie de travail",
         "L'ouvrier travaille (tentative 1)",
         "Contrôles automatiques : python3 -m pytest -q",
-        "Le vérificateur relit (Sonnet, effort moyen)",
+        "Le vérificateur relit (Opus, effort moyen)",
         "Enregistrement et fusion",
     ]
     assert m.phase("A") is None  # une tâche finie n'a plus de phase
@@ -83,8 +83,8 @@ def test_chaque_agent_recoit_son_dosage_et_le_verificateur_est_au_dessus():
     m, agent = moteur(c)
     m.executer()
     dosages = {(a["tache"], a["role"]): (a["modele"], a["effort"]) for a in agent.appels}
-    assert dosages[("A", "ouvrier")] == ("haiku", "low")
-    assert dosages[("A", "verificateur")] == ("sonnet", "medium")
+    assert dosages[("A", "ouvrier")] == ("sonnet", "low")
+    assert dosages[("A", "verificateur")] == ("opus", "medium")
     assert dosages[("P", "ouvrier")] == ("fable", "max")
     assert dosages[("P", "verificateur")] == ("fable", "max")
 
@@ -96,17 +96,17 @@ def test_seconde_chance_puis_montee_d_un_cran():
     a = c.tache("A")
     assert a.etat == "verifie"
     assert a.tentatives == 3
-    assert (a.modele, a.effort) == ("sonnet", "low")
+    assert (a.modele, a.effort) == ("opus", "low")
     assert c.montees == 1
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
-    assert ouvriers == [("haiku", "low"), ("haiku", "low"), ("sonnet", "low")]
+    assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low")]
 
 
 def test_un_travail_bacle_monte_l_effort_pas_le_modele():
     c = chantier([tache("A")])
     m, _ = moteur(c, {"A": ["bacle", "bacle", "ok"]})
     m.executer()
-    assert (c.tache("A").modele, c.tache("A").effort) == ("haiku", "medium")
+    assert (c.tache("A").modele, c.tache("A").effort) == ("sonnet", "medium")
 
 
 def test_au_plafond_la_tache_revient_avec_une_seule_decision():
@@ -606,19 +606,19 @@ def test_l_accueil_resume_chaque_projet_sans_le_demarrer(tmp_path):
 
 
 def test_une_tache_epuisee_est_relancee_seule_un_cran_plus_haut():
-    c = chantier([tache("A")])  # plafond du contrat : Opus, effort élevé
+    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
     m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ne_sait_pas", "ok"]})
     m.executer()
     a = c.tache("A")
     assert a.etat == "verifie" and c.demandes == [] and c.termine
     assert a.relances_auto == 1 and a.tentatives == 4
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
-    assert ouvriers == [("haiku", "low"), ("haiku", "low"), ("sonnet", "low"), ("opus", "low")]
-    assert any("Je relance seul un cran plus haut : Opus" in e["texte"] for e in c.evenements)
+    assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low"), ("fable", "low")]
+    assert any("Je relance seul un cran plus haut : Fable" in e["texte"] for e in c.evenements)
 
 
 def test_la_relance_seule_n_a_lieu_qu_une_fois_puis_la_tache_revient():
-    c = chantier([tache("A")])
+    c = chantier([tache("A")], plafond_modele="fable", plafond_effort="high")
     m, _ = moteur(c, {"A": ["ne_sait_pas"]})
     m.executer()
     a = c.tache("A")
@@ -795,11 +795,11 @@ def test_tout_en_haut_de_l_echelle_la_tache_revient_au_plafond_sans_panne():
 
 
 def test_la_relance_seule_ne_depasse_jamais_le_plafond_du_contrat():
-    c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
+    c = chantier([tache("A")], plafond_modele="opus", plafond_effort="low")
     m, agent = moteur(c, {"A": ["ne_sait_pas"]})
     m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and a.relances_auto == 0 and a.tentatives == 3
     ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
-    assert ouvriers == [("haiku", "low"), ("haiku", "low"), ("sonnet", "low")]
+    assert ouvriers == [("sonnet", "low"), ("sonnet", "low"), ("opus", "low")]
     assert "3 tentatives sans succès" in c.demandes[-1]["question"]

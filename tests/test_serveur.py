@@ -817,8 +817,8 @@ def test_l_arret_se_lit_dans_le_resultat_meme_sans_drapeau(role):
     moteur = moteur_de([tache("A")], agent=agent)
     moteur.executer()
     verifier_retour_a_la_personne(moteur)
-    # Le coût du tour arrêté est compté (celui d'un ouvrier simulé haiku : 0,02).
-    attendu = {"ouvrier": 0.5, "verificateur": 0.52}[role]
+    # Le coût du tour arrêté est compté (celui d'un ouvrier simulé sonnet : 0,09).
+    attendu = {"ouvrier": 0.5, "verificateur": 0.59}[role]
     assert moteur.chantier.tache("A").cout_usd == pytest.approx(attendu)
     assert moteur.chantier.tache("A").tentatives == 1
 
