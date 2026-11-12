@@ -97,6 +97,13 @@ Deux défauts : le dépassement payant de l'abonnement (statut « rejected » ma
 - CC (onglet Code) : correction de trois lignes, prouvée par l'essai CODE-carte, qui échouait 10 fois sur 10 et passe 36 sur 36 (dix passages chez l'ouvrier, trois chez l'orchestrateur). Reste en option : rendre déterministe, dans la démonstration, la tâche qui attend une autorisation.
 - V1b (phrase du plan) : vagues recomparées au vrai moteur avec l'outil du vérificateur de V1 ; reste le cas de deux tâches de même identifiant, où `possible` vaut faux alors que la phrase dit que le plan peut aller au bout (un test existant exige ce faux).
 
+### V3-refus : la règle d'usage que le moteur (V3b) doit suivre
+Mesuré par le second vérificateur : 0 faux positif sur 3 046 paires de refus réels différents, tirés des archives ; les trois refus de la tâche B de Sonarq sont reconnus. Mais 14 faux positifs sur 29 cas synthétiques (deux tests différents d'un même fichier, deux critères écrits sur le même modèle, deux codes ruff), et des reformulations au vocabulaire changé ne sont pas reconnues. Donc, pour V3b :
+- ne jamais bloquer sur la seule ressemblance de mots quand un cran reste : la règle « trois refus identiques de suite » ne compte que des refus de même forme, ou un empêchement signalé ;
+- un refus des contrôles automatiques se compare par l'ensemble des tests en échec et des codes de contrôle de forme, pas par le texte ;
+- la demande de blocage cite les deux détails, pour que la personne voie une confusion ;
+- amélioration essayée par le vérificateur, à reprendre : des vetos sur les identifiants (noms de tests, numéros de critère, codes ruff) ramènent les faux positifs synthétiques de 14 à 4 sans perdre le cas réel.
+
 ### Restes relevés par les vérificateurs de V0, V1 et M8
 - V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.
 - V1 : la consigne ne dit pas quoi faire d'un fichier que chaque tâche doit toucher (le journal d'un projet) ; la phrase de `plan.py` devient illisible quand beaucoup de tâches partagent un fichier ; aucun test ne garde les consignes ; accords (« toutes deux », « A et A ») ; récursion sur une chaîne de 1 000 tâches.
