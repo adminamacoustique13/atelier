@@ -37,6 +37,7 @@ Un fichier `chantier/profil.json` dans chaque dépôt :
 ```
 
 - `commandes` : les contrôles automatiques lancés par l'atelier après chaque livrable.
+- `delai_controles_s` (facultatif) : le temps laissé à chacune de ces commandes, en secondes ; 1800 (trente minutes) sans cette clé. Passé ce délai, la commande est arrêtée avec tout ce qu'elle avait lancé, et la tentative compte comme refusée.
 - `commandes_permises` : les seules commandes qu'un agent a le droit de lancer (chaque entrée permet la commande et tout ce qui la suit : `uv` permet `uv add`, `uv run pytest`…). Sans cette clé, l'atelier permet `uv`, `python3`, `cargo`, `npm` et `npx`, de quoi installer les outils et lancer les tests ; un projet neuf est créé avec cette liste écrite dans son profil.
 
 Tu n'as pas à modifier ce fichier à la main. Quand un chantier demande un outil qui n'est pas permis, ou pour fixer les contrôles, l'orchestrateur propose un réglage : il apparaît au tableau de bord comme une décision (« Accepter ce réglage » ou « Refuser »). Accepté, il prend effet tout de suite, même en plein chantier, et l'atelier l'enregistre dans le profil. Une tâche revenue faute d'outil se relance ensuite avec « Relancer au même niveau », sans monter le dosage.
@@ -144,6 +145,16 @@ Rien de tout cela n'a été essayé avec un vrai compte : ces modes n'ont tourn�
 ## Arrêter un agent
 
 Le bouton « Arrêter » interrompt un agent en cours. Une tâche arrêtée te revient : elle n'a ni seconde chance ni montée en gamme, et tu la reprends avec « Relancer au même niveau ». Tu peux aussi arrêter la réponse de l'orchestrateur en pleine écriture : ce qu'il avait écrit est gardé, et la conversation continue au message suivant.
+
+## Après une panne ou un redémarrage
+
+Si l'Atelier s'arrête pendant un chantier (redémarrage du Mac, plantage, arrêt à la main), les tâches qui étaient en cours ou en vérification te reviennent à la réouverture du projet, chacune avec sa décision : « Relancer au même niveau », « Relancer un cran plus haut » ou « Abandonner cette tâche ». Ce que l'agent avait écrit sans que ce soit vérifié est perdu ; ce qui était déjà vérifié est dans git et y reste. Rien ne repart tout seul : aucun agent n'est lancé tant que tu n'as pas répondu.
+
+Une erreur de l'Atelier lui-même pendant une tâche (une commande git qui échoue, un disque plein) fait la même chose pour cette tâche seule : elle te revient avec l'erreur écrite en clair, et les autres tâches continuent.
+
+L'état du chantier (`.atelier/etat.json`) est écrit dans un fichier voisin puis mis à sa place d'un seul geste : un arrêt en pleine écriture laisse l'ancien état lisible. Si ce fichier est malgré tout illisible à l'ouverture, l'Atelier le met de côté sous le nom `.atelier/etat-illisible-<date>.json`, ouvre un chantier vide et le dit dans le fil ; le code, son historique git et les chantiers archivés ne sont pas touchés.
+
+Ce que cela ne couvre pas : un programme Claude resté en marche après un plantage de l'Atelier n'est pas arrêté, et l'Atelier ne se relance pas tout seul après une mise en veille prolongée du Mac.
 
 ## Plusieurs projets
 
