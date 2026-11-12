@@ -812,7 +812,7 @@ class Atelier:
         """Choisit le mode des ouvriers : l'écrit au profil et l'applique à chaud aux ouvriers.
 
         Un mode inconnu, mal typé ou « bypassPermissions » est refusé sans rien écrire. Le
-        vérificateur et l'orchestrateur ne sont jamais touchés : ils restent en lecture seule.
+        vérificateur et l'orchestrateur ne sont jamais touchés.
         """
         if not mode_valide(mode):
             return {"fait": False, "phrase": phrase_mode_refuse(mode)}

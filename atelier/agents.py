@@ -4,8 +4,10 @@ Les deux offrent la même interface au moteur et au serveur : `executer`, `conve
 `arreter(tache)`, `changer_mode(mode)`, `modes_appliques()`, et les attributs `guichet`,
 `sur_evenement`, `source_connexion` et `mode_ouvriers`.
 
-Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers : le
-vérificateur et l'orchestrateur restent en lecture seule, en mode « default », quoi qu'il arrive.
+Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers.
+L'orchestrateur reste en lecture seule, en mode « default », quoi qu'il arrive. Le vérificateur
+ne peut jamais écrire dans la copie de l'ouvrier : il travaille dans une copie jetable du
+livrable, où ses essais passent sans carte (« acceptEdits »), ou à défaut en lecture seule.
 """
 
 from __future__ import annotations
@@ -275,16 +277,28 @@ class AgentClaude(_ModeDesOuvriers):
         dossier: Path | None,
         lecture_seule: bool = False,
         contexte: dict | None = None,
+        copie_jetable: bool = False,
     ) -> Resultat:
-        """Exécute une consigne et rend le résultat de l'agent."""
+        """Exécute une consigne et rend le résultat de l'agent.
+
+        `copie_jetable` : le vérificateur travaille dans une copie du livrable que l'atelier
+        jette après son avis. Il peut y écrire sans carte (ses essais : un fichier modifié pour
+        voir un test échouer, un script), puisque rien de ce qu'il y fait n'est enregistré ; il
+        n'a toujours aucun accès en écriture à la copie de l'ouvrier, ni aux modes des ouvriers.
+        """
         tache, nom = _poste(contexte)
+        bac_a_sable = lecture_seule and copie_jetable
+        ecrit = not lecture_seule or bac_a_sable
+        if bac_a_sable:
+            mode = "acceptEdits"
+        else:  # le mode d'un ouvrier est relu sous le verrou des postes, à son inscription
+            mode = "default" if lecture_seule else self._postes.mode
         return self._travailler(
             tache, nom, consigne, ouvrier=not lecture_seule,
             modele=self._alias(modele), effort=effort, dossier=dossier,
-            outils_permis=self._outils(lecture_seule) + self._autorisations(lecture_seule),
-            outils_interdits=list(ECRITURE) if lecture_seule else [],
-            # Le mode d'un ouvrier est relu sous le verrou des postes, à son inscription.
-            mode_permission="default" if lecture_seule else self._postes.mode,
+            outils_permis=self._outils(not ecrit) + self._autorisations(not ecrit),
+            outils_interdits=[] if ecrit else list(ECRITURE),
+            mode_permission=mode,
         )  # fmt: skip
 
     def converser(
@@ -490,6 +504,7 @@ class AgentSimule(_ModeDesOuvriers):
         dossier: Path | None,
         lecture_seule: bool = False,
         contexte: dict | None = None,
+        copie_jetable: bool = False,
     ) -> Resultat:
         """Rend le résultat prévu par le scénario pour cette tâche et cette tentative."""
         contexte = contexte or {}

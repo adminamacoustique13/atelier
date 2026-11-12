@@ -112,7 +112,9 @@ def creer_projet_d_essai(dossier: Path, python: str) -> None:
     profil = {
         "nom": NOM_PROJET,
         "commandes": [f'{python} -c "import calcul; assert calcul.moyenne([2, 4]) == 3"'],
-        "commandes_permises": COMMANDES_PAR_DEFAUT,
+        # Le Python de l'Atelier, que citent les critères : sans lui, chaque agent qui lance le
+        # contrôle demanderait une carte, et l'essai ne distinguerait plus les vraies demandes.
+        "commandes_permises": [*COMMANDES_PAR_DEFAUT, python],
         "dosage": {"courante": ["sonnet", "low"]},
     }
     texte = json.dumps(profil, ensure_ascii=False, indent=2) + "\n"
@@ -281,6 +283,12 @@ class Essai:
             self.rapport.noter(
                 None, "Cartes d'autorisation acceptées une fois", " | ".join(self.cartes)
             )
+        du_verificateur = [c for c in self.cartes if "-verificateur-" in c.split(" : ")[0]]
+        self.rapport.noter(
+            not du_verificateur,
+            "Le vérificateur fait ses essais sans carte, dans sa copie jetable",
+            " | ".join(du_verificateur) or "aucune carte",
+        )
         if arret is not None:
             self._dire_arret(arret)
         return termine and a.etat == "verifie"

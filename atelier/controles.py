@@ -8,8 +8,10 @@ principale sans avoir été vérifié.
 from __future__ import annotations
 
 import os
+import shutil
 import subprocess
 import threading
+from contextlib import suppress
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -35,6 +37,37 @@ def expliquer_refus_git(message: str) -> str:
             "reprends-le plutôt avec « Reprendre un dépôt existant »."
         )
     return message
+
+
+# Les caches que git ignore et qu'une copie de vérification n'a pas à partager.
+CACHES = {"__pycache__", ".pytest_cache", ".ruff_cache", ".mypy_cache", ".DS_Store"}
+
+
+def _chemins_du_statut(sortie: str) -> list[str]:
+    """Les chemins d'un `git status --porcelain -z` : pour un renommage, le nouveau et l'ancien."""
+    chemins, morceaux = [], sortie.split("\0")
+    while morceaux:
+        ligne = morceaux.pop(0)
+        if len(ligne) < 4:
+            continue
+        chemins.append(ligne[3:])
+        if ligne[0] in "RC" and morceaux:
+            chemins.append(morceaux.pop(0))
+    return chemins
+
+
+def _relier(source: Path, cible: Path) -> None:
+    """Relie un fichier ignoré par un lien. Un dossier, lui, est recréé et c'est son contenu
+    qui est relié : git ne reconnaît pas un lien comme le dossier ignoré (« node_modules/ »)."""
+    if cible.exists() or cible.is_symlink():
+        return
+    cible.parent.mkdir(parents=True, exist_ok=True)
+    if source.is_dir() and not source.is_symlink():
+        cible.mkdir()
+        for element in source.iterdir():
+            (cible / element.name).symlink_to(element)
+    else:
+        cible.symlink_to(source)
 
 
 def hors_perimetre(fichiers: list[str], perimetre: list[str]) -> list[str]:
@@ -119,6 +152,52 @@ class ControlesGit:
         with self.verrou_fusion:
             self._git("worktree", "add", "-q", "-B", f"tache/{tache.id}", str(arbre), "HEAD")
         return arbre
+
+    def _copie(self, tache) -> Path:
+        return self.depot / ".atelier" / "verifications" / tache.id.replace("/", "_")
+
+    def copie_de_verification(self, tache, dossier) -> Path:
+        """Une copie jetable du livrable, pour que le vérificateur y fasse ses essais.
+
+        Elle part du même commit que la copie de l'ouvrier, puis reçoit ses fichiers modifiés,
+        créés ou supprimés : `git status` et `git diff` y montrent le même livrable. Les fichiers
+        que git ignore (node_modules, .venv, .env...) n'y sont pas recopiés mais reliés, pour que
+        les tests y tournent sans réinstaller ; les caches ne le sont pas. Ce que le vérificateur
+        y change n'atteint jamais ce qui sera enregistré, et la copie est jetée après son avis.
+        """
+        dossier, copie = Path(dossier), self._copie(tache)
+        self.jeter_copie(copie)
+        copie.parent.mkdir(parents=True, exist_ok=True)
+        with self.verrou_fusion:
+            self._git("worktree", "add", "-q", "--detach", str(copie), "HEAD", dossier=dossier)
+        changes = self._git("status", "--porcelain", "-z", "--untracked-files=all", dossier=dossier)
+        for chemin in _chemins_du_statut(changes):
+            source, cible = dossier / chemin, copie / chemin
+            if source.is_symlink() or source.is_file():
+                cible.parent.mkdir(parents=True, exist_ok=True)
+                if cible.is_symlink() or cible.exists():
+                    cible.unlink()
+                shutil.copy2(source, cible, follow_symlinks=False)
+            elif cible.is_symlink() or cible.is_file():
+                cible.unlink()
+        ignores = self._git("status", "--porcelain", "-z", "--ignored", dossier=dossier)
+        for ligne in ignores.split("\0"):
+            chemin = ligne[3:].rstrip("/") if ligne.startswith("!! ") else ""
+            if not chemin or Path(chemin).name in CACHES or chemin.endswith(".pyc"):
+                continue
+            _relier(dossier / chemin, copie / chemin)
+        return copie
+
+    def jeter_copie(self, copie) -> None:
+        """Jette la copie du vérificateur, quoi qu'il y ait fait."""
+        copie = Path(copie)
+        if copie.exists():
+            with self.verrou_fusion, suppress(RuntimeError):
+                self._git("worktree", "remove", "--force", str(copie))
+        if copie.exists():
+            shutil.rmtree(copie, ignore_errors=True)
+        with self.verrou_fusion, suppress(RuntimeError):
+            self._git("worktree", "prune")
 
     def fichiers_modifies(self, tache, dossier, resultat) -> list[str]:
         """Rend les fichiers réellement modifiés, lus dans git et non dans le compte rendu."""

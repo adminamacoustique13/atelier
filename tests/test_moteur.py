@@ -227,8 +227,22 @@ def test_avec_un_vrai_depot_git_le_travail_verifie_est_fusionne_et_le_reste_jete
     c = chantier([tache("A"), tache("B"), tache("C", depend_de=["A"])])
     agent = AgentSimule({"B": ["deborde", "ok"]}, perimetres={t.id: t.perimetre for t in c.taches})
     controles = ControlesGit(tmp_path, commandes=["test -f LISEZMOI.md"])
+    # Le vérificateur travaille dans une copie jetable, où il essaie une mutation.
+    verifications, executer = [], agent.executer
+
+    def executer_en_notant(consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
+                           copie_jetable=False):  # fmt: skip
+        if lecture_seule:
+            verifications.append((dossier, copie_jetable, "copie jetable" in consigne))
+            (dossier / "mutation.py").write_text("raise SystemExit(1)\n", "utf-8")
+        return executer(consigne, modele, effort, dossier, lecture_seule, contexte)
+
+    agent.executer = executer_en_notant
     Moteur(c, agent, controles).executer()
 
+    assert verifications and all(jetable and dite for _, jetable, dite in verifications)
+    assert all(".atelier/verifications/" in str(d) and not d.exists() for d, _, _ in verifications)
+    assert not (tmp_path / "mutation.py").exists()
     assert c.termine
     assert sorted(p.name for p in tmp_path.glob("*.py")) == ["a.py", "b.py", "c.py"]
     assert not (tmp_path / "hors_perimetre.txt").exists()

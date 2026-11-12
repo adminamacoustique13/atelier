@@ -76,12 +76,44 @@ Fichiers touchés, Contrats modifiés, Reste à faire, Doutes et demandes.
 """
 
 
-def consigne_verificateur(tache: Tache, contrat: Contrat, profil: dict) -> str:
-    """Rédige la consigne du vérificateur : il juge le livrable et la consigne, sans corriger."""
+COPIE_JETABLE = """Tu travailles dans une copie jetable du livrable : l'atelier la jette après \
+ton verdict, et ce qu'il enregistre est le livrable de l'agent, pas cette copie. Tu ne corriges \
+rien : une correction ne serait pas gardée. Mais tu peux y faire tes essais sans rien demander, \
+à condition de t'y prendre ainsi :
+- pour une mutation (changer le code pour voir si un test échoue), modifie le fichier avec \
+l'outil Edit, lance le test, puis remets le texte d'origine avec Edit ;
+- pour un essai de plus de quelques mots, écris un script dans ce dossier avec l'outil Write, \
+puis lance-le (par exemple `python3 essai_mutation.py`) ;
+- une commande simple par appel : pas de commandes enchaînées (`;`, `&&`, plusieurs \
+lignes), pas de heredoc (`<<EOF`), pas de variable du shell (`$?`, `$(...)` : le code de \
+retour de la commande t'est déjà donné), pas de `sed -i` ni de `rm -rf`, pas de dossier \
+temporaire ailleurs (`mktemp`, `/tmp`). Claude Code ne sait pas découper ces commandes-là \
+sans risque : chacune demanderait une autorisation à la personne qui suit le chantier, et la ferait attendre.
+Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent ; \
+lis-les avant tes essais, qui y apparaîtraient ensuite."""
+
+LECTURE_SEULE = """Tu ne modifies, ne crées et ne supprimes aucun fichier. Travaille dans le \
+dossier courant.
+Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent."""
+
+
+def consigne_verificateur(
+    tache: Tache, contrat: Contrat, profil: dict, copie_jetable: bool = False
+) -> str:
+    """Rédige la consigne du vérificateur : il juge le livrable et la consigne, sans corriger.
+
+    Avec `copie_jetable`, il travaille dans une copie du livrable que l'atelier jettera, et
+    peut y faire ses essais ; sinon il relit en lecture seule.
+    """
     commandes = "\n".join(f"- `{c}`" for c in profil.get("commandes", [])) or "- (aucune)"
+    cadre = COPIE_JETABLE if copie_jetable else LECTURE_SEULE
+    essais = (
+        "Fais tes essais dans ce dossier, comme dit plus haut, en remettant chaque fichier."
+        if copie_jetable
+        else "Fais tes essais sur une copie hors du dépôt."
+    )
     return f"""Tu es vérificateur. Tu contrôles le livrable d'un autre agent, sans rien corriger.
-Tu ne modifies, ne crées et ne supprimes aucun fichier. Travaille dans le dossier courant.
-Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent.
+{cadre}
 
 ## But de la tâche {tache.id} — {tache.titre}
 {tache.pourquoi or contrat.objectif}
@@ -96,7 +128,7 @@ Le travail à contrôler n'est pas encore enregistré : `git status` et `git dif
 1. Vérifie chaque critère par toi-même, en exécutant réellement le code quand c'est possible.
 2. Vérifie le but, pas seulement les critères. Cherche activement à mettre le livrable en défaut.
 3. Vérifie que les tests peuvent échouer : un test qui ne peut pas échouer ne compte pas. \
-Fais tes essais sur une copie hors du dépôt.
+{essais}
 4. Si le sujet relève d'une norme ou d'une formule physique, confronte le code au texte \
 de référence et à ses cas tests, pas seulement à ta relecture.
 5. Lance les commandes de contrôle :

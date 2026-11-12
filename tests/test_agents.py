@@ -302,6 +302,20 @@ def test_le_verificateur_n_a_aucun_outil_d_ecriture():
     assert options.permission_mode == "default"
 
 
+def test_dans_sa_copie_jetable_le_verificateur_essaie_sans_carte():
+    """Ses essais (un fichier modifié pour voir un test échouer) passent sans demander, puisque
+    l'atelier jette la copie ; il ne suit pas pour autant le mode choisi pour les ouvriers."""
+    agent, fabrique = claude([fin()], profil={"autorisations": ["Write", "Bash(npm test:*)"]})
+    agent.changer_mode("default")
+    agent.executer("Consigne.", "opus", "high", None, True, VERIFICATEUR, copie_jetable=True)
+    options = fabrique.clients[0].options
+    assert options.allowed_tools == agent._outils(False) + ["Write", "Bash(npm test:*)"]
+    assert {"Edit", "Write"} <= set(options.allowed_tools)
+    assert options.disallowed_tools == []
+    assert options.permission_mode == "acceptEdits"
+    assert agent.modes_appliques() == {}  # aucun poste d'ouvrier n'a été occupé
+
+
 def test_une_regle_retenue_entre_deux_messages_vaut_des_le_suivant():
     profil = {"autorisations": []}
     agent, fabrique = claude([fin()], [fin()], profil=profil)

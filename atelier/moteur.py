@@ -369,16 +369,35 @@ class Moteur:
                 self.chantier.agents_lances -= 1
             return None
         self._phase(tache, PHASES["verificateur"].format(dosage.libelle(modele, effort)))
-        avis = self.agent.executer(
-            consigne_verificateur(tache, self.chantier.contrat, self.profil),
-            modele,
-            effort,
-            dossier,
-            lecture_seule=True,
-            contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
-        )
+        copie = self._copie_de_verification(tache, dossier)
+        en_plus = {"copie_jetable": True} if copie else {}
+        try:
+            avis = self.agent.executer(
+                consigne_verificateur(tache, self.chantier.contrat, self.profil, bool(copie)),
+                modele,
+                effort,
+                copie or dossier,
+                lecture_seule=True,
+                contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
+                **en_plus,
+            )
+        finally:
+            if copie:
+                self.controles.jeter_copie(copie)
         self._compter(tache, avis)
         return avis
+
+    def _copie_de_verification(self, tache: Tache, dossier):
+        """La copie jetable où le vérificateur fait ses essais, ou None : il relit alors la
+        copie de l'ouvrier, sans rien y écrire, comme avant (contrôles simulés, échec de git)."""
+        copier = getattr(self.controles, "copie_de_verification", None)
+        if copier is None or dossier is None:
+            return None
+        try:
+            return copier(tache, dossier)
+        except Exception as erreur:  # le vérificateur part quand même, en relecture seule
+            self._noter(f"Copie du vérificateur impossible, il relit seulement : {erreur}", tache)
+            return None
 
     def _apres_echec(self, tache: Tache, motif: str, detail: str) -> bool:
         """Décide de la suite après un refus. Rend False si la tâche s'arrête là."""

@@ -103,7 +103,7 @@ Dans l'onglet Chantier, la carte « Mode des ouvriers » montre cinq choix. Le m
 - **Un changement en cours de route.** Pendant qu'un ouvrier travaille, change de mode : le fil doit le dire en une phrase, et l'ouvrier doit continuer.
 - Reviens ensuite à « Accepter les modifications », le mode d'avant ce menu.
 
-Ce qui ne doit jamais arriver : un vérificateur ou l'orchestrateur qui modifie un fichier, quel que soit le mode.
+Ce qui ne doit jamais arriver : l'orchestrateur qui modifie un fichier, ou un vérificateur qui modifie le travail de l'ouvrier (il fait ses essais dans une copie jetable), quel que soit le mode.
 
 ## 8. Le bouton « Mettre à jour »
 
@@ -128,7 +128,7 @@ Rien de ce qui suit n'a pu être essayé pendant le chantier. Tu n'as pas à tou
 - **La connexion.** Le Claude Code embarqué par la bibliothèque reprend bien ta connexion faite avec `claude` ; ce que le SDK annonce comme source (abonnement ou clé) dans ton cas.
 - **L'installation.** `uv sync` installe la version verrouillée de la bibliothèque sur ton Mac ; Atelier redémarre à l'ouverture de session, y compris sans réseau.
 - **L'arrêt.** Après « Arrêter », le programme Claude Code de l'agent meurt bien, même s'il avait lancé des tâches de fond ; la conversation reprend après une réponse arrêtée, y compris si c'était la toute première.
-- **Les autorisations.** Un outil interdit au vérificateur n'arrive jamais sur une carte ; « Toujours pour ce projet » sur un outil entier est accepté par Claude Code ; tes réglages personnels de `~/.claude` peuvent permettre des outils sans carte, quel que soit le mode.
+- **Les autorisations.** Un outil interdit à l'orchestrateur n'arrive jamais sur une carte ; « Toujours pour ce projet » sur un outil entier est accepté par Claude Code ; tes réglages personnels de `~/.claude` peuvent permettre des outils sans carte, quel que soit le mode.
 - **L'arbitre.** La forme exacte de ses refus ; son retour aux cartes après trois refus de suite ; le message quand il n'est pas disponible.
 - **La répétition.** Les cartes pour les modifications, la carte de passage à l'exécution, et le mode appliqué ensuite.
 - **La mise à jour.** Le délai réel du redémarrage par macOS, et l'installation d'une dépendance nouvelle au redémarrage.

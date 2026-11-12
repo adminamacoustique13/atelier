@@ -120,7 +120,7 @@ Tu peux aussi écrire des règles à l'avance dans `chantier/profil.json`, avec 
 }
 ```
 
-La clé `commandes_permises` reste lue comme avant. En lecture seule (l'orchestrateur, les vérificateurs), les règles qui visent des outils d'écriture sont ignorées.
+La clé `commandes_permises` reste lue comme avant. Pour l'orchestrateur, en lecture seule, les règles qui visent des outils d'écriture sont ignorées.
 
 ## Le mode des ouvriers
 
@@ -134,7 +134,7 @@ Un ouvrier a toujours, permis d'avance : la lecture, les modifications de fichie
 - **Refuser sans demander** : comme « Me demander », mais ce qui aurait demandé une carte est refusé sans rien te demander, et ces refus n'apparaissent nulle part dans l'activité. L'ouvrier fait avec ce qui lui reste.
 - **Laisser un arbitre décider** : un modèle, l'arbitre, approuve ou refuse à ta place ce qui aurait demandé une carte. Ce qui est permis d'avance passe sans lui, sauf les commandes qui exécutent du code (`python3`, `npm`, `uv`...), que Claude Code lui renvoie dans ce mode. Ses refus s'affichent dans l'activité de l'agent, avec la règle qui a joué. Après trois refus de suite ou vingt au total, il se met en pause et les demandes reviennent en cartes. Il n'est pas disponible pour tous les modèles : le fil dit alors quel mode est réellement appliqué.
 
-Ce qui ne change jamais : le vérificateur et l'orchestrateur restent en lecture seule, quel que soit le choix. Le mode qui supprime tout garde-fou de Claude Code (`bypassPermissions`) n'est pas proposé ; s'il est écrit dans le profil, l'Atelier le refuse et travaille en « Accepter les modifications », en le disant dans le fil.
+Ce qui ne change jamais : l'orchestrateur reste en lecture seule, et le vérificateur ne peut rien changer au travail de l'ouvrier (il fait ses essais dans une copie jetable, voir « Comment une tâche se déroule »), quel que soit le choix. Le mode qui supprime tout garde-fou de Claude Code (`bypassPermissions`) n'est pas proposé ; s'il est écrit dans le profil, l'Atelier le refuse et travaille en « Accepter les modifications », en le disant dans le fil.
 
 Rien de tout cela n'a été essayé avec un vrai compte : ces modes n'ont tourné que sur des faux clients et sur la démonstration. Le premier essai à faire sur ton Mac est de changer de mode pendant qu'un ouvrier travaille, sur un dépôt sans importance.
 
@@ -256,7 +256,7 @@ Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqu�
 1. L'atelier crée une copie de travail du dépôt réservée à la tâche.
 2. L'ouvrier travaille dans cette copie, avec son modèle et son effort.
 3. L'atelier contrôle le périmètre en lisant git, puis lance les commandes du profil.
-4. Un vérificateur, un modèle au-dessus de l'ouvrier, juge le livrable sans pouvoir écrire.
+4. Un vérificateur, un modèle au-dessus de l'ouvrier, juge le livrable dans une copie jetable : l'atelier recopie le livrable à côté, le vérificateur y fait ses essais sans te demander (modifier un fichier pour voir si un test échoue, écrire un script d'essai), puis la copie est jetée. Il ne touche jamais la copie de l'ouvrier, et ce qui est enregistré est le travail de l'ouvrier, pas le sien. Les dépendances installées par l'ouvrier (`node_modules`, `.venv`...) sont reliées dans la copie, pas recopiées. Sa consigne lui fait modifier les fichiers avec l'outil d'édition, écrire ses scripts d'essai dans un fichier et lancer une commande simple à la fois : Claude Code demande toujours une autorisation pour une commande enchaînée sur plusieurs lignes, un heredoc, une variable du shell (`$?`) ou une écriture hors de la copie (un dossier dans `/tmp`). S'il s'y prend autrement, une carte peut donc encore apparaître ; l'essai réel (`python3 -m atelier essai`) le signale.
 5. Accepté : le travail est enregistré et fusionné. Refusé : il est jeté, et la tâche a une seconde chance, puis monte d'un cran, puis te revient.
 
 ## L'essai réel
@@ -267,7 +267,7 @@ Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqu�
 2. écrit un message à l'orchestrateur et attend sa réponse, puis dit ce qui est facturé selon le SDK (abonnement ou clé API) ;
 3. lance un chantier de deux tâches, sur Sonnet en effort faible : A (une fonction `moyenne`) doit traverser tout le chantier, ouvrier, contrôles, vérificateur, fusion ; B est arrêtée par le bouton « Arrêter » dès que son ouvrier travaille (`--sans-arret` pour s'en passer) ;
 4. accepte une fois chaque carte d'autorisation, et les liste ;
-5. vérifie que le travail de A est dans `main`, sans fichier en trop, qu'il marche, et qu'aucun programme Claude ne reste après la fin.
+5. vérifie que le vérificateur a fait ses essais sans demander de carte, que le travail de A est dans `main`, sans fichier en trop, qu'il marche, et qu'aucun programme Claude ne reste après la fin.
 
 Chaque étape s'affiche « ok », « ÉCHEC » ou « info », et le tout est écrit dans `ESSAI.md`, dans le dossier de l'essai. La commande sort en erreur si une étape a échoué. Compte trois à cinq minutes.
 
