@@ -302,13 +302,29 @@ def test_le_verificateur_n_a_aucun_outil_d_ecriture():
     assert options.permission_mode == "default"
 
 
+def test_une_regle_retenue_entre_deux_messages_vaut_des_le_suivant():
+    profil = {"autorisations": []}
+    agent, fabrique = claude([fin()], [fin()], profil=profil)
+    converser(agent)
+    assert "Bash(ls:*)" not in fabrique.clients[0].options.allowed_tools
+    profil["autorisations"] = ["Bash(ls:*)"]  # « Toujours pour ce projet », écrit à chaud
+    converser(agent, reprise=True)
+    assert fabrique.clients[1].options.allowed_tools[-1] == "Bash(ls:*)"
+
+
 def test_la_conversation_reste_en_lecture_seule_sans_les_commandes_du_projet():
-    profil = {"commandes_permises": ["npm"], "autorisations": ["Bash(npm install:*)", "Write"]}
+    regles = ["Bash(npm install:*)", "Write", "WebFetch(domain:docs.python.org)", " Edit(src/**) "]
+    profil = {"commandes_permises": ["npm"], "autorisations": regles}
     agent, fabrique = claude([fin()], profil=profil)
     converser(agent)
     options = fabrique.clients[0].options
     assert options.allowed_tools[:3] == ["Read", "Glob", "Grep"]
-    assert all(o.startswith("Bash(git ") for o in options.allowed_tools[3:])
+    # Les règles retenues par « Toujours » valent pour elle, sauf celles qui écrivent ;
+    # les commandes permises d'office aux ouvriers (ici npm), non.
+    retenues = ["Bash(npm install:*)", "WebFetch(domain:docs.python.org)"]
+    assert options.allowed_tools[-2:] == retenues
+    assert all(o.startswith("Bash(git ") for o in options.allowed_tools[3:-2])
+    assert "Bash(npm:*)" not in options.allowed_tools
     assert "Bash(git status:*)" in options.allowed_tools
     assert set(options.disallowed_tools) >= ECRITURE
     assert options.permission_mode == "default"
