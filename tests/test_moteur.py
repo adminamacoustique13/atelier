@@ -1,4 +1,5 @@
 import subprocess
+import threading
 
 import pytest
 
@@ -694,3 +695,111 @@ def test_pas_de_controle_de_main_tant_qu_une_tache_attend_une_decision():
     controles = ControlesReglables(principale=[(False, "rouge")])
     Moteur(c, AgentSimule({"A": ["ne_sait_pas"]}), controles).executer()
     assert controles.controles_principale == 0 and len(c.taches) == 1
+
+
+# --- l'historique des tentatives, le verrou et le plafond d'escalade ---------------------------
+
+
+class VerrouSuivi:
+    """Le verrou du moteur, qui sait dire si le fil courant le tient."""
+
+    def __init__(self):
+        self._verrou, self._tenant, self._profondeur = threading.RLock(), None, 0
+
+    def __enter__(self):
+        self._verrou.acquire()
+        self._tenant = threading.get_ident()
+        self._profondeur += 1
+
+    def __exit__(self, *erreur):
+        self._profondeur -= 1
+        if not self._profondeur:
+            self._tenant = None
+        self._verrou.release()
+
+    def tenu_ici(self):
+        return self._tenant == threading.get_ident()
+
+
+class HistoriqueSurveille(list):
+    """Un historique qui note, à chaque ajout, si le verrou du moteur était tenu par l'auteur."""
+
+    def __init__(self, verrou):
+        super().__init__()
+        self.verrou, self.sous_verrou = verrou, []
+
+    def append(self, entree):
+        self.sous_verrou.append(self.verrou.tenu_ici())
+        super().append(entree)
+
+
+def surveiller(m, t):
+    m.verrou = VerrouSuivi()
+    t.historique = HistoriqueSurveille(m.verrou)
+    return t.historique
+
+
+def test_chaque_tentative_jugee_est_tracee_sous_le_verrou_du_moteur():
+    c = chantier([tache("A")])
+    m, _ = moteur(c, {"A": ["ne_sait_pas", "ok"]})
+    historique = surveiller(m, c.tache("A"))
+    m.executer()
+    assert [e["issue"] for e in historique] == ["ne_sait_pas", "valide"]
+    assert historique.sous_verrou == [True, True]
+
+
+def test_un_arret_avant_le_depart_de_l_ouvrier_est_trace_sous_le_verrou_avec_son_numero():
+    c = chantier([tache("A")])
+
+    class Controles(ControlesSimules):
+        def preparer(self, t):  # l'arrêt arrive pendant la préparation de la copie
+            assert m.arreter(t.id)
+
+    m = Moteur(c, AgentSimule(perimetres={"A": ["a.py"]}), Controles())
+    historique = surveiller(m, c.tache("A"))
+    m.executer()
+    assert c.tache("A").etat == "revenu" and c.tache("A").tentatives == 0
+    assert [(e["tentative"], e["issue"]) for e in historique] == [(1, "arretee")]
+    assert historique.sous_verrou == [True]
+
+
+def test_une_tache_rendue_au_redemarrage_garde_le_numero_de_sa_derniere_tentative():
+    t = tache("A", etat="en_cours", tentatives=2)
+    m, _ = moteur(chantier([t]))
+    assert t.etat == "revenu"
+    assert [(e["tentative"], e["issue"]) for e in t.historique] == [(2, "panne")]
+
+
+def test_une_panne_de_l_atelier_est_tracee_au_numero_de_la_tentative_en_cours():
+    c = chantier([tache("A")])
+
+    class Controles(ControlesSimules):
+        def mecaniques(self, t, dossier):
+            raise OSError("disque plein")
+
+    Moteur(c, AgentSimule(perimetres={"A": ["a.py"]}), Controles()).executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.tentatives == 1
+    assert [(e["tentative"], e["issue"]) for e in a.historique] == [(1, "panne")]
+    assert "disque plein" in a.historique[0]["detail"]
+
+
+def test_tout_en_haut_de_l_echelle_la_tache_revient_au_plafond_sans_panne():
+    c = chantier([tache("P", type="physique")], plafond_modele="fable", plafond_effort="max")
+    m, _ = moteur(c, {"P": ["ne_sait_pas"]})
+    m.executer()
+    p = c.tache("P")
+    assert p.etat == "revenu" and p.tentatives == 2
+    assert [e["issue"] for e in p.historique] == ["ne_sait_pas", "ne_sait_pas"]
+    assert "le plafond d'escalade du contrat est atteint" in c.demandes[-1]["question"]
+
+
+def test_la_relance_seule_ne_depasse_jamais_le_plafond_du_contrat():
+    c = chantier([tache("A")], plafond_modele="sonnet", plafond_effort="low")
+    m, agent = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and a.relances_auto == 0 and a.tentatives == 3
+    ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
+    assert ouvriers == [("haiku", "low"), ("haiku", "low"), ("sonnet", "low")]
+    assert "3 tentatives sans succès" in c.demandes[-1]["question"]
