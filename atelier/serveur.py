@@ -936,6 +936,9 @@ class Atelier:
         if self.mode != "démonstration" or self.carte.carte is None:
             return []
         codes = sorted(c for c, f in self.carte.carte["fichiers"].items() if f["genre"] == "code")
+        # Le code de l'Atelier lui-même d'abord : le tirage ne dérive pas vers les scripts d'essai
+        # quand le dépôt grandit.
+        codes = [c for c in codes if c.startswith("atelier/")] or codes
         if not codes:
             return []
         rang = sum(map(ord, tache.id)) % len(codes)

@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -17,7 +19,7 @@ from atelier.mise_a_jour import MiseAJour, MiseAJourSimulee
 from atelier.modele import Chantier, Contrat
 from atelier.moteur import RELANCER, planifier
 from atelier.projets import Projets, creer_depot, lire_profil, ouvrir_depot
-from atelier.serveur import PAGE, Atelier, SuiviMiseAJour, creer_serveur
+from atelier.serveur import PAGE, POLICES, Atelier, SuiviMiseAJour, creer_serveur
 
 OBJECTIF_DEMO = "Moteur de calcul : formules de la norme, validées sur les cas de référence."
 
@@ -175,6 +177,15 @@ def _attendre_une_autorisation(atelier: Atelier, delai_s: float = 10.0) -> str:
     raise SystemExit("La démonstration n'a pas déposé sa demande d'autorisation.")
 
 
+def polices_embarquees(page: str) -> str:
+    """La page autonome s'ouvre sans serveur : ses polices y sont écrites en entier (data:)."""
+    page = re.sub(r'<link rel="preload" href="/polices/[^"]+"[^>]*>\n?', "", page)
+    for adresse, (fichier, nature) in POLICES.items():
+        donnees = base64.b64encode(fichier.read_bytes()).decode("ascii")
+        page = page.replace(f'url("{adresse}")', f'url("data:{nature};base64,{donnees}")')
+    return page
+
+
 def commande_instantanes(arguments) -> None:
     """Joue la démonstration d'une traite et l'inscrit dans une page autonome."""
     atelier = atelier_de_demonstration(0.0)
@@ -195,7 +206,7 @@ def commande_instantanes(arguments) -> None:
     page = PAGE.read_text("utf-8").replace(
         "/*INSTANTANES*/[]", json.dumps(vues, ensure_ascii=False).replace("</", "<\\/")
     )
-    Path(arguments.sortie).write_text(page, "utf-8")
+    Path(arguments.sortie).write_text(polices_embarquees(page), "utf-8")
     print(f"{len(vues)} instantanés écrits dans {arguments.sortie}")
 
 

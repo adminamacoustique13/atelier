@@ -154,7 +154,8 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
     }
     ok('la fiche dit quel agent le modifie', dit);
     await page.locator('#vue-code').screenshot({ path: path.join(CAPTURES, 'CODE-en-cours.png') });
-    await page.click('button[data-action="code-vue"][data-vue="explorateur"]');
+    // L'explorateur reste à gauche quelle que soit la vue du milieu.
+    ok('l\'explorateur reste visible à côté du plan', await page.locator('#explorateur').isVisible());
     const ligne = page.locator('#explorateur .ligne-arbre.fichier.en-cours:not(.fantome)').first();
     await ligne.waitFor({ timeout: 10000 });
     ok('la ligne du fichier clignote dans l\'explorateur', true);
@@ -170,7 +171,7 @@ const pause = (ms) => new Promise((r) => setTimeout(r, ms));
       planChemin = ''; fichiersOuverts.add(h); fichierChoisi = h;
       afficherCode(derniere);
     }, hostile);
-    for (const v of ['plan', 'voisinage', 'explorateur']) { await page.click(`button[data-action="code-vue"][data-vue="${v}"]`); await pause(150); }
+    for (const v of ['plan', 'voisinage']) { await page.click(`button[data-action="code-vue"][data-vue="${v}"]`); await pause(150); }
     ok('un texte hostile reste du texte', (await page.evaluate(() => window.pirate)) === undefined
       && (await page.locator('#vue-code img').count()) === 0 && (await fiche.locator('h2').textContent()) === hostile);
     await page.evaluate(() => { carteVersion = -1; fichierChoisi = ''; chargerCarte(true); });

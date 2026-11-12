@@ -5,299 +5,386 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Atelier</title>
 <meta name="apple-mobile-web-app-title" content="Atelier">
-<meta name="theme-color" content="#2b2c2f">
+<meta name="theme-color" content="#000000">
+<link rel="preload" href="/polices/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/polices/doto.woff" as="font" type="font/woff" crossorigin>
 <link rel="icon" type="image/png" href="/icone.png">
 <link rel="apple-touch-icon" href="/icone.png">
 <link rel="manifest" href="/manifest.webmanifest">
 <style>
-/* Verre fumé gris sur une scène floue : panneaux flottants, grands rayons, typographie fine.
-   Turquoise = réussite, orange = tu es attendue. Boutons principaux en neutre plein. */
+/* Atelier : noir, bleu nuit, ambre, gris clair, blanc.
+   Ambre = ce qui t'attend, et rien d'autre. Blanc = vérifié. Bleu acier (le bleu nuit éclairci) = en cours.
+   Un refus se dit par des points creux, jamais par une couleur de plus.
+   Trois polices livrées avec l'Atelier : Geist pour lire, Geist Mono pour les étiquettes et les chiffres,
+   Doto (des points lumineux) pour le nom ATELIER et les grands nombres. */
+@font-face { font-family: "Geist"; src: url("/polices/geist.woff2") format("woff2"); font-weight: 300 700; font-display: swap; }
+@font-face { font-family: "Geist Mono"; src: url("/polices/geist-mono.woff2") format("woff2"); font-weight: 400 600; font-display: swap; }
+@font-face { font-family: "Doto"; src: url("/polices/doto.woff") format("woff"); font-weight: 900; font-display: swap; }
 :root {
   color-scheme: dark;
-  /* Une pièce floue derrière (fenêtre, lampe, meubles sombres), une grande plaque de verre fumé
-     par-dessus, et des cartes à peine plus claires posées sur la plaque. */
-  --fond: #5a595e;
-  --scene: radial-gradient(40% 46% at 52% 110%, rgba(255, 220, 182, 0.5), transparent 70%),
-    radial-gradient(32% 42% at 20% -8%, rgba(255, 255, 255, 0.4), transparent 70%),
-    radial-gradient(26% 62% at 104% 42%, rgba(16, 16, 18, 0.85), transparent 72%),
-    radial-gradient(30% 46% at -5% 80%, rgba(14, 14, 16, 0.88), transparent 72%),
-    radial-gradient(22% 30% at 78% 4%, rgba(200, 212, 235, 0.32), transparent 70%),
-    linear-gradient(170deg, #7e7c81, #57565b 55%, #46454a);
-  --plaque: rgba(58, 58, 64, 0.36);
-  --verre: linear-gradient(180deg, rgba(255, 255, 255, 0.115), rgba(255, 255, 255, 0.055));
-  --verre-fort: rgba(255, 255, 255, 0.17); --creux: rgba(0, 0, 0, 0.14);
-  --bord: rgba(255, 255, 255, 0.12); --reflet: rgba(255, 255, 255, 0.2); --trait: rgba(255, 255, 255, 0.12);
-  --texte: #ffffff; --discret: rgba(255, 255, 255, 0.8); --faible: rgba(255, 255, 255, 0.66);
-  --reussite: #72ebdc; --refus: #ffa76e; --change: #ffd76e; --fragile: #ff9db0; --plein: #ffffff; --sur-plein: #2a2a2e;
-  --ombre: 0 14px 34px -22px rgba(0, 0, 0, 0.5);
-  --rayon: 22px; --mono: ui-monospace, "SF Mono", Menlo, monospace;
+  --noir: #000000; --nuit: #141a2c; --ambre: #e8953a; --gris: #dcdcdc; --blanc: #ffffff;
+  --fond: var(--noir); --surface: #0e1220; --surface-haut: #151b2d; --creux: rgba(0, 0, 0, 0.32);
+  --bord: rgba(220, 220, 220, 0.09); --bord-fort: rgba(220, 220, 220, 0.17); --trait: rgba(220, 220, 220, 0.08);
+  --texte: var(--blanc); --discret: rgba(220, 220, 220, 0.74); --faible: rgba(220, 220, 220, 0.52); --eteint: rgba(220, 220, 220, 0.12);
+  --attend: var(--ambre); --verifie: var(--blanc); --en-cours: #8297c4;
+  /* Les anciens noms, gardés pour les morceaux qui les lisent encore */
+  --reussite: var(--verifie); --refus: var(--attend); --change: var(--gris); --fragile: var(--blanc); --plein: var(--blanc); --sur-plein: var(--noir);
+  --ombre: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 0 rgba(0, 0, 0, 0.6), 0 24px 40px -24px rgba(0, 0, 0, 0.85);
+  --rayon: 18px;
+  --sans: "Geist", -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
+  --mono: "Geist Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  --points: "Doto", "Geist Mono", ui-monospace, monospace;
 }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
-  margin: 0; color: var(--texte); font-size: 13px; line-height: 1.45; font-weight: 400;
-  font-family: -apple-system, "SF Pro Text", "Inter", system-ui, "Segoe UI", sans-serif;
+  margin: 0; color: var(--texte); font-size: 13px; line-height: 1.45; font-weight: 400; font-family: var(--sans);
   font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
-  background: var(--scene), var(--fond); background-attachment: fixed;
+  background: radial-gradient(120% 90% at 50% -25%, #1c2440 0%, #0b0f1b 48%, #000 100%) fixed, var(--fond);
 }
 h1, h2, h3, p, ol, ul { margin: 0; }
-.app {
-  height: calc(100% - 24px); margin: 12px; display: flex; flex-direction: column; gap: 12px; padding: 12px 14px 14px; min-width: 0;
-  border-radius: 30px; background: var(--plaque); border: 1px solid var(--bord);
-  box-shadow: inset 0 1px 0 var(--reflet), 0 30px 80px -40px rgba(0, 0, 0, 0.7);
-  -webkit-backdrop-filter: blur(30px) saturate(125%); backdrop-filter: blur(30px) saturate(125%);
+.app { height: 100%; display: flex; flex-direction: column; gap: 12px; padding: 0 22px 18px; min-width: 0; }
+
+/* Les panneaux : bleu nuit mat, à peine éclairé par le haut */
+.carte, .rail, .fiche, .toile, .code-cadre, .explorateur-cadre, .boite, .carte-fil, .projet-carte, .salle-panneau, .msg.toi {
+  background: linear-gradient(180deg, var(--surface-haut), var(--surface)); border: 1px solid rgba(220, 220, 220, 0.05); box-shadow: var(--ombre);
 }
 
-/* Le verre : les cartes sont translucides, c'est la plaque qui floute la pièce */
-.carte, .rail, .fiche, .toile, .code-cadre, .boite, .carte-fil, .msg.toi, .infos {
-  background: var(--verre); border: 1px solid var(--bord); border-top-color: var(--reflet); box-shadow: var(--ombre);
-}
-@media (prefers-reduced-transparency: reduce) { .app { background: var(--fond); -webkit-backdrop-filter: none; backdrop-filter: none; } }
-
-/* Barre du haut : le nom, les onglets en texte souligné, les compteurs */
-.tete { flex: none; display: flex; align-items: center; gap: 18px; min-height: 40px; padding: 0 6px; overflow-x: auto; white-space: nowrap; }
-.pilule { flex: none; display: flex; align-items: center; gap: 10px; }
-.logo { width: 14px; height: 14px; border-radius: 5px; background: var(--plein); position: relative; }
-.logo::after { content: ""; position: absolute; inset: 4px; border-radius: 2px; background: var(--sur-plein); }
-.marque b { font-size: 14px; font-weight: 600; letter-spacing: 0.01em; }
+/* ---------- En-tête : le nom en points, le projet, les onglets ---------- */
+.tete { flex: none; display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 0 4px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.pilule { flex: none; display: flex; align-items: center; gap: 14px; }
+.vers-accueil { display: inline-flex; align-items: center; color: inherit; text-decoration: none; }
+.mot { font: 900 25px/1 var(--points); letter-spacing: 0.02em; color: var(--texte); }
+.vers-accueil:hover .mot { color: var(--gris); }
 .nom-projet {
-  appearance: none; -webkit-appearance: none; max-width: 240px; padding: 5px 20px 5px 12px; border: 0; border-left: 1px solid var(--trait);
-  border-radius: 0; background-color: transparent; color: var(--discret); font: inherit; cursor: pointer; text-overflow: ellipsis;
+  appearance: none; -webkit-appearance: none; max-width: 240px; padding: 6px 20px 6px 16px; border: 0; border-left: 1px solid var(--bord);
+  border-radius: 0; background-color: transparent; color: var(--discret); font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase;
+  cursor: pointer; text-overflow: ellipsis;
   background-image: linear-gradient(45deg, transparent 50%, currentColor 50%), linear-gradient(135deg, currentColor 50%, transparent 50%);
   background-position: calc(100% - 10px) 55%, calc(100% - 6px) 55%; background-size: 4px 4px; background-repeat: no-repeat;
 }
 .nom-projet:disabled { background-image: none; padding-right: 6px; cursor: default; opacity: 1; }
-.nom-projet option { background: #3b3b40; color: #ffffff; }
-.plus::before { content: "+"; margin-right: 6px; font-weight: 400; }
-dialog {
-  width: min(420px, calc(100vw - 32px)); padding: 20px 22px; color: var(--texte); border: 1px solid var(--bord); border-top-color: var(--reflet);
-  border-radius: 22px; background: rgba(72, 72, 78, 0.74); box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.75);
-  -webkit-backdrop-filter: blur(30px); backdrop-filter: blur(30px);
-}
-dialog::backdrop { background: rgba(0, 0, 0, 0.38); }
-dialog form { display: flex; flex-direction: column; gap: 10px; }
-dialog h2 { font-size: 15px; font-weight: 600; }
-dialog .boutons { margin-top: 6px; }
-dialog .reprise { margin-top: 18px; padding-top: 16px; border-top: 1px solid rgba(255,255,255,0.12); }
-input[type="text"] {
-  height: 34px; padding: 0 12px; border-radius: 10px; border: 1px solid var(--bord); background: var(--creux); color: var(--texte);
-  font: inherit; font-size: 13.5px; outline: 0;
-}
-input[type="text"]:focus-visible { border-color: var(--texte); }
-.alerte { color: var(--refus); }
-.alerte:empty { display: none; }
-.onglets { gap: 24px; margin-left: 14px; align-self: stretch; }
+.nom-projet option { background: var(--surface-haut); color: var(--texte); text-transform: none; }
+.plus::before { content: "+"; margin-right: 6px; }
+.onglets { gap: 2px; margin-left: 4px; }
 .onglets a {
-  display: flex; align-items: center; gap: 7px; height: 40px; color: var(--faible); text-decoration: none;
-  font-size: 15px; font-weight: 400; border-bottom: 2px solid transparent;
+  display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 8px; color: var(--faible); text-decoration: none;
+  font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase;
 }
 .onglets a:hover { color: var(--texte); }
-.onglets a[aria-current="page"] { color: var(--texte); border-bottom-color: var(--texte); }
-.cpt { font-family: var(--mono); font-size: 10.5px; color: var(--faible); }
-.pt { width: 6px; height: 6px; border-radius: 50%; background: var(--refus); display: none; }
+.onglets a[aria-current="page"] { color: var(--texte); background: rgba(220, 220, 220, 0.08); }
+.cpt { font: 500 11px var(--mono); color: var(--faible); letter-spacing: 0; }
+.pt { width: 6px; height: 6px; border-radius: 50%; background: var(--attend); box-shadow: 0 0 10px var(--attend); display: none; }
+.pt.code { background: var(--en-cours); box-shadow: 0 0 10px var(--en-cours); }
 .pt.allume { display: block; }
 .pousse { flex-grow: 1; }
-.infos { height: 32px; padding: 0 14px; border-radius: 999px; font-size: 11.5px; color: var(--discret); gap: 14px; }
+.infos { gap: 18px; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--discret); }
 .infos span:empty { display: none; }
 .infos[hidden] { display: none; }
+#pastille-agents::before { content: ""; display: inline-block; width: 7px; height: 7px; margin-right: 8px; border-radius: 50%; background: var(--en-cours); box-shadow: 0 0 10px var(--en-cours); vertical-align: 0; }
+#mode { color: var(--faible); border: 1px dashed var(--bord-fort); padding: 5px 10px; border-radius: 7px; }
 
-.vue { flex: 1 1 0; min-height: 0; display: none; gap: 10px; }
-.vue.active { display: flex; }
-
-.etiquette, .carte h2, th, .contrat span, .chiffres span, .rail h2, .fiche h3 {
-  font-size: 10.5px; font-weight: 500; color: var(--faible); letter-spacing: 0.08em; text-transform: uppercase;
+/* ---------- Commun ---------- */
+dialog {
+  width: min(440px, calc(100vw - 32px)); padding: 22px 24px; color: var(--texte); border: 1px solid var(--bord-fort);
+  border-radius: 18px; background: linear-gradient(180deg, var(--surface-haut), var(--surface)); box-shadow: 0 40px 90px -30px rgba(0, 0, 0, 0.9);
 }
+dialog::backdrop { background: rgba(0, 0, 0, 0.6); }
+dialog form { display: flex; flex-direction: column; gap: 10px; }
+dialog h2 { font-size: 16px; font-weight: 600; }
+dialog .boutons { margin-top: 6px; }
+dialog .reprise { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--bord); }
+input[type="text"] {
+  height: 36px; padding: 0 12px; border-radius: 9px; border: 1px solid var(--bord-fort); background: var(--creux); color: var(--texte);
+  font: inherit; font-size: 13.5px; outline: 0;
+}
+input[type="text"]:focus-visible { border-color: var(--gris); }
+.alerte { color: var(--attend); }
+.alerte:empty { display: none; }
+.vue { flex: 1 1 0; min-height: 0; display: none; gap: 12px; }
+.vue.active { display: flex; }
+.etiquette, .carte h2, th, .contrat span, .chiffres span, .rail h2, .fiche h3, .sur-titre {
+  font: 500 10.5px var(--mono); color: var(--faible); letter-spacing: 0.08em; text-transform: uppercase;
+}
+.carte h2 { display: flex; align-items: baseline; gap: 10px; color: var(--discret); }
+.carte h2 .num { color: var(--faible); }
+.carte h2 .note { margin-left: auto; color: var(--faible); font-style: normal; text-transform: none; letter-spacing: 0.02em; }
 .calme { color: var(--discret); }
 .petit { color: var(--faible); font-size: 11.5px; }
+code { font-family: var(--mono); }
 button {
-  height: 28px; padding: 0 13px; border-radius: 999px; font: inherit; font-size: 12.5px; font-weight: 500; cursor: pointer;
-  background: var(--verre); color: var(--texte); border: 1px solid var(--bord); white-space: nowrap;
+  height: 30px; padding: 0 13px; border-radius: 8px; font: 500 12px var(--mono); letter-spacing: -0.01em; cursor: pointer;
+  background: transparent; color: var(--texte); border: 1px solid var(--bord-fort); white-space: nowrap;
 }
-button.principal { background: var(--plein); color: var(--sur-plein); border-color: transparent; font-weight: 600; }
-button:hover:not(:disabled) { filter: brightness(1.1); }
+button.principal { background: var(--blanc); color: var(--noir); border-color: transparent; font-weight: 600; }
+/* Ce qui t'attend : le bouton qui répond est ambre */
+.autorisation button.principal, .demande button.principal, .carte-fil.decision button.principal, button[data-action="valider"], .salle-attente button.principal {
+  background: var(--attend); color: #1c0f00;
+}
+button:hover:not(:disabled) { border-color: var(--gris); }
+button.principal:hover:not(:disabled) { filter: brightness(1.08); }
 button:disabled { opacity: 0.4; cursor: default; }
-button:focus-visible, a:focus-visible, select:focus-visible, .noeud:focus-visible { outline: 2px solid var(--texte); outline-offset: 2px; }
+button:focus-visible, a:focus-visible, select:focus-visible, .noeud:focus-visible, [role="button"]:focus-visible { outline: 2px solid var(--gris); outline-offset: 2px; }
 .boutons { display: flex; flex-wrap: wrap; gap: 6px; }
 @media (pointer: coarse) { button { height: 44px; padding: 0 16px; } }
+.puce { font: 500 12px var(--mono); color: var(--texte); }
+.rond { width: 6px; height: 6px; border-radius: 50%; background: var(--eteint); box-shadow: inset 0 0 0 1px var(--faible); display: block; }
+.rond.verifie { background: var(--verifie); box-shadow: none; }
+.rond.revenu { background: transparent; box-shadow: inset 0 0 0 1.5px var(--gris); }
+.rond.en_cours, .rond.en_verification { background: var(--en-cours); box-shadow: 0 0 8px var(--en-cours); animation: battre 1.4s ease-in-out infinite; }
+.etat { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; font: 500 11.5px var(--mono); }
+.etat.verifie { color: var(--verifie); } .etat.revenu { color: var(--gris); } .etat.en_cours, .etat.en_verification { color: var(--en-cours); }
+.etat.a_lancer, .etat.abandonnee { color: var(--faible); }
+@keyframes battre { 50% { opacity: 0.3; } }
+@keyframes couler { to { stroke-dashoffset: -14; } }
+@media (prefers-reduced-motion: reduce) { .rond, .points i, .impulsion, .s-pulse { animation: none !important; } }
 
-/* Conversation */
+/* ---------- Conversation ---------- */
 .discussion { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; }
-.fil { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 16px 16px 8px; }
-.colonne { max-width: 720px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
-.msg { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
-.msg.toi { align-self: flex-end; max-width: 80%; padding: 8px 14px; border-radius: 18px 18px 5px 18px; white-space: pre-wrap; overflow-wrap: anywhere; }
-.qui { display: flex; align-items: center; gap: 7px; font-size: 11px; color: var(--faible); }
-.qui::before { content: ""; width: 7px; height: 7px; border-radius: 2px; border: 1px solid var(--reussite); }
-.qui b { font-weight: 500; color: var(--discret); }
-.qui time { font-family: var(--mono); font-size: 10.5px; }
-.prose { font-size: 13.5px; line-height: 1.58; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 8px; }
-.prose code { font-family: var(--mono); font-size: 12px; padding: 1px 4px; border-radius: 4px; background: var(--creux); }
+.fil { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 18px 16px 8px; }
+.colonne { max-width: 760px; margin: 0 auto; display: flex; flex-direction: column; gap: 22px; }
+.msg { display: flex; flex-direction: column; gap: 7px; min-width: 0; }
+.msg.toi { align-self: flex-end; max-width: 78%; padding: 11px 16px; border-radius: 16px 16px 4px 16px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; line-height: 1.55; }
+.qui { display: flex; align-items: center; gap: 10px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--discret); }
+.qui::before { content: ""; flex: none; width: 11px; height: 11px; background-image: radial-gradient(circle, var(--texte) 1.1px, transparent 1.4px); background-size: 4px 4px; background-position: -0.5px -0.5px; }
+.qui b { font-weight: 500; }
+.qui time { color: var(--faible); }
+.prose { font-size: 14.5px; line-height: 1.6; overflow-wrap: anywhere; display: flex; flex-direction: column; gap: 9px; }
+.prose code { font-size: 12.5px; padding: 1px 5px; border-radius: 5px; background: rgba(220, 220, 220, 0.08); }
 .prose b { font-weight: 600; }
 .prose ul { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
-.prose pre { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--creux); overflow-x: auto; }
+.prose pre { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--creux); border: 1px solid var(--bord); overflow-x: auto; }
 .prose pre code { padding: 0; background: none; white-space: pre; }
 .distant { color: var(--discret); }
-.distant.relie::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--reussite); vertical-align: 1px; }
-.distant.souci { color: var(--refus); }
-.distant.souci::before { background: var(--refus); }
-.gestes { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 2px; font-family: var(--mono); font-size: 11.5px; color: var(--faible); }
+.distant.relie::before { content: ""; display: inline-block; width: 6px; height: 6px; margin-right: 7px; border-radius: 50%; background: var(--verifie); vertical-align: 1px; }
+.distant.souci { color: var(--attend); border-color: color-mix(in srgb, var(--attend) 50%, transparent); }
+.distant.souci::before { background: var(--attend); }
+.gestes { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 2px; font: 400 11.5px var(--mono); color: var(--faible); }
 .points { display: inline-flex; gap: 4px; padding: 6px 0; }
-.points i { width: 4px; height: 4px; border-radius: 50%; background: var(--discret); animation: battre 1.2s ease-in-out infinite; }
+.points i { width: 4px; height: 4px; border-radius: 50%; background: var(--en-cours); animation: battre 1.2s ease-in-out infinite; }
 .points i:nth-child(2) { animation-delay: 0.2s; } .points i:nth-child(3) { animation-delay: 0.4s; }
-.activite { margin-left: 3px; padding-left: 14px; border-left: 1px solid var(--trait); display: flex; flex-direction: column; gap: 2px; }
-.activite p { color: var(--faible); font-size: 11.5px; padding-bottom: 2px; }
-.ligne-moteur { display: grid; grid-template-columns: 58px 30px minmax(0, 1fr); gap: 8px; font-size: 12px; color: var(--discret); }
-.ligne-moteur time, .ligne-moteur .id { font-family: var(--mono); font-size: 11px; color: var(--faible); }
-.ligne-moteur .id { color: var(--reussite); }
-.carte-fil { border-radius: 16px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
-.carte-fil.decision { border-color: color-mix(in srgb, var(--refus) 60%, transparent); }
-.carte-fil h3 { font-size: 12.5px; font-weight: 600; }
-.saisie { flex: none; padding: 6px 16px 4px; }
-.boite { max-width: 720px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; padding: 7px 7px 7px 16px; border-radius: 22px; }
-.boite:focus-within { border-color: color-mix(in srgb, var(--texte) 40%, transparent); }
+.activite { padding: 2px 0 2px 16px; border-left: 1px solid var(--bord-fort); display: flex; flex-direction: column; gap: 4px; }
+.activite p { font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); padding-bottom: 2px; }
+.ligne-moteur { display: grid; grid-template-columns: 66px 34px minmax(0, 1fr); gap: 0; font-size: 12.5px; color: var(--discret); }
+.ligne-moteur time, .ligne-moteur .id { font: 400 11px var(--mono); color: var(--faible); }
+.ligne-moteur .id { color: var(--texte); font-weight: 500; }
+.carte-fil { border-radius: 16px; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+.carte-fil.decision { background: linear-gradient(180deg, #211a15, #12151f); border-color: color-mix(in srgb, var(--attend) 38%, transparent); }
+.carte-fil h3 { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--discret); display: flex; align-items: center; gap: 8px; }
+.carte-fil.decision h3 { color: var(--attend); }
+.carte-fil.decision h3::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--attend); }
+.saisie { flex: none; padding: 10px 16px 2px; }
+.boite { max-width: 760px; margin: 0 auto; display: flex; align-items: flex-end; gap: 8px; padding: 8px 8px 8px 18px; border-radius: 14px; border-color: var(--bord-fort); }
+.boite:focus-within { border-color: rgba(220, 220, 220, 0.4); }
 textarea {
   flex: 1 1 0; min-width: 0; resize: none; border: 0; outline: 0; background: transparent; color: var(--texte);
-  font: inherit; font-size: 13.5px; line-height: 1.5; max-height: 160px; padding: 4px 0;
+  font: inherit; font-size: 14px; line-height: 1.5; max-height: 160px; padding: 5px 0;
 }
 textarea::placeholder { color: var(--faible); }
-.sous-saisie { max-width: 720px; margin: 6px auto 0; padding-left: 16px; color: var(--faible); font-size: 11px; }
-.rail { flex: 0 0 284px; border-radius: var(--rayon); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
-.rail section { display: flex; flex-direction: column; gap: 9px; }
+.sous-saisie { max-width: 760px; margin: 8px auto 0; padding-left: 18px; font: 400 10.5px var(--mono); color: var(--faible); letter-spacing: 0.02em; }
+.rail { flex: 0 0 320px; border-radius: var(--rayon); padding: 18px 20px; overflow-y: auto; display: flex; flex-direction: column; gap: 24px; }
+.rail section { display: flex; flex-direction: column; gap: 10px; }
+.rail-tete { display: flex; align-items: center; gap: 14px; }
+.rail-tete p { font-size: 14px; font-weight: 500; line-height: 1.4; }
 .mini { list-style: none; padding: 0; display: flex; flex-direction: column; }
-.mini li { display: grid; grid-template-columns: 28px minmax(0, 1fr) 8px; align-items: center; gap: 8px; padding: 5px 0; border-top: 1px solid var(--trait); font-size: 12px; }
+.mini li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 8px; padding: 7px 0; border-top: 1px solid var(--trait); font-size: 12.5px; }
 .mini li:first-child { border-top: 0; }
 .mini .titre { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--discret); }
 
-/* États */
-.puce { font-family: var(--mono); font-size: 12px; color: var(--reussite); }
-.rond { width: 6px; height: 6px; border-radius: 50%; background: var(--faible); display: block; }
-.rond.verifie { background: var(--reussite); } .rond.revenu { background: var(--refus); }
-.rond.en_cours, .rond.en_verification { background: var(--texte); animation: battre 1.2s ease-in-out infinite; }
-.etat { display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; }
-.etat.verifie { color: var(--reussite); } .etat.revenu { color: var(--refus); }
-.etat.a_lancer, .etat.abandonnee { color: var(--faible); }
-@keyframes battre { 50% { opacity: 0.25; } }
-@media (prefers-reduced-motion: reduce) { .rond, .points i, .c-en_cours, .c-en_verification { animation: none !important; } .rail-jauge i, .anneau .arc { transition: none; } }
+/* ---------- Les points : anneaux, jauges, courbes ---------- */
+.anneau-points { flex: none; display: block; }
+.anneau-points text { font-family: var(--points); font-weight: 900; fill: var(--texte); text-anchor: middle; }
+.anneau-points .sous { font-family: var(--mono); font-weight: 500; fill: var(--faible); letter-spacing: 0.12em; }
+.jauge { display: flex; flex-direction: column; gap: 7px; }
+.jauge .ligne { display: flex; justify-content: space-between; gap: 12px; font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
+.jauge .ligne b { font-weight: 500; color: var(--texte); letter-spacing: 0.04em; }
+.rang-points { height: 6px; background: radial-gradient(circle, var(--eteint) 2.1px, transparent 2.5px) 0 50% / 7px 6px repeat-x; }
+.rang-points i { display: block; height: 100%; width: var(--part); width: round(down, var(--part), 7px);
+  background: radial-gradient(circle, var(--texte) 2.1px, transparent 2.5px) 0 50% / 7px 6px repeat-x; }
+.chiffres { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; padding-top: 6px; }
+.chiffres span { display: block; margin-bottom: 4px; }
+.chiffres b { font: 900 30px/1 var(--points); letter-spacing: 0.01em; }
 
-/* Chantier */
-.defilante { overflow-y: auto; border-radius: var(--rayon); }
-.pages { width: 100%; max-width: 1280px; margin: 0 auto; padding: 0 0 12px; display: flex; flex-direction: column; gap: 10px; height: max-content; }
-.grille { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-.carte { border-radius: var(--rayon); padding: 16px 18px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+/* ---------- Chantier : des modules numérotés, comme les cadrans d'un appareil ---------- */
+.defilante { overflow-y: auto; }
+.pages { width: 100%; max-width: 1440px; margin: 0 auto; padding: 0 0 6px; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; height: max-content; }
+.pages > * { grid-column: 1 / -1; }
+.pages .m4 { grid-column: span 4; } .pages .m5 { grid-column: span 5; } .pages .m3 { grid-column: span 3; }
+.pages .m7 { grid-column: span 7; } .pages .m8 { grid-column: span 8; } .pages .m9 { grid-column: span 9; }
+.carte { border-radius: var(--rayon); padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.carte.attend { background: linear-gradient(180deg, #221a14, #121624); }
+.carte.attend h2 .note { color: var(--attend); }
 .tete-orch { display: flex; align-items: center; gap: 18px; }
 .tete-orch > div { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
-.tete-orch > #anneau { flex: none; min-width: 78px; }
-.anneau { flex: none; width: 78px; height: 78px; }
-.anneau circle { fill: none; stroke-width: 5; }
-.anneau .piste { stroke: var(--trait); }
-.anneau .arc { stroke: var(--reussite); stroke-linecap: round; transition: stroke-dashoffset 0.6s ease; }
-.anneau text { fill: var(--texte); font-size: 17px; font-weight: 300; text-anchor: middle; }
-.anneau .sous { fill: var(--faible); font-size: 8px; letter-spacing: 0.08em; }
+.tete-orch > #anneau { flex: none; }
+.tete-orch > #anneau:empty { display: none; }
 .point { font-size: 15px; line-height: 1.4; font-weight: 500; text-wrap: balance; }
+.compteurs { display: flex; align-items: flex-end; gap: 22px; }
+.compteurs > div { display: flex; flex-direction: column; gap: 3px; }
+.compteurs > i { width: 1px; height: 28px; background: var(--trait); }
+.compteurs span { font: 500 10px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
+.compteurs b { font: 400 19px var(--mono); font-weight: 400; }
 .contrat { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; }
 .contrat div { padding: 7px 0; border-top: 1px solid var(--trait); min-width: 0; }
 .contrat div:first-child, .contrat .large:first-child { border-top: 0; padding-top: 0; }
 .contrat .large { grid-column: 1 / -1; }
-.contrat span { display: block; margin-bottom: 1px; }
-.demande { border-left: 2px solid var(--refus); padding: 2px 0 2px 12px; display: flex; flex-direction: column; gap: 8px; }
-.salle { width: 100%; height: auto; display: block; min-width: 760px; }
-.salle text { font-family: inherit; fill: var(--discret); font-size: 10.5px; }
-.salle .s-id { font-family: var(--mono); fill: var(--reussite); font-size: 11px; font-weight: 400; }
+.contrat span { display: block; margin-bottom: 2px; }
+.demande { display: flex; flex-direction: column; gap: 8px; }
+.demande + .demande { padding-top: 12px; border-top: 1px solid var(--trait); }
+/* La salle du Chantier : un poste par tâche, sa courbe d'activité en points */
+.salle { width: 100%; height: auto; display: block; min-width: 640px; }
+.salle text { font-family: var(--sans); fill: var(--discret); font-size: 11px; }
+.salle .s-id { font-family: var(--points); font-weight: 900; font-size: 22px; fill: var(--texte); }
+.salle .s-etat { font-family: var(--mono); font-size: 10.5px; font-weight: 500; text-anchor: end; }
 .salle .s-titre { fill: var(--texte); font-size: 11.5px; font-weight: 500; }
+.salle .s-dose { font-family: var(--mono); font-size: 10px; fill: var(--discret); }
 .salle .s-faible { fill: var(--faible); }
-.salle .s-milieu { text-anchor: middle; }
-.salle .mur { fill: var(--creux); stroke: var(--trait); }
-.salle .bureau { fill: var(--verre-fort); stroke: color-mix(in srgb, var(--texte) 22%, transparent); }
-.salle .ecran { fill: color-mix(in srgb, var(--texte) 22%, transparent); }
-.salle .buste { fill: none; stroke: var(--texte); stroke-width: 1.4; stroke-linecap: round; }
-.salle .vide .buste { stroke: var(--faible); stroke-dasharray: 2 3; }
-.salle .couloir { fill: none; stroke: var(--trait); stroke-width: 1; }
-.salle .descente { fill: none; stroke: color-mix(in srgb, var(--texte) 55%, transparent); stroke-width: 1; stroke-dasharray: 3 4; animation: couler 0.9s linear infinite; }
-.salle .actif .ecran { fill: var(--texte); animation: battre 1.2s ease-in-out infinite; }
-.salle .verifie .bureau { stroke: color-mix(in srgb, var(--reussite) 75%, transparent); }
-.salle .verifie .coche { fill: none; stroke: var(--reussite); stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.salle .revenu .bureau { stroke: var(--refus); }
-.salle .revenu .signal, .salle .attendue .signal { fill: var(--refus); }
-.salle .controle .buste { stroke: var(--reussite); }
-.salle .controle text { fill: var(--reussite); }
-.salle .en-retrait .buste { stroke: var(--faible); }
-.salle .pense i, .salle .pense circle { fill: var(--texte); animation: battre 1.2s ease-in-out infinite; }
-.salle .pense circle:nth-child(2) { animation-delay: 0.2s; } .salle .pense circle:nth-child(3) { animation-delay: 0.4s; }
-.salle .attendue .buste { stroke: var(--refus); }
-@keyframes couler { to { stroke-dashoffset: -14; } }
-@media (prefers-reduced-motion: reduce) { .salle .descente, .salle .actif .ecran, .salle .pense circle { animation: none; } }
-.tuiles { display: flex; flex-direction: column; gap: 9px; }
-.rang { display: grid; grid-template-columns: 82px minmax(0, 1fr) 150px; align-items: center; gap: 12px; }
-.rang .nom { color: var(--discret); }
-.duo { display: flex; gap: 2px; height: 5px; border-radius: 3px; overflow: hidden; background: var(--trait); }
-.duo i { display: block; height: 100%; }
-.duo .r { background: var(--reussite); } .duo .f { background: var(--refus); }
-.rang .compte { text-align: right; color: var(--discret); font-size: 12px; white-space: nowrap; }
-.rang .compte b { font-weight: 500; }
-.rang .compte .r { color: var(--reussite); } .rang .compte .f { color: var(--refus); }
-.jauge { display: flex; flex-direction: column; gap: 5px; }
-.jauge .ligne { display: flex; justify-content: space-between; gap: 12px; color: var(--discret); }
-.jauge .ligne b { font-weight: 500; color: var(--texte); }
-.rail-jauge { height: 3px; border-radius: 2px; background: var(--trait); overflow: hidden; }
-.rail-jauge i { display: block; height: 100%; background: var(--reussite); transition: width 0.5s ease; }
-.rail-jauge i.haut-niveau { background: var(--refus); }
-.chiffres { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; border-top: 1px solid var(--trait); padding-top: 10px; }
-.chiffres span { display: block; }
-.chiffres b { font-size: 21px; font-weight: 300; letter-spacing: -0.01em; }
-.defile { overflow-x: auto; margin: 0 -6px; }
+.salle .s-activite { font-family: var(--mono); font-size: 9.5px; fill: var(--faible); }
+.salle .s-fond { fill: rgba(220, 220, 220, 0.025); stroke: rgba(220, 220, 220, 0.06); }
+.salle .poste-actif .s-fond { stroke: rgba(130, 151, 196, 0.35); }
+.salle .attendue .s-fond { stroke: color-mix(in srgb, var(--attend) 55%, transparent); }
+.salle .poste-actif { cursor: pointer; }
+.salle .poste-actif:hover .s-fond { fill: rgba(220, 220, 220, 0.05); }
+.salle .s-vide { font-family: var(--sans); font-size: 12px; fill: var(--faible); text-anchor: middle; }
+.agents { display: flex; flex-direction: column; margin-top: -2px; }
+.agent { border-top: 1px solid var(--trait); }
+.agent:first-child { border-top: 0; }
+.agent-tete { display: flex; align-items: center; gap: 10px; }
+button.agent-ligne {
+  flex: 1 1 0; min-width: 0; height: auto; padding: 7px 0; border: 0; border-radius: 0; background: none; font: 400 12px var(--sans); letter-spacing: 0; text-transform: none; text-align: left;
+  display: grid; grid-template-columns: 52px 92px minmax(0, 1fr); gap: 8px; align-items: baseline; color: var(--discret);
+}
+button.agent-ligne .id { font: 500 11.5px var(--mono); color: var(--texte); }
+button.agent-ligne .role { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
+button.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.journal { list-style: none; padding: 2px 0 10px 152px; display: flex; flex-direction: column; gap: 1px; font: 400 11.5px var(--mono); color: var(--faible); max-height: 260px; overflow-y: auto; }
+.journal li { overflow-wrap: anywhere; }
+.tuiles { display: flex; flex-direction: column; gap: 12px; }
+.rang { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; align-items: center; gap: 12px; }
+.rang .nom { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--discret); }
+.rang .essais-points { display: flex; flex-wrap: wrap; gap: 3px 10px; }
+.rang .essais-points span { display: grid; grid-template-columns: repeat(3, 4.4px); gap: 2px; }
+.rang .essais-points i { width: 4.4px; height: 4.4px; border-radius: 50%; }
+.rang .essais-points .r i { background: var(--verifie); }
+.rang .essais-points .f i { background: transparent; box-shadow: inset 0 0 0 1px var(--gris); }
+.rang .compte { text-align: right; font: 400 10.5px var(--mono); color: var(--faible); white-space: nowrap; }
+.legende-points { display: flex; flex-wrap: wrap; gap: 6px 16px; font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
+.legende-points i { display: inline-block; width: 6px; height: 6px; border-radius: 50%; margin-right: 6px; vertical-align: 1px; background: var(--verifie); }
+.legende-points i.creux { background: transparent; box-shadow: inset 0 0 0 1px var(--gris); }
+.defile { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
 table { width: 100%; border-collapse: collapse; min-width: 640px; }
-th { text-align: left; padding: 0 6px 7px; }
-td { padding: 7px 6px; border-top: 1px solid var(--trait); vertical-align: baseline; }
+th { text-align: left; padding: 0 6px 8px; }
+td { padding: 8px 6px; border-top: 1px solid var(--trait); vertical-align: baseline; }
+td.dose, td.droite { font: 400 11px var(--mono); color: var(--discret); }
 td.droite, th.droite { text-align: right; }
-.badge { margin-left: 8px; padding: 0 7px; border-radius: 999px; border: 1px solid color-mix(in srgb, var(--refus) 55%, transparent); color: var(--refus); font-size: 10.5px; font-weight: 500; white-space: nowrap; }
-.evenements { list-style: none; padding: 0; display: flex; flex-direction: column; font-size: 12px; }
-.evenements li { display: grid; grid-template-columns: 62px 34px minmax(0, 1fr); gap: 8px; padding: 4px 0; border-top: 1px solid var(--trait); }
+.badge { margin-left: 8px; padding: 1px 7px; border-radius: 6px; border: 1px solid var(--bord-fort); color: var(--discret); font: 500 10.5px var(--mono); white-space: nowrap; }
+.evenements { list-style: none; padding: 0; display: flex; flex-direction: column; font-size: 12.5px; }
+.evenements li { display: grid; grid-template-columns: 66px 34px minmax(0, 1fr); gap: 0; padding: 6px 0; border-top: 1px solid var(--trait); }
 .evenements li:first-child { border-top: 0; }
-.evenements time, .evenements .id { font-family: var(--mono); font-size: 11.5px; color: var(--faible); }
-.evenements .id { color: var(--reussite); }
+.evenements time, .evenements .id { font: 400 11px var(--mono); color: var(--faible); }
+.evenements .id { color: var(--texte); font-weight: 500; }
 .evenements span:last-child { color: var(--discret); }
 
-/* Plan */
-.toile { flex: 1 1 0; min-width: 0; overflow: auto; padding: 20px; border-radius: var(--rayon); display: flex; flex-direction: column; gap: 16px; }
-.toile svg { display: block; margin: 0 auto; flex: none; }
-.bandeau { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; max-width: 900px; width: 100%; margin: 0 auto; }
+/* ---------- Plan : le câblage des tâches ---------- */
+.toile { flex: 1 1 0; min-width: 0; overflow: auto; border-radius: var(--rayon); position: relative; display: flex; flex-direction: column; gap: 14px; padding: 16px 18px;
+  background-image: radial-gradient(rgba(220, 220, 220, 0.07) 1px, transparent 1.2px), linear-gradient(180deg, var(--surface-haut), var(--surface)); background-size: 22px 22px, auto; }
+.bandeau { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .bandeau p { flex: 1 1 320px; color: var(--discret); }
-.legende { display: flex; flex-wrap: wrap; justify-content: center; gap: 6px 16px; color: var(--faible); font-size: 11.5px; }
-.legende span { display: inline-flex; align-items: center; gap: 6px; }
-.lien { fill: none; stroke: color-mix(in srgb, var(--texte) 24%, transparent); stroke-width: 1; }
-.lien.fait { stroke: color-mix(in srgb, var(--reussite) 75%, transparent); }
-.noeud { cursor: pointer; outline-offset: 3px; }
-.noeud rect { fill: var(--verre-fort); stroke: color-mix(in srgb, var(--texte) 16%, transparent); stroke-width: 1; }
-.noeud:hover rect { stroke: color-mix(in srgb, var(--texte) 40%, transparent); }
-.noeud.verifie rect { stroke: color-mix(in srgb, var(--reussite) 70%, transparent); }
-.noeud.revenu rect { stroke: var(--refus); }
-.noeud.ajoutee rect { stroke-dasharray: 4 3; }
-.noeud.choisie rect { stroke: var(--texte); stroke-width: 1.25; }
-.noeud text { font-family: inherit; }
-.n-id { font-family: var(--mono) !important; font-size: 11.5px; fill: var(--reussite); }
-.n-etat { font-size: 10.5px; fill: var(--faible); text-anchor: end; }
-.n-titre { font-size: 12.5px; fill: var(--texte); font-weight: 500; }
-.n-dose { font-size: 11px; fill: var(--discret); }
-.racine rect { fill: var(--creux); stroke: color-mix(in srgb, var(--texte) 16%, transparent); }
-.racine text { font-size: 11.5px; fill: var(--discret); text-anchor: middle; }
-.racine.fait rect { stroke: color-mix(in srgb, var(--reussite) 70%, transparent); } .racine.fait text { fill: var(--reussite); }
-.c-verifie { fill: var(--reussite); } .c-revenu { fill: var(--refus); } .c-a_lancer, .c-abandonnee { fill: var(--faible); }
-.c-en_cours, .c-en_verification { fill: var(--texte); animation: battre 1.2s ease-in-out infinite; }
-.fiche { flex: 0 0 324px; border-radius: var(--rayon); padding: 18px 16px; overflow-y: auto; display: flex; flex-direction: column; gap: 16px; }
+.cablage { position: relative; flex: none; margin: 0 auto; }
+.cablage svg.fils { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
+.fil-lien { fill: none; stroke-width: 1.6; }
+.fil-lien.verifie { stroke: var(--verifie); }
+.fil-lien.attend { stroke: var(--attend); }
+.fil-lien.en_cours { stroke: var(--en-cours); }
+.fil-lien.a_venir { stroke: rgba(220, 220, 220, 0.24); stroke-width: 1; stroke-dasharray: 3 4; }
+.fil-lueur { fill: none; stroke-width: 4; opacity: 0.45; filter: url(#lueur-fil); }
+.fil-lueur.verifie { stroke: var(--verifie); opacity: 0.32; } .fil-lueur.attend { stroke: var(--attend); } .fil-lueur.en_cours { stroke: var(--en-cours); opacity: 0.35; }
+.impulsion { fill: #fff; }
+.impulsion-halo { opacity: 0.4; filter: url(#lueur-fil); }
+.etage-titre { position: absolute; font: 500 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faible); white-space: nowrap; }
+.noeud {
+  position: absolute; width: 216px; height: 66px; border-radius: 12px; cursor: pointer; text-align: left;
+  display: grid; grid-template-columns: 30px minmax(0, 1fr); gap: 10px; align-items: center; padding: 0 12px;
+  background: linear-gradient(180deg, var(--surface-haut), #10141f); border: 1px solid var(--bord);
+  box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 18px 30px -18px rgba(0, 0, 0, 0.9), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.noeud:hover { border-color: var(--bord-fort); }
+.noeud .ic { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: rgba(220, 220, 220, 0.04); border: 1px solid var(--bord); }
+.noeud .t { font-size: 12.5px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.noeud .t b { font: 500 11.5px var(--mono); margin-right: 7px; color: var(--discret); }
+.noeud .d { font: 400 10.5px var(--mono); color: var(--faible); margin-top: 2px; display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; overflow: hidden; }
+.noeud .d span:last-child { overflow: hidden; text-overflow: ellipsis; }
+.noeud.verifie { border-color: rgba(255, 255, 255, 0.24); } .noeud.verifie .ic { background: rgba(255, 255, 255, 0.08); border-color: rgba(255, 255, 255, 0.3); }
+.noeud.attend { border-color: color-mix(in srgb, var(--attend) 55%, transparent); box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.5), 0 0 30px -6px color-mix(in srgb, var(--attend) 35%, transparent), inset 0 1px 0 rgba(255, 255, 255, 0.05); }
+.noeud.attend .ic { background: color-mix(in srgb, var(--attend) 12%, transparent); border-color: color-mix(in srgb, var(--attend) 50%, transparent); }
+.noeud.en_cours, .noeud.en_verification { border-color: rgba(130, 151, 196, 0.45); }
+.noeud.a_lancer, .noeud.abandonnee { background: rgba(11, 15, 27, 0.7); border-style: dashed; border-color: rgba(220, 220, 220, 0.16); box-shadow: none; }
+.noeud.a_lancer .t, .noeud.abandonnee .t { color: var(--discret); }
+.noeud.revenu .ic { border-color: var(--gris); }
+.noeud.ajoutee { border-style: dashed; }
+.noeud.choisie { outline: 1.5px solid var(--gris); outline-offset: 3px; }
+.noeud.fixe { cursor: default; }
+.noeud .port { position: absolute; top: 29px; width: 7px; height: 7px; border-radius: 50%; background: var(--fond); border: 1.5px solid rgba(220, 220, 220, 0.35); }
+.noeud .port.g { left: -4px; } .noeud .port.d { right: -4px; }
+.etat-mot.verifie { color: var(--verifie); } .etat-mot.attend { color: var(--attend); } .etat-mot.en_cours, .etat-mot.en_verification { color: var(--en-cours); }
+.legende { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 500 10.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
+.legende span { display: inline-flex; align-items: center; gap: 7px; }
+.legende i { display: inline-block; width: 18px; border-top: 2px solid; }
+.fiche { flex: 0 0 340px; border-radius: var(--rayon); padding: 20px 22px; overflow-y: auto; display: flex; flex-direction: column; gap: 18px; }
 .fiche:empty { display: none; }
-.fiche header { display: flex; flex-direction: column; gap: 4px; }
-.fiche h2 { font-size: 14px; font-weight: 600; }
-.fiche section { display: flex; flex-direction: column; gap: 5px; }
-.fiche ol, .fiche ul { padding-left: 18px; display: flex; flex-direction: column; gap: 3px; color: var(--discret); }
-.fiche ul.fichiers { list-style: none; padding: 0; font-family: var(--mono); font-size: 11.5px; }
+.fiche header { display: flex; flex-direction: column; gap: 5px; }
+.fiche .fiche-id { display: flex; justify-content: space-between; align-items: baseline; }
+.fiche .fiche-id .puce { font: 900 34px/1 var(--points); }
+.fiche h2 { font-size: 16px; font-weight: 500; }
+.fiche section { display: flex; flex-direction: column; gap: 6px; }
+.fiche h3 { margin-bottom: 2px; }
+.fiche ol, .fiche ul { padding-left: 18px; display: flex; flex-direction: column; gap: 5px; color: var(--discret); }
+.fiche ul.fichiers { list-style: none; padding: 0; font: 400 11.5px var(--mono); }
 .fiche .essais { list-style: none; padding: 0; }
-.fiche .essais li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; padding: 4px 0; border-top: 1px solid var(--trait); font-size: 12px; }
+.fiche .essais li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 6px; padding: 6px 0; border-top: 1px solid var(--trait); font-size: 12px; }
 .fiche .essais li:first-child { border-top: 0; }
-.fiche .essais .ok { color: var(--reussite); } .fiche .essais .non { color: var(--refus); }
+.fiche .essais .ok { color: var(--verifie); } .fiche .essais .non { color: var(--gris); } .fiche .essais .neutre { color: var(--faible); }
+.fiche .autorisation { border: 1px solid color-mix(in srgb, var(--attend) 35%, transparent); background: color-mix(in srgb, var(--attend) 5%, transparent); border-radius: 12px; padding: 12px 14px; }
 
-/* Autorisations et agents en marche */
-button.discret { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 400; background: transparent; color: var(--discret); }
-.maj-phrase { flex: none; margin: -4px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
+/* ---------- Salle : le plancher isométrique ---------- */
+#vue-salle { position: relative; overflow: hidden; border-radius: var(--rayon); }
+#vue-salle.active { display: block; }
+.salle-sol-cadre { position: absolute; inset: 0; }
+.salle-sol { position: absolute; inset: 0; width: 100%; height: 100%; }
+.salle-etiquettes { position: absolute; inset: 0; pointer-events: none; }
+.s-tag { position: absolute; padding: 8px 11px 9px; border-radius: 11px; background: rgba(14, 18, 32, 0.86); border: 1px solid var(--bord); white-space: nowrap; box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.9); transform: translateY(-50%); pointer-events: auto; cursor: default; }
+.s-tag.g { transform: translate(-100%, -50%); }
+.s-tag::after { content: ""; position: absolute; top: 50%; width: 18px; height: 1px; background: rgba(220, 220, 220, 0.3); }
+.s-tag.d::after { left: -19px; } .s-tag.g::after { right: -19px; }
+.s-tag .t { font-size: 12.5px; font-weight: 500; }
+.s-tag .t b { font: 500 11px var(--mono); color: var(--discret); margin-right: 6px; }
+.s-tag .d { font: 400 10.5px var(--mono); color: var(--faible); margin-top: 2px; }
+.s-tag.attend { border-color: color-mix(in srgb, var(--attend) 50%, transparent); }
+.s-tag.attend .d span { color: var(--attend); } .s-tag.verifie .d span { color: var(--verifie); } .s-tag.en_cours .d span { color: var(--en-cours); }
+.salle-panneau { position: absolute; z-index: 2; border-radius: 16px; padding: 16px 18px; background: linear-gradient(180deg, rgba(21, 27, 45, 0.86), rgba(12, 16, 28, 0.86)); -webkit-backdrop-filter: blur(12px); backdrop-filter: blur(12px); }
+.salle-orch { left: 0; top: 0; width: 320px; display: flex; flex-direction: column; gap: 12px; }
+.salle-orch .rail-tete p { font-size: 14.5px; }
+.salle-attente { right: 0; top: 76px; width: 360px; max-height: calc(100% - 210px); overflow-y: auto; display: flex; flex-direction: column; gap: 10px; }
+.salle-attente[hidden] { display: none; }
+.salle-attente.attend { border-color: color-mix(in srgb, var(--attend) 32%, transparent); }
+.salle-attente h2 { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
+.salle-attente.attend h2 { color: var(--attend); }
+.salle-compteurs { position: absolute; right: 4px; top: 4px; display: flex; gap: 28px; z-index: 2; }
+.salle-compteurs div { display: flex; flex-direction: column; gap: 3px; }
+.salle-compteurs span { font: 500 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faible); }
+.salle-compteurs b { font: 400 20px var(--mono); letter-spacing: -0.02em; }
+.salle-compteurs small { font-size: 12px; color: var(--faible); }
+.salle-legende { position: absolute; left: 4px; bottom: 4px; z-index: 2; display: flex; flex-direction: column; gap: 6px; font: 400 11px var(--mono); color: var(--discret); }
+.salle-fil { position: absolute; right: 4px; bottom: 4px; z-index: 2; width: 340px; display: flex; flex-direction: column; gap: 5px; font-size: 11.5px; color: var(--discret); }
+.salle-fil div { display: grid; grid-template-columns: 52px 30px minmax(0, 1fr); }
+.salle-fil time, .salle-fil b { font: 400 10.5px var(--mono); color: var(--faible); } .salle-fil b { color: var(--texte); font-weight: 500; }
+.salle-fil span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.salle-vide { position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%); max-width: 380px; text-align: center; color: var(--discret); line-height: 1.5; }
+.s-pulse { animation: battre 1.6s ease-in-out infinite; }
+
+/* Autorisations, arrêts, mises à jour, archives */
+button.discret { height: 26px; padding: 0 10px; font-size: 11.5px; color: var(--discret); }
+.maj-phrase { flex: none; margin: -6px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
 .maj-phrase .page { display: block; color: var(--faible); }
 #maj[disabled] { opacity: 0.6; cursor: default; }
 .nouveau-chantier, #form-nouveau-chantier { display: flex; flex-direction: column; gap: 8px; }
@@ -307,64 +394,49 @@ button.discret { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 
 #nom-chantier { max-width: 520px; }
 #archiver-chantier[disabled] { opacity: 0.6; cursor: default; }
 .archives { display: flex; flex-direction: column; }
-.archive-ligne { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; width: 100%; height: auto; padding: 10px 2px;
-  text-align: left; border: 0; border-radius: 0; border-top: 1px solid var(--trait); background: transparent; color: var(--texte); font-weight: 400; }
+.archive-ligne { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; width: 100%; height: auto; padding: 11px 2px;
+  text-align: left; border: 0; border-radius: 0; border-top: 1px solid var(--trait); background: transparent; color: var(--texte); font: 400 13px var(--sans); letter-spacing: 0; text-transform: none; }
 .archive-ligne:first-child { border-top: 0; }
 .archive-ligne:hover b, .archive-ligne:focus-visible b { text-decoration: underline; text-underline-offset: 3px; }
 .archive-ligne b { font-weight: 500; overflow-wrap: anywhere; }
 .archive-ligne .petit { grid-column: 1; }
 .archive-ligne .bilan { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--discret); font-size: 12px; text-align: right; }
 dialog.journal-archive { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
-.journal-archive h2 { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
-.journal-archive h3 { margin-top: 16px; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
+.journal-archive h2 { font-size: 17px; font-weight: 600; overflow-wrap: anywhere; }
+.journal-archive h3 { margin-top: 18px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
 .journal-archive p, .journal-archive li { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
 .journal-archive ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
 .journal-archive .bilan { margin-top: 10px; font-weight: 500; }
 .journal-archive .chiffres { margin-top: 8px; }
+.journal-archive .chiffres b { font: 400 15px var(--mono); }
 .journal-archive details { margin-top: 16px; }
 .journal-archive summary { cursor: pointer; font-size: 12.5px; color: var(--discret); }
 .journal-archive .fil-archive { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--discret); }
 .journal-archive .fil-archive b { font-weight: 500; color: var(--texte); }
 .journal-archive > .boutons { margin-top: 18px; }
-button.discret.confirme { color: var(--refus); border-color: color-mix(in srgb, var(--refus) 60%, transparent); font-weight: 500; }
+button.discret.confirme, button.confirme { color: var(--attend); border-color: color-mix(in srgb, var(--attend) 60%, transparent); font-weight: 600; }
 .autorisation { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .autor-corps { display: flex; flex-direction: column; gap: 6px; min-width: 0; cursor: pointer; border-radius: 8px; }
-.autor-corps p { overflow-wrap: anywhere; }
+.autor-corps p { overflow-wrap: anywhere; font-size: 14px; }
 .autor-corps:hover .petit { color: var(--discret); }
-.regle { font-family: var(--mono); font-size: 12px; padding: 1px 6px; border-radius: 4px; background: var(--creux); color: var(--texte); overflow-wrap: anywhere; }
-.detail { margin: 0; padding: 8px 10px; border-radius: 10px; background: var(--creux); font-family: var(--mono); font-size: 11.5px; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
+.regle { font: 400 12px var(--mono); padding: 1px 6px; border-radius: 5px; background: rgba(220, 220, 220, 0.08); color: var(--texte); overflow-wrap: anywhere; }
+.detail { margin: 0; padding: 10px 12px; border-radius: 9px; background: var(--creux); border: 1px solid var(--bord); font: 400 12px var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; max-height: 200px; overflow: auto; }
 textarea.dis-lui {
-  flex: none; width: 100%; min-height: 56px; max-height: 160px; resize: vertical; padding: 8px 10px; border-radius: 10px;
-  border: 1px solid var(--bord); background: var(--creux); font-size: 13px;
+  flex: none; width: 100%; min-height: 56px; max-height: 160px; resize: vertical; padding: 8px 10px; border-radius: 9px;
+  border: 1px solid var(--bord-fort); background: var(--creux); font-size: 13px;
 }
-textarea.dis-lui:focus-visible { border-color: var(--texte); outline: 0; }
+textarea.dis-lui:focus-visible { border-color: var(--gris); outline: 0; }
 .refus-champ { display: flex; flex-direction: column; gap: 6px; }
-.agents { display: flex; flex-direction: column; margin-top: 4px; }
-.agent { border-top: 1px solid var(--trait); }
-.agent:first-child { border-top: 0; }
-.agent-tete { display: flex; align-items: center; gap: 10px; }
-button.agent-ligne {
-  flex: 1 1 0; min-width: 0; height: auto; padding: 5px 0; border: 0; border-radius: 0; background: none; font-weight: 400; text-align: left;
-  display: grid; grid-template-columns: 52px 78px minmax(0, 1fr); gap: 8px; align-items: baseline; font-size: 12px; color: var(--discret);
-}
-button.agent-ligne .id { font-family: var(--mono); font-size: 11px; color: var(--reussite); }
-button.agent-ligne .role { color: var(--faible); }
-button.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.journal { list-style: none; padding: 2px 0 8px 138px; display: flex; flex-direction: column; gap: 1px; font-family: var(--mono); font-size: 11.5px; color: var(--faible); max-height: 260px; overflow-y: auto; }
-.journal li { overflow-wrap: anywhere; }
-.salle .s-activite { font-family: var(--mono); font-size: 10px; fill: var(--faible); }
-.poste-actif { cursor: pointer; }
-.fiche .essais .neutre { color: var(--faible); }
 
 /* Mode des ouvriers : cinq choix compacts, l'explication du choix en vigueur dessous (ou celle du choix survolé ou pris au clavier). */
 .carte[hidden] { display: none; }
 .modes-cadre { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 #mode-ouvriers { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .modes-boutons { display: flex; flex-wrap: wrap; gap: 6px; }
-button.mode-btn { height: 26px; padding: 0 12px; font-size: 12px; font-weight: 400; background: transparent; color: var(--discret); }
-button.mode-btn[aria-pressed="true"] { background: var(--plein); color: var(--sur-plein); border-color: transparent; font-weight: 600; }
-button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animation: battre 1.2s ease-in-out infinite; }
-.expl { display: none; color: var(--discret); max-width: 78ch; overflow-wrap: anywhere; }
+button.mode-btn { height: 28px; padding: 0 12px; color: var(--discret); }
+button.mode-btn[aria-pressed="true"] { background: var(--blanc); color: var(--noir); border-color: transparent; font-weight: 600; }
+button.mode-btn.envoi { border-color: var(--en-cours); color: var(--texte); animation: battre 1.2s ease-in-out infinite; }
+.expl { display: none; color: var(--discret); max-width: 82ch; overflow-wrap: anywhere; }
 .expl b { color: var(--texte); font-weight: 500; }
 .expl.vigueur { display: block; }
 .modes-cadre:has(.mode-btn:is(:hover, :focus-visible)) .expl { display: none; }
@@ -374,110 +446,203 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
 #mode-ouvriers-etat { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
 #mode-ouvriers-etat:empty { display: none; }
 #mode-ouvriers-etat p { overflow-wrap: anywhere; }
-.mode-reel, .mode-refus { color: var(--refus); }
+.mode-reel, .mode-refus { color: var(--attend); }
 @media (prefers-reduced-motion: reduce) { button.mode-btn.envoi { animation: none; } }
 
-/* Code : l'explorateur, le plan, la vue d'un fichier et la fiche */
+/* ---------- Code : l'explorateur toujours à gauche, le plan ou la vue d'un fichier au milieu, la fiche à droite ---------- */
+.explorateur-cadre { flex: 0 0 330px; min-width: 0; min-height: 0; border-radius: var(--rayon); padding: 14px 12px 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.explorateur-cadre[hidden] { display: none; }
+.explorateur-tete { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding-right: 4px; }
 .code-cadre { flex: 1 1 0; min-width: 0; min-height: 0; border-radius: var(--rayon); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .code-barre { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
-.segments { display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid var(--bord); background: var(--creux); }
-.segments button { height: 26px; padding: 0 12px; border: 0; background: transparent; color: var(--discret); font-size: 12px; font-weight: 400; }
-.segments button[aria-pressed="true"] { background: var(--verre-fort); color: var(--texte); font-weight: 500; }
+.segments { display: inline-flex; gap: 2px; padding: 3px; border-radius: 9px; border: 1px solid var(--bord); }
+.segments button { height: 26px; padding: 0 11px; border: 0; border-radius: 6px; background: transparent; color: var(--faible); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; }
+.segments button[aria-pressed="true"] { background: rgba(220, 220, 220, 0.09); color: var(--texte); }
 .code-etat { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
-.code-etat .souci { color: var(--refus); }
+.code-etat .souci { color: var(--en-cours); }
 .code-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .code-actions .petit { max-width: 520px; }
 .code-corps { flex: 1 1 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
 .code-vide { margin: auto; max-width: 520px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
 .code-vide:empty { display: none; }
-.code-vide h2 { font-size: 15px; font-weight: 600; }
+.code-vide h2 { font-size: 16px; font-weight: 600; }
 .code-vide p { color: var(--discret); font-size: 13px; line-height: 1.5; }
-.explorateur { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; font-size: 13px; }
+.code-repos { margin: auto; max-width: 420px; text-align: center; color: var(--discret); line-height: 1.5; }
+.explorateur { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; font-size: 12px; padding-right: 2px; }
 .explorateur[hidden], .plan[hidden], .voisinage[hidden] { display: none; }
-button.ligne-arbre { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; width: 100%; height: 28px;
-  padding: 0 8px 0 calc(6px + var(--p, 0) * 16px); border: 0; border-radius: 8px; background: transparent; color: var(--texte); font-weight: 400; text-align: left; }
-button.ligne-arbre:hover { background: var(--creux); }
-button.ligne-arbre.choisi { background: var(--verre-fort); }
-button.ligne-arbre.dossier { grid-template-columns: 14px minmax(0, 1fr) auto auto; color: var(--discret); }
-.ligne-arbre .chevron { color: var(--faible); font-size: 10px; }
+button.ligne-arbre { flex: none; display: grid; grid-template-columns: 12px auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; width: 100%; height: 27px;
+  padding: 0 6px 0 calc(6px + var(--p, 0) * 14px); border: 0; border-radius: 7px; background: transparent; color: var(--discret); font: 400 12px var(--mono); letter-spacing: 0; text-transform: none; text-align: left; }
+button.ligne-arbre:hover { background: rgba(220, 220, 220, 0.04); }
+button.ligne-arbre.choisi { background: rgba(220, 220, 220, 0.08); color: var(--texte); }
+button.ligne-arbre.dossier { grid-template-columns: 12px minmax(0, 1fr) auto auto; color: var(--texte); }
+.ligne-arbre .chevron { color: var(--faible); font-size: 9px; }
 .ligne-arbre .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ligne-arbre .petit { font-family: var(--mono); font-size: 10.5px; }
-.ligne-arbre .marques { display: flex; gap: 4px; }
+.ligne-arbre .petit { font: 400 10.5px var(--mono); }
+.ligne-arbre .marques { display: flex; gap: 4px; align-items: center; }
 .ligne-arbre .badge { margin-left: 0; }
-.badge.change { color: var(--change); border-color: color-mix(in srgb, var(--change) 55%, transparent); }
-.point-change { width: 7px; height: 7px; border-radius: 50%; background: var(--change); }
-.pastille-genre { width: 7px; height: 7px; border-radius: 50%; background: var(--couleur, var(--texte)); }
-.g-code { --couleur: #ffffff; } .g-tests { --couleur: var(--reussite); } .g-page { --couleur: #a9c1ff; }
-.g-reglages { --couleur: #d4c4ff; } .g-documentation { --couleur: rgba(255, 255, 255, 0.5); } .g-autre { --couleur: rgba(255, 255, 255, 0.35); }
-.fichier-ouvert { margin: 2px 0 8px calc(42px + var(--p, 0) * 16px); padding: 8px 12px; border-left: 1px solid var(--trait); display: flex; flex-direction: column; gap: 6px; }
-.fichier-ouvert > p { color: var(--discret); line-height: 1.45; }
-ul.pieces { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.taille-points { display: inline-flex; gap: 2px; }
+.taille-points i { width: 3px; height: 3px; border-radius: 50%; background: var(--eteint); }
+.taille-points i.on { background: rgba(220, 220, 220, 0.7); }
+.badge.change { color: var(--gris); }
+.badge.en-cours-badge { color: var(--en-cours); border-color: rgba(130, 151, 196, 0.45); }
+.point-change { width: 6px; height: 6px; border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.5px var(--gris); }
+.pastille-genre { width: 6px; height: 6px; border-radius: 50%; background: var(--couleur, var(--texte)); }
+.g-code { --couleur: #ffffff; } .g-tests { --couleur: #8297c4; } .g-page { --couleur: #b7c3dd; }
+.g-reglages { --couleur: #7f8698; } .g-documentation { --couleur: rgba(220, 220, 220, 0.45); } .g-autre { --couleur: rgba(220, 220, 220, 0.28); }
+.fichier-ouvert { margin: 2px 0 8px calc(26px + var(--p, 0) * 14px); padding: 8px 12px; border-left: 1px solid var(--bord-fort); display: flex; flex-direction: column; gap: 6px; }
+.fichier-ouvert > p { color: var(--discret); line-height: 1.45; font-size: 12.5px; }
+ul.pieces { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 4px; }
 ul.pieces li { display: grid; grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); gap: 10px; font-size: 12px; color: var(--discret); }
-ul.pieces code { font-family: var(--mono); font-size: 11.5px; color: var(--texte); overflow-wrap: anywhere; }
+ul.pieces code { font: 400 11.5px var(--mono); color: var(--texte); overflow-wrap: anywhere; }
 ul.pieces .vide { color: var(--faible); }
-@keyframes clignoter { 50% { opacity: 0.3; } }
-@keyframes clignoter-fond { 50% { background: color-mix(in srgb, var(--refus) 22%, transparent); } }
-button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinite; }
-.badge.en-cours-badge { animation: clignoter 1.2s ease-in-out infinite; }
+@keyframes clignoter { 50% { opacity: 0.35; } }
+@keyframes clignoter-fond { 50% { background: rgba(130, 151, 196, 0.16); } }
+button.ligne-arbre.en-cours { animation: clignoter-fond 1.4s ease-in-out infinite; }
+.badge.en-cours-badge { animation: clignoter 1.4s ease-in-out infinite; }
 .plan, .voisinage { flex: 1 1 0; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
 .plan-tete { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 14px; }
-.ariane { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--faible); font-size: 13px; }
-.ariane button { height: 26px; padding: 0 8px; border: 0; background: transparent; color: var(--discret); font-weight: 400; }
+.ariane { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; color: var(--faible); font: 400 12px var(--mono); }
+.ariane button { height: 26px; padding: 0 8px; border: 0; background: transparent; color: var(--discret); text-transform: none; letter-spacing: 0; font-size: 12px; }
 .ariane button:last-child { color: var(--texte); font-weight: 600; }
-.ariane button:hover { background: var(--creux); }
+.ariane button:hover { background: rgba(220, 220, 220, 0.05); }
 .plan-aide { line-height: 1.45; }
-.plan-aide .souci { color: var(--fragile); }
-.plan-toile, .voisins-toile { flex: 1 1 0; min-height: 0; position: relative; overflow: auto; border-radius: 14px; background: var(--creux); }
+.plan-aide .souci { color: var(--texte); font-weight: 500; }
+.plan-toile, .voisins-toile { flex: 1 1 0; min-height: 0; position: relative; overflow: auto; border-radius: 14px; background-color: rgba(0, 0, 0, 0.2);
+  background-image: radial-gradient(rgba(220, 220, 220, 0.06) 1px, transparent 1.2px); background-size: 22px 22px; }
 .plan-toile { display: flex; flex-direction: column; gap: 44px; padding: 40px 18px 24px; }
 .etage { position: relative; z-index: 1; display: flex; flex-wrap: wrap; justify-content: center; gap: 14px 22px; }
 .etage.sans-lien { padding-top: 18px; border-top: 1px dashed var(--trait); }
 .etage.sans-lien > .petit { flex-basis: 100%; text-align: center; }
 svg.fleches { position: absolute; left: 0; top: 0; pointer-events: none; overflow: visible; }
-svg.fleches marker path { fill: rgba(255, 255, 255, 0.55); }
-.fleche { fill: none; stroke: rgba(255, 255, 255, 0.32); pointer-events: stroke; }
-.fleche.mutuel { stroke: var(--fragile); }
-.fleche.provisoire { stroke: var(--refus); stroke-dasharray: 4 3; animation: couler 0.9s linear infinite; }
-.fleche.actif { stroke: rgba(255, 255, 255, 0.9); }
-.fleche.long { stroke: rgba(255, 255, 255, 0.13); }
-.fleche.pale { stroke: rgba(255, 255, 255, 0.07); }
-.fleche.provisoire.actif { stroke: var(--refus); }
-.fleche.provisoire.pale { stroke: color-mix(in srgb, var(--refus) 35%, transparent); }
+svg.fleches marker path { fill: rgba(220, 220, 220, 0.55); }
+.fleche { fill: none; stroke: rgba(220, 220, 220, 0.3); pointer-events: stroke; }
+.fleche.mutuel { stroke: var(--blanc); stroke-dasharray: 1 3; }
+.fleche.provisoire { stroke: var(--en-cours); stroke-dasharray: 4 3; animation: couler 0.9s linear infinite; }
+.fleche.actif { stroke: rgba(255, 255, 255, 0.92); }
+.fleche.long { stroke: rgba(220, 220, 220, 0.13); }
+.fleche.pale { stroke: rgba(220, 220, 220, 0.07); }
+.fleche.provisoire.actif { stroke: var(--en-cours); }
+.fleche.provisoire.pale { stroke: rgba(130, 151, 196, 0.35); }
 button.bloc, button.voisin-carte { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; width: 190px; height: auto; min-height: 58px;
-  padding: 9px 11px; border-radius: 12px; border: 1px solid var(--bord); background: rgb(68 68 74 / 0.96); color: var(--texte); font-weight: 400; text-align: left; }
-button.bloc:hover, button.voisin-carte:hover { border-color: rgba(255, 255, 255, 0.45); }
-button.bloc.dossier { background: rgb(80 80 88 / 0.97); }
-button.bloc.choisi, button.voisin-carte.centre { border-color: #ffffff; box-shadow: 0 0 0 1px #ffffff; }
+  padding: 10px 12px; border-radius: 11px; border: 1px solid var(--bord); background: linear-gradient(180deg, var(--surface-haut), #10141f); color: var(--texte);
+  font: 400 12px var(--sans); letter-spacing: 0; text-transform: none; text-align: left; box-shadow: 0 14px 26px -16px rgba(0, 0, 0, 0.9); }
+button.bloc:hover, button.voisin-carte:hover { border-color: rgba(220, 220, 220, 0.4); }
+button.bloc.dossier { background: linear-gradient(180deg, #1a2136, #121829); }
+button.bloc.choisi, button.voisin-carte.centre { border-color: var(--blanc); box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.25), 0 0 40px -10px rgba(255, 255, 255, 0.25); }
 button.bloc.pale { opacity: 0.4; }
-button.bloc.fantome, button.voisin-carte.fantome { border: 1.5px dashed var(--refus); background: rgb(68 68 74 / 0.78); }
+button.bloc.fantome, button.voisin-carte.fantome { border: 1.5px dashed var(--en-cours); background: rgba(14, 18, 32, 0.8); }
 button.bloc.fantome.en-cours, button.voisin-carte.fantome.en-cours { animation: none; }
 button.ligne-arbre.fantome .nom { font-style: italic; }
-button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus); animation: clignoter-bord 1.2s ease-in-out infinite; }
-.bloc-nom { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; font-size: 13px; }
-.bloc-nom b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+button.bloc.en-cours, button.voisin-carte.en-cours { border-color: rgba(130, 151, 196, 0.7); animation: clignoter-bord 1.4s ease-in-out infinite; }
+.bloc-nom { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; font: 500 12px var(--mono); }
+.bloc-nom b { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .bloc-nom .badge { margin-left: auto; }
 .bloc-nom .point-change { flex: none; }
 .bloc-texte { color: var(--discret); font-size: 11.5px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; }
-.voisin-carte .chemin { font-family: var(--mono); font-size: 10.5px; overflow-wrap: anywhere; }
+.voisin-carte .chemin { font: 400 10.5px var(--mono); overflow-wrap: anywhere; }
 .icone-dossier { flex: none; width: 12px; height: 9px; border-radius: 2px; border: 1.5px solid var(--discret); border-top-width: 3px; }
-@keyframes clignoter-bord { 50% { border-color: transparent; box-shadow: 0 0 0 3px color-mix(in srgb, var(--refus) 35%, transparent); } }
+@keyframes clignoter-bord { 50% { border-color: transparent; box-shadow: 0 0 0 3px rgba(130, 151, 196, 0.3); } }
 .voisins-toile { display: grid; grid-template-columns: repeat(var(--colonnes, 5), minmax(170px, 1fr)); gap: 0 44px; padding: 16px 18px; align-items: start; }
 .colonne-voisins { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 10px; min-height: 100%; justify-content: center; }
-.colonne-voisins h3 { color: var(--faible); font-size: 10.5px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; text-align: center; }
+.colonne-voisins h3 { font: 500 10px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--faible); text-align: center; }
 .colonne-voisins > .petit { text-align: center; }
 .colonne-voisins button.voisin-carte { width: 100%; }
 .colonne-voisins.milieu button.voisin-carte { min-height: 110px; }
 .voisinage-vide { margin: auto; max-width: 420px; text-align: center; line-height: 1.5; }
-.legende-code { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--faible); }
+.legende-code { display: flex; flex-wrap: wrap; gap: 4px 14px; font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
 .legende-code span { display: inline-flex; align-items: center; gap: 6px; }
-.fiche .en-cours-texte { color: var(--refus); }
-.fiche button.lien-fichier { height: auto; padding: 2px 0; border: 0; background: transparent; color: var(--discret); font-family: var(--mono); font-size: 11.5px; font-weight: 400; text-align: left; overflow-wrap: anywhere; }
+.fiche .en-cours-texte { color: var(--en-cours); border: 1px solid rgba(130, 151, 196, 0.35); background: rgba(130, 151, 196, 0.07); border-radius: 10px; padding: 8px 10px; }
+.fiche button.lien-fichier { height: auto; padding: 3px 0; border: 0; background: transparent; color: var(--discret); font: 400 11.5px var(--mono); letter-spacing: 0; text-transform: none; text-align: left; overflow-wrap: anywhere; }
 .fiche button.lien-fichier:hover { color: var(--texte); text-decoration: underline; }
 @media (prefers-reduced-motion: reduce) {
   button.ligne-arbre.en-cours, .badge.en-cours-badge, button.bloc.en-cours, button.voisin-carte.en-cours, .fleche.provisoire { animation: none; }
-  button.ligne-arbre.en-cours { background: color-mix(in srgb, var(--refus) 18%, transparent); }
+  button.ligne-arbre.en-cours { background: rgba(130, 151, 196, 0.14); }
+}
+
+/* ---------- Accueil : tous les projets, pour en reprendre un ou en commencer un ---------- */
+.sans-projet .vue:not(#vue-accueil) { display: none !important; }
+.sans-projet #vue-accueil { display: flex; }
+.sans-projet .onglets { visibility: hidden; }
+.sur-accueil #infos, .sur-accueil #distant { visibility: hidden; }
+#vue-accueil { overflow-y: auto; }
+.accueil-defile > * { flex: none; }
+.accueil-defile { flex: none; width: min(1180px, 100%); margin: 0 auto; padding: 6px 4px 28px; display: flex; flex-direction: column; gap: 28px; }
+.accueil-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 300px; align-items: center; gap: 26px 36px;
+  padding: 34px 34px 30px; border-radius: 22px; border: 1px solid rgba(220, 220, 220, 0.05);
+  background: radial-gradient(60% 120% at 100% 0%, rgba(60, 80, 140, 0.25), transparent 70%), linear-gradient(180deg, var(--surface-haut), var(--surface));
+  box-shadow: var(--ombre); }
+.hero-texte { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 12px; }
+.hero-texte h1 { font: 900 clamp(38px, 5vw, 58px)/1 var(--points); letter-spacing: 0.01em; }
+.hero-sous { max-width: 440px; color: var(--discret); font-size: 15px; line-height: 1.5; }
+.hero-actions { grid-column: 1 / -1; position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
+button.tuile-action { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 14px; height: auto; padding: 14px 16px; border-radius: 14px;
+  border: 1px solid var(--bord); background: rgba(220, 220, 220, 0.03); color: var(--texte); text-align: left; font: 400 13px var(--sans); letter-spacing: 0; text-transform: none; transition: background 0.15s, border-color 0.15s; }
+button.tuile-action:hover { background: rgba(220, 220, 220, 0.06); border-color: var(--bord-fort); }
+button.tuile-action b { display: block; font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 4px; }
+button.tuile-action .petit { display: block; white-space: normal; line-height: 1.4; font-size: 12px; }
+.tuile-icone { width: 38px; height: 38px; border-radius: 10px; background: var(--blanc); position: relative; }
+.tuile-icone::before, .tuile-icone::after { content: ""; position: absolute; background: var(--noir); border-radius: 2px; }
+.plus-grand::before { left: 18px; top: 11px; width: 2px; height: 16px; } .plus-grand::after { left: 11px; top: 18px; width: 16px; height: 2px; }
+.fleche-bas { background: transparent; border: 1px solid var(--bord-fort); }
+.fleche-bas::before { left: 17px; top: 9px; width: 2px; height: 14px; background: var(--texte); }
+.fleche-bas::after { left: 12px; top: 18px; width: 8px; height: 8px; background: transparent; border-right: 2px solid var(--texte); border-bottom: 2px solid var(--texte); transform: rotate(45deg); border-radius: 0; }
+.hero-dessin { grid-row: 1; grid-column: 2; width: 100%; pointer-events: none; }
+.hero-dessin .fil-lien { stroke-width: 1.4; }
+.hero-dessin rect { fill: #10141f; stroke: rgba(220, 220, 220, 0.25); stroke-width: 1; }
+.hero-dessin rect.ok { stroke: rgba(255, 255, 255, 0.6); } .hero-dessin rect.vif { stroke: var(--en-cours); stroke-dasharray: 4 3; animation: couler 1.4s linear infinite; }
+.hero-dessin circle { fill: #fff; }
+button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
+.titre-section { display: flex; align-items: baseline; gap: 12px; padding: 0 4px; }
+.titre-section h2 { font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; color: var(--discret); }
+.grille-projets { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.projet-carte { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 18px 18px 16px; border-radius: 18px; min-width: 0; transition: border-color 0.18s; }
+.projet-carte:hover { border-color: var(--bord-fort); }
+.projet-carte.courant { border-color: rgba(255, 255, 255, 0.28); }
+.projet-haut { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 12px; }
+.chantier-tete { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.monogramme { width: 44px; height: 44px; border-radius: 12px; display: grid; place-items: center; font: 900 19px/1 var(--points); color: var(--texte);
+  background: radial-gradient(circle at 30% 20%, hsl(var(--teinte) 35% 30% / 0.55), transparent 70%), #10141f; border: 1px solid var(--bord-fort); }
+.projet-haut h3 { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.projet-haut .petit { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-family: var(--mono); font-size: 10.5px; }
+.etat-projet { flex: none; display: inline-flex; align-items: center; gap: 7px; font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--discret); white-space: nowrap; }
+.etat-projet::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--eteint); box-shadow: inset 0 0 0 1px var(--faible); }
+.etat-projet.travail { color: var(--en-cours); } .etat-projet.travail::before { background: var(--en-cours); box-shadow: 0 0 8px var(--en-cours); animation: battre 1.4s ease-in-out infinite; }
+.etat-projet.attente { color: var(--attend); } .etat-projet.attente::before { background: var(--attend); box-shadow: 0 0 8px var(--attend); }
+.etat-projet.fini { color: var(--verifie); } .etat-projet.fini::before { background: var(--verifie); box-shadow: none; }
+.projet-chantier { display: flex; flex-direction: column; gap: 9px; padding: 12px 14px; border-radius: 12px; background: rgba(0, 0, 0, 0.22); border: 1px solid var(--bord); }
+.chantier-nom { font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.chantier-nom.vide { color: var(--faible); }
+.barre-taches { display: flex; gap: 3px; height: 6px; }
+.barre-taches i { flex: 1 1 0; min-width: 2px; border-radius: 2px; background: rgba(220, 220, 220, 0.1); }
+.barre-taches i.verifie { background: var(--verifie); }
+.barre-taches i.en_cours, .barre-taches i.en_verification { background: var(--en-cours); animation: battre 1.4s ease-in-out infinite; }
+.barre-taches i.revenu { background: transparent; box-shadow: inset 0 0 0 1px var(--gris); }
+.barre-taches i.abandonnee { background: rgba(220, 220, 220, 0.04); }
+.projet-meta { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; font: 400 10.5px var(--mono); color: var(--faible); }
+.projet-meta li { overflow-wrap: anywhere; }
+.projet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
+.projet-actions .principal { flex: 1 1 auto; }
+.session-neuve { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 12px; border: 1px dashed var(--bord-fort); }
+.session-neuve p { color: var(--discret); line-height: 1.45; }
+.session-neuve .alerte:empty { display: none; }
+.projet-vide { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 42px 20px; text-align: center; border-radius: 18px; border: 1px dashed var(--bord-fort); }
+.projet-vide h3 { font-size: 16px; font-weight: 600; }
+.projet-vide p { max-width: 460px; color: var(--discret); line-height: 1.5; }
+.accueil-lieu { padding: 0 4px; color: var(--faible); font-family: var(--mono); font-size: 10.5px; }
+@media (prefers-reduced-motion: reduce) { .etat-projet.travail::before, .barre-taches i, .hero-dessin rect.vif { animation: none; } }
+
+/* ---------- Écrans étroits ---------- */
+@media (max-width: 1100px) {
+  .pages .m3, .pages .m4, .pages .m5 { grid-column: span 6; }
+  .pages .m7, .pages .m8, .pages .m9 { grid-column: 1 / -1; }
+  .salle-attente { width: 320px; }
+  .explorateur-cadre { flex-basis: 270px; }
 }
 @media (max-width: 900px) {
+  .app { padding: 0 10px 10px; }
+  .pages > *, .pages .m3, .pages .m4, .pages .m5, .pages .m7, .pages .m8, .pages .m9 { grid-column: 1 / -1; }
   #vue-code.active { flex-direction: column; overflow-y: auto; }
+  .explorateur-cadre { flex: none; height: 50vh; }
   .code-cadre { flex: none; min-height: 70vh; }
   .voisins-toile { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .voisins-toile svg.fleches { display: none; }
@@ -485,106 +650,38 @@ button.bloc.en-cours, button.voisin-carte.en-cours { border-color: var(--refus);
   button.agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
   button.agent-ligne .role { display: none; }
   .rail { display: none; }
-  .grille { grid-template-columns: minmax(0, 1fr); }
   #vue-plan.active { flex-direction: column; overflow-y: auto; }
   .toile { flex: none; overflow-x: auto; }
   .fiche { flex: none; }
   .infos { display: none; }
   .fil, .saisie { padding-left: 4px; padding-right: 4px; }
-  .app { margin: 6px; height: calc(100% - 12px); padding: 8px 10px 10px; border-radius: 22px; }
-  .onglets { gap: 16px; margin-left: 4px; }
-}
-/* Accueil : tous les projets, pour en reprendre un ou en commencer un */
-.vers-accueil { display: inline-flex; align-items: center; gap: 10px; color: inherit; text-decoration: none; }
-.vers-accueil:hover b { text-decoration: underline; text-underline-offset: 3px; }
-.sans-projet .vue:not(#vue-accueil) { display: none !important; }
-.sans-projet #vue-accueil { display: flex; }
-.sans-projet .onglets { visibility: hidden; }
-.sur-accueil #infos, .sur-accueil #distant { visibility: hidden; }
-#vue-accueil { overflow-y: auto; }
-.accueil-defile > * { flex: none; }
-.accueil-defile { flex: none; width: min(1120px, 100%); margin: 0 auto; padding: 10px 6px 28px; display: flex; flex-direction: column; gap: 26px; }
-.accueil-hero { position: relative; overflow: hidden; display: grid; grid-template-columns: minmax(0, 1fr) 260px; align-items: center; gap: 26px 36px;
-  padding: 34px 34px 30px; border-radius: 28px; border: 1px solid var(--bord); border-top-color: var(--reflet);
-  background: radial-gradient(60% 90% at 0% 0%, rgba(255, 255, 255, 0.16), transparent 60%), radial-gradient(50% 80% at 100% 110%, rgba(255, 214, 170, 0.18), transparent 70%), var(--verre);
-  box-shadow: var(--ombre); }
-.sur-titre { color: var(--faible); font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; }
-.hero-texte { position: relative; z-index: 1; display: flex; flex-direction: column; gap: 10px; }
-.hero-texte h1 { font-size: clamp(30px, 4.4vw, 46px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.02; }
-.hero-sous { max-width: 420px; color: var(--discret); font-size: 15px; line-height: 1.5; }
-.hero-actions { grid-column: 1 / -1; position: relative; z-index: 1; display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; }
-button.tuile-action { display: grid; grid-template-columns: 38px minmax(0, 1fr); align-items: center; gap: 14px; height: auto; padding: 14px 16px; border-radius: 16px;
-  border: 1px solid var(--bord); background: rgba(255, 255, 255, 0.07); color: var(--texte); text-align: left; font-weight: 400; transition: background 0.15s, transform 0.15s, border-color 0.15s; }
-button.tuile-action:hover { background: rgba(255, 255, 255, 0.13); border-color: rgba(255, 255, 255, 0.3); transform: translateY(-1px); }
-button.tuile-action b { display: block; font-size: 14px; font-weight: 600; margin-bottom: 2px; }
-button.tuile-action .petit { display: block; white-space: normal; line-height: 1.4; }
-.tuile-icone { width: 38px; height: 38px; border-radius: 12px; background: var(--plein); position: relative; }
-.tuile-icone::before, .tuile-icone::after { content: ""; position: absolute; background: var(--sur-plein); border-radius: 2px; }
-.plus-grand::before { left: 18px; top: 11px; width: 2px; height: 16px; } .plus-grand::after { left: 11px; top: 18px; width: 16px; height: 2px; }
-.fleche-bas { background: rgba(255, 255, 255, 0.16); border: 1px solid var(--bord); }
-.fleche-bas::before { left: 17px; top: 9px; width: 2px; height: 14px; background: var(--texte); }
-.fleche-bas::after { left: 12px; top: 18px; width: 8px; height: 8px; background: transparent; border-right: 2px solid var(--texte); border-bottom: 2px solid var(--texte); transform: rotate(45deg); border-radius: 0; }
-.hero-dessin { grid-row: 1; grid-column: 2; width: 100%; opacity: 0.55; pointer-events: none; }
-.hero-dessin path { fill: none; stroke: #ffffff; stroke-width: 1.4; }
-.hero-dessin rect { fill: none; stroke: #ffffff; stroke-width: 1.4; }
-.hero-dessin rect.vif { stroke: var(--refus); stroke-dasharray: 4 3; animation: couler 1.4s linear infinite; }
-button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
-.titre-section { display: flex; align-items: baseline; gap: 12px; padding: 0 4px; }
-.titre-section h2 { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
-.grille-projets { display: grid; grid-template-columns: repeat(auto-fill, minmax(310px, 1fr)); gap: 14px; }
-.projet-carte { position: relative; display: flex; flex-direction: column; gap: 14px; padding: 18px 18px 16px; border-radius: 22px; min-width: 0;
-  background: var(--verre); border: 1px solid var(--bord); border-top-color: var(--reflet); box-shadow: var(--ombre); transition: transform 0.18s, border-color 0.18s; }
-.projet-carte:hover { transform: translateY(-2px); border-color: rgba(255, 255, 255, 0.28); }
-.projet-carte.courant { border-color: rgba(255, 255, 255, 0.42); }
-.projet-haut { display: grid; grid-template-columns: 44px minmax(0, 1fr); align-items: center; gap: 12px; }
-.chantier-tete { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.monogramme { width: 44px; height: 44px; border-radius: 14px; display: grid; place-items: center; font-size: 15px; font-weight: 700; letter-spacing: 0.02em; color: #2a2a2e;
-  background: linear-gradient(140deg, hsl(var(--teinte) 62% 84%), hsl(calc(var(--teinte) + 38) 46% 64%)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6); }
-.projet-haut h3 { font-size: 15px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.projet-haut .petit { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.etat-projet { flex: none; display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 999px; font-size: 11px; color: var(--discret); background: var(--creux); white-space: nowrap; }
-.etat-projet::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--faible); }
-.etat-projet.travail::before { background: var(--reussite); animation: battre 1.4s ease-in-out infinite; }
-.etat-projet.attente { color: var(--refus); } .etat-projet.attente::before { background: var(--refus); }
-.etat-projet.fini::before { background: var(--reussite); }
-.projet-chantier { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; background: var(--creux); }
-.chantier-nom { font-size: 13.5px; line-height: 1.4; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
-.chantier-nom.vide { color: var(--faible); }
-.barre-taches { display: flex; gap: 3px; height: 6px; }
-.barre-taches i { flex: 1 1 0; min-width: 2px; border-radius: 3px; background: rgba(255, 255, 255, 0.14); }
-.barre-taches i.verifie { background: var(--reussite); }
-.barre-taches i.en_cours, .barre-taches i.en_verification { background: #ffffff; animation: battre 1.4s ease-in-out infinite; }
-.barre-taches i.revenu { background: var(--refus); }
-.barre-taches i.abandonnee { background: rgba(255, 255, 255, 0.05); }
-.projet-meta { list-style: none; padding: 0; display: flex; flex-wrap: wrap; gap: 4px 14px; color: var(--faible); font-size: 11.5px; }
-.projet-meta li { overflow-wrap: anywhere; }
-.projet-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
-.projet-actions .principal { flex: 1 1 auto; }
-.session-neuve { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 16px; border: 1px dashed rgba(255, 255, 255, 0.28); }
-.session-neuve p { color: var(--discret); line-height: 1.45; }
-.session-neuve .alerte:empty { display: none; }
-.projet-vide { grid-column: 1 / -1; display: flex; flex-direction: column; align-items: center; gap: 10px; padding: 42px 20px; text-align: center; border-radius: 22px; border: 1px dashed rgba(255, 255, 255, 0.25); }
-.projet-vide h3 { font-size: 16px; font-weight: 600; }
-.projet-vide p { max-width: 460px; color: var(--discret); line-height: 1.5; }
-.accueil-lieu { padding: 0 4px; color: var(--faible); }
-@media (max-width: 900px) {
+  .onglets a { padding: 8px 8px; }
   .accueil-hero { grid-template-columns: minmax(0, 1fr); padding: 24px 20px; }
   .hero-dessin { display: none; }
   .grille-projets { grid-template-columns: minmax(0, 1fr); }
+  #vue-salle.active { display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+  .salle-panneau, .salle-compteurs, .salle-legende, .salle-fil { position: static; width: auto; max-height: none; }
+  .salle-sol-cadre { position: relative; inset: auto; height: 420px; flex: none; overflow: hidden; }
+  #vue-salle > * { flex: none; }
+  /* Petit écran : la lettre de la tâche suffit, la couleur dit l'état. */
+  .s-tag { padding: 4px 8px; } .s-tag .d, .s-tag:not([data-id]) { display: none; }
+  .s-tag .t { font-size: 0; } .s-tag .t b { font-size: 11.5px; margin: 0; color: var(--texte); }
+  .s-tag.attend .t b { color: var(--attend); } .s-tag.en_cours .t b { color: var(--en-cours); }
+  .salle-orch { order: -2; } .salle-attente { order: -1; }
 }
-@media (prefers-reduced-motion: reduce) { .etat-projet.travail::before, .barre-taches i, .hero-dessin rect.vif { animation: none; } }
 </style>
 </head>
 <body>
 <div class="app">
   <header class="tete">
-    <div class="pilule marque"><a class="vers-accueil" href="#accueil" title="Accueil : tous tes projets"><i class="logo" aria-hidden="true"></i><b>Atelier</b></a><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus" id="nouveau">Nouveau projet</button><button type="button" class="distant" id="distant" hidden>Dépôt en ligne</button></div>
+    <div class="pilule marque"><a class="vers-accueil" href="#accueil" title="Accueil : tous tes projets"><span class="mot" aria-label="Atelier">ATELIER</span></a><select class="nom-projet" id="projet" aria-label="Projet affiché"><option>Chargement</option></select><button type="button" class="plus discret" id="nouveau" title="Nouveau projet" aria-label="Nouveau projet">Nouveau</button><button type="button" class="distant discret" id="distant" hidden>Dépôt en ligne</button></div>
     <nav class="pilule onglets" aria-label="Onglets">
       <a href="#accueil" data-onglet="accueil">Accueil</a>
       <a href="#conversation" data-onglet="conversation">Conversation<i class="pt" id="pt-conversation" title="Quelque chose t'attend"></i></a>
       <a href="#chantier" data-onglet="chantier">Chantier<span class="cpt" id="cpt-chantier"></span></a>
+      <a href="#salle" data-onglet="salle">Salle</a>
       <a href="#plan" data-onglet="plan">Plan<span class="cpt" id="cpt-plan"></span></a>
-      <a href="#code" data-onglet="code">Code<i class="pt" id="pt-code" title="Un agent modifie le code en ce moment"></i></a>
+      <a href="#code" data-onglet="code">Code<i class="pt code" id="pt-code" title="Un agent modifie le code en ce moment"></i></a>
     </nav>
     <div class="pousse"></div>
     <button type="button" class="discret" id="maj" data-action="maj" hidden>Mettre à jour</button>
@@ -610,10 +707,15 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
             <span><b>Récupérer un dépôt</b><span class="petit">Un projet qui existe déjà, sur GitHub ou ailleurs, récupéré avec tes accès git.</span></span>
           </button>
         </div>
-        <svg class="hero-dessin" viewBox="0 0 220 150" aria-hidden="true">
-          <path d="M110 22 C110 50 52 46 52 74 M110 22 C110 50 168 46 168 74 M52 90 C52 112 110 108 110 128 M168 90 C168 112 110 108 110 128"/>
-          <rect x="84" y="8" width="52" height="16" rx="5"/><rect x="26" y="74" width="52" height="16" rx="5"/>
-          <rect class="vif" x="142" y="74" width="52" height="16" rx="5"/><rect x="84" y="128" width="52" height="16" rx="5"/>
+        <svg class="hero-dessin" viewBox="0 0 300 170" aria-hidden="true">
+          <path class="fil-lien verifie" d="M64 85 H92 Q100 85 100 77 V44 Q100 36 108 36 H128"/>
+          <path class="fil-lien en_cours" d="M64 85 H128"/>
+          <path class="fil-lien a_venir" d="M64 85 H92 Q100 85 100 93 V126 Q100 134 108 134 H128"/>
+          <path class="fil-lien verifie" d="M212 36 H226 Q234 36 234 44 V77 Q234 85 242 85 H248"/>
+          <path class="fil-lien a_venir" d="M212 85 H248 M212 134 H226 Q234 134 234 126 V93"/>
+          <rect class="ok" x="8" y="70" width="56" height="30" rx="7"/><rect class="ok" x="128" y="21" width="84" height="30" rx="7"/>
+          <rect class="vif" x="128" y="70" width="84" height="30" rx="7"/><rect x="128" y="119" width="84" height="30" rx="7"/><rect x="248" y="70" width="44" height="30" rx="7"/>
+          <circle cx="112" cy="36" r="2.4"/><circle cx="96" cy="85" r="2.4" style="fill: #8297c4"/>
         </svg>
       </header>
       <section class="accueil-projets" aria-labelledby="titre-projets">
@@ -637,7 +739,7 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
       </form>
     </div>
     <aside class="rail" aria-label="Résumé du chantier">
-      <section><h2>Point d'étape</h2><p id="rail-point"></p></section>
+      <section><h2>Point d'étape</h2><div class="rail-tete"><div id="rail-anneau"></div><p id="rail-point"></p></div></section>
       <section><h2>Enveloppe</h2><div id="rail-jauges" style="display: flex; flex-direction: column; gap: 10px"></div></section>
       <section><h2>Tâches</h2><ul class="mini" id="rail-taches"></ul></section>
     </aside>
@@ -645,34 +747,42 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
 
   <section class="vue defilante" id="vue-chantier" aria-label="Chantier">
     <div class="pages">
-      <div class="grille">
-        <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
-        <article class="carte"><h2>Ce qui t'attend</h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
-      </div>
+      <article class="carte m4"><h2><span class="num">01</span>Orchestrateur<i class="note">Fable · élevé</i></h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="compteurs" id="compteurs"></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
+      <article class="carte m5" id="carte-attente"><h2><span class="num">02</span>Ce qui t'attend<i class="note" id="attente-note"></i></h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
+      <article class="carte m3"><h2><span class="num">03</span>Enveloppe<i class="note">contrat</i></h2><div id="jauges" style="display: flex; flex-direction: column; gap: 14px; flex: 1"></div></article>
       <article class="carte" id="carte-mode" hidden><h2>Mode des ouvriers</h2><div class="modes-cadre"><div id="mode-ouvriers"></div><div id="mode-ouvriers-etat" aria-live="polite"></div></div></article>
-      <article class="carte"><h2>La salle</h2><div class="defile" id="salle"></div><div class="agents" id="agents"></div></article>
-      <div class="grille">
-        <article class="carte"><h2>Dosage par type de tâche</h2><div class="tuiles" id="tuiles"></div>
-          <p class="petit">Turquoise : vérifiées du premier coup. Orange : livrables refusés.</p></article>
-        <article class="carte"><h2>Enveloppe du contrat</h2><div id="jauges" style="display: flex; flex-direction: column; gap: 12px"></div></article>
-      </div>
-      <article class="carte"><h2>Détail des tâches</h2>
+      <article class="carte m9"><h2><span class="num">04</span>La salle<i class="note" id="salle-note"></i></h2><div class="defile" id="salle"></div><div class="agents" id="agents"></div></article>
+      <article class="carte m3"><h2><span class="num">05</span>Dosage<i class="note">par type de tâche</i></h2><div class="tuiles" id="tuiles"></div>
+        <p class="legende-points" style="margin-top: auto"><span><i></i>Vérifiée du premier coup</span><span><i class="creux"></i>Livrable refusé</span></p></article>
+      <article class="carte m7"><h2><span class="num">06</span>Détail des tâches<i class="note" id="lignes-note"></i></h2>
         <div class="defile"><table>
           <thead><tr><th>Tâche</th><th>Intitulé</th><th>Agent</th><th class="droite">Tentatives</th><th>État</th><th class="droite">Coût</th><th class="droite">Tokens</th></tr></thead>
           <tbody id="lignes"></tbody>
         </table></div>
       </article>
-      <article class="carte"><h2>Fil du chantier</h2><ol class="evenements" id="evenements"></ol></article>
+      <article class="carte m5"><h2><span class="num">07</span>Fil du chantier<i class="note">en direct</i></h2><ol class="evenements" id="evenements"></ol></article>
       <article class="carte" id="carte-archives" hidden><h2>Chantiers archivés</h2><div class="archives" id="archives"></div></article>
     </div>
   </section>
 
+  <section class="vue" id="vue-salle" aria-label="Salle">
+    <div class="salle-sol-cadre" id="salle-sol-cadre"><svg class="salle-sol" id="salle-sol" aria-hidden="true"></svg><div class="salle-etiquettes" id="salle-etiquettes"></div></div>
+    <div class="salle-panneau salle-orch" id="salle-orch"></div>
+    <div class="salle-compteurs" id="salle-compteurs"></div>
+    <div class="salle-panneau salle-attente" id="salle-attente"></div>
+    <div class="salle-legende" id="salle-legende"><span class="etiquette">Lecture</span><span>▮ hauteur = effort · couleur = état</span><span><span style="color: var(--verifie)">━</span> vérifié &nbsp; <span style="color: var(--en-cours)">━</span> en cours &nbsp; <span style="color: var(--attend)">━</span> t'attend &nbsp; <span style="color: var(--faible)">┄</span> à venir</span></div>
+    <div class="salle-fil" id="salle-fil"></div>
+  </section>
+
   <section class="vue" id="vue-code" aria-label="Code">
+    <aside class="explorateur-cadre" id="explorateur-cadre" aria-label="Fichiers du projet" hidden>
+      <div class="explorateur-tete"><span class="etiquette" id="explorateur-titre">Fichiers</span></div>
+      <div class="explorateur" id="explorateur" hidden></div>
+    </aside>
     <div class="code-cadre">
       <div class="code-barre">
         <div class="segments" role="group" aria-label="Affichage du code">
-          <button type="button" data-action="code-vue" data-vue="explorateur" aria-pressed="true">Explorateur</button>
-          <button type="button" data-action="code-vue" data-vue="plan" aria-pressed="false">Plan</button>
+          <button type="button" data-action="code-vue" data-vue="plan" aria-pressed="true">Plan</button>
           <button type="button" data-action="code-vue" data-vue="voisinage" aria-pressed="false">Fichier</button>
         </div>
         <p class="petit code-etat" id="code-etat" aria-live="polite"></p>
@@ -680,7 +790,6 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
       </div>
       <div class="code-corps">
         <div class="code-vide" id="code-vide"></div>
-        <div class="explorateur" id="explorateur" hidden></div>
         <div class="plan" id="plan" hidden></div>
         <div class="voisinage" id="voisinage" hidden></div>
       </div>
@@ -881,11 +990,62 @@ function demandeHtml(d) {
     `<button class="${i ? "" : "principal"}" data-action="decider" data-id="${propre(d.id)}" data-choix="${propre(o)}">${propre(o)}</button>`).join("")}</div>`;
 }
 
+/* ---------- Les points : un anneau, une jauge, une courbe d'activité ---------- */
+const MOUVEMENT_REDUIT = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+function anneauPoints(faites, total, attente, taille = 132) {
+  const grand = taille > 100, n = grand ? 60 : 40, c = taille / 2;
+  const rangs = grand ? [[c - 6, 1.9], [c - 14, 1.5]] : [[c - 4, 1.7]];
+  const faitsN = total ? Math.round((n * faites) / total) : 0, attN = attente ? Math.min(3, n - faitsN) : 0;
+  let points = "";
+  for (let i = 0; i < n; i++) {
+    const a = -Math.PI / 2 + (i * 2 * Math.PI) / n;
+    const couleur = i < faitsN ? "var(--verifie)" : i < faitsN + attN ? "var(--attend)" : "var(--eteint)";
+    for (const [r, rr] of rangs) points += `<circle cx="${(c + r * Math.cos(a)).toFixed(1)}" cy="${(c + r * Math.sin(a)).toFixed(1)}" r="${rr}" fill="${couleur}"/>`;
+  }
+  return `<svg class="anneau-points" width="${taille}" height="${taille}" viewBox="0 0 ${taille} ${taille}" role="img" aria-label="${faites} tâches vérifiées sur ${total}">${points}
+    <text x="${c}" y="${c + (grand ? 8 : 6)}" font-size="${grand ? 36 : 18}">${faites}/${total}</text>${grand ? `<text class="sous" x="${c}" y="${c + 26}" font-size="8.5">VÉRIFIÉES</text>` : ""}</svg>`;
+}
+/* Une jauge en points : la rangée s'allonge avec la carte, la part allumée suit la valeur. */
+const rangPoints = (valeur, maximum) => `<div class="rang-points" aria-hidden="true"><i style="--part: ${maximum ? Math.min(100, (100 * valeur) / maximum) : 0}%"></i></div>`;
 function jauge(titre, valeur, maximum) {
-  const part = maximum ? Math.min(100, Math.round((valeur / maximum) * 100)) : 0;
-  return `<div class="jauge"><div class="ligne"><span>${titre}</span><b>${valeur} sur ${maximum}</b></div>
-    <div class="rail-jauge" role="img" aria-label="${titre} : ${valeur} sur ${maximum}">
-    <i class="${part >= 80 ? "haut-niveau" : ""}" style="width: ${part}%"></i></div></div>`;
+  return `<div class="jauge"><div class="ligne"><span>${titre}</span><b>${valeur} / ${maximum}</b></div>
+    <div role="img" aria-label="${titre} : ${valeur} sur ${maximum}">${rangPoints(valeur, maximum)}</div></div>`;
+}
+/* Les tâches qui t'attendent : une autorisation ouverte de leur agent, ou revenues avec une décision ouverte. */
+const tacheDeAgent = (nom) => String(nom || "").split("-").slice(0, -2).join("-");
+function attendDe(vue) {
+  const ids = new Set(autorisationsDe(vue).map((a) => tacheDeAgent(a.agent)).filter(Boolean));
+  if (ouvertes(vue).length) vue.taches.filter((t) => t.etat === "revenu").forEach((t) => ids.add(t.id));
+  return ids;
+}
+const etatVu = (t, attend) => (attend.has(t.id) ? "attend" : t.etat);
+const etatFil = (etat) => (etat === "verifie" ? "verifie" : etat === "attend" ? "attend" : etat === "en_cours" || etat === "en_verification" ? "en_cours" : "a_venir");
+const COULEURS = { verifie: "#ffffff", attend: "#e8953a", en_cours: "#8297c4", en_verification: "#8297c4", revenu: "#dcdcdc", a_venir: "rgba(220,220,220,0.24)" };
+const doseCourte = (t) => `${String(t.modele || "").charAt(0).toUpperCase()}${String(t.modele || "").slice(1)} · ${EFFORTS[t.effort] || t.effort}`;
+const motEtat = (t, etat) => (etat === "attend" ? "t'attend" : libelleEtat(t).toLowerCase());
+/* La courbe d'un poste : une colonne par tranche, sa hauteur dit combien l'agent a agi.
+   En direct : bleu acier, et les dernières colonnes en ambre tant qu'une demande attend ta réponse.
+   Tâche finie : le résumé de toute la marche de son ouvrier, en blanc. */
+function rythmeDe(vue, t) {
+  const r = vue.rythmes || {}, direct = Object.values(r.en_direct || {}).filter((c) => c.tache === t.id && c.role === "ouvrier").pop();
+  if (direct) return { colonnes: direct.colonnes, attente: direct.attente, vivant: true };
+  const bilan = (r.bilans || {})[t.id];
+  return bilan ? { colonnes: bilan, attente: 0, vivant: false } : null;
+}
+function courbePoints(rythme, etat, x, y, largeur, hauteur) {
+  const colonnes = rythme ? rythme.colonnes : Array(20).fill(0), n = colonnes.length || 20, rangs = 9;
+  const pasX = largeur / n, pasY = hauteur / (rangs - 1), haut = Math.max(3, ...colonnes);
+  const couleur = rythme && rythme.vivant ? COULEURS.en_cours : etat === "verifie" ? COULEURS.verifie : etat === "revenu" ? COULEURS.revenu : "rgba(220,220,220,0.5)";
+  let points = "";
+  colonnes.forEach((v, c) => {
+    const enAttente = rythme && rythme.attente && c >= n - rythme.attente;
+    const allumes = enAttente ? 1 : v > 0 ? Math.max(2, Math.ceil((v / haut) * (rangs - 1)) + 1) : rythme ? 1 : 0;
+    for (let r = 0; r < rangs; r++) {
+      const fill = r < allumes ? (enAttente ? COULEURS.attend : couleur) : "rgba(220,220,220,0.07)";
+      points += `<circle cx="${(x + pasX * (c + 0.5)).toFixed(1)}" cy="${(y + hauteur - r * pasY).toFixed(1)}" r="1.7" fill="${fill}"/>`;
+    }
+  });
+  return points;
 }
 
 /* ---------- Conversation ---------- */
@@ -940,12 +1100,14 @@ function afficherConversation(vue) {
   }
   const c = vue.contrat;
   document.getElementById("rail-point").textContent = vue.point_d_etape;
+  poser("rail-anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue), 74) : "");
   poser("rail-jauges", vue.taches.length
     ? jauge("Agents lancés", vue.agents_lances, c.max_agents) + jauge("Montées en gamme", vue.montees, c.max_montees)
     : `<p class="calme">Pas encore de contrat.</p>`);
+  const attend = attendDe(vue);
   poser("rail-taches", vue.taches.map((t) => `<li><span class="puce">${propre(t.id)}</span>
     <span class="titre" title="${propre(t.titre)} · ${propre(libelleEtat(t))}">${propre(t.titre)}</span>
-    <i class="rond ${propre(t.etat)}" aria-label="${propre(libelleEtat(t))}"></i></li>`).join("") || `<li style="display:block" class="calme">Aucune tâche.</li>`);
+    <span class="etat ${propre(t.etat)} etat-mot ${etatVu(t, attend)}">${propre(motEtat(t, etatVu(t, attend)))}</span></li>`).join("") || `<li style="display:block" class="calme">Aucune tâche.</li>`);
 
   const saisie = document.getElementById("message"), envoi = document.getElementById("envoi");
   const fige = rejoue && attente_de(vue) !== "objectif";
@@ -984,40 +1146,60 @@ function attenteHtml(vue) {
     + liste.map((d) => `<div class="demande">${demandeHtml(d)}</div>`).join("");
 }
 
-function anneau(faites, total) {
-  const tour = 2 * Math.PI * 34, part = total ? faites / total : 0;
-  return `<svg class="anneau" viewBox="0 0 78 78" role="img" aria-label="${faites} tâches vérifiées sur ${total}">
-    <circle class="piste" cx="39" cy="39" r="34"/>
-    <circle class="arc" cx="39" cy="39" r="34" transform="rotate(-90 39 39)" stroke-dasharray="${tour}" stroke-dashoffset="${tour * (1 - part)}"/>
-    <text x="39" y="42">${faites}/${total}</text><text class="sous" x="39" y="54">VÉRIFIÉES</text></svg>`;
-}
-
-/* La salle : l'orchestrateur dans son bureau, un poste par tâche, et ta place à droite. */
-const buste = (x, y) => `<circle class="buste" cx="${x}" cy="${y}" r="6"/><path class="buste" d="M${x - 12} ${y + 22} a12 12 0 0 1 24 0"/>`;
-const pense = (x, y) => `<g class="pense"><circle cx="${x - 5}" cy="${y}" r="1.4"/><circle cx="${x}" cy="${y}" r="1.4"/><circle cx="${x + 5}" cy="${y}" r="1.4"/></g>`;
-
-function poste(t, x, y, agent) {
-  const cx = x + 86, actif = t.etat === "en_cours", controle = t.etat === "en_verification";
-  const parti = t.etat === "verifie" || t.etat === "revenu" || t.etat === "abandonnee";
-  const classes = [t.etat, actif || controle ? "actif" : "", t.etat === "a_lancer" ? "vide" : ""].join(" ");
-  let personnes = "";
-  if (!parti) personnes += `<g class="${controle ? "en-retrait" : ""}">${buste(cx, y + 38)}</g>${actif ? pense(cx, y + 24) : ""}`;
-  if (controle) personnes += `<g class="controle">${buste(cx + 66, y + 38)}${pense(cx + 66, y + 24)}</g>`;
-  const marque = t.etat === "verifie" ? `<path class="coche" d="M${cx - 6} ${y + 40} l4.5 4.5 l8 -9"/>`
-    : t.etat === "revenu" ? `<circle class="signal" cx="${cx}" cy="${y + 40}" r="4"/>` : "";
+/* La salle du Chantier : un poste par tâche, avec sa courbe d'activité. Un clic sur un poste en marche
+   déroule son journal, juste dessous. */
+const POSTE = { l: 180, h: 196, ecart: 10, parRang: 6 };
+function poste(t, x, y, agent, rythme, etat) {
+  const actif = t.etat === "en_cours" || t.etat === "en_verification", controle = t.etat === "en_verification";
+  const couleur = etat === "attend" ? COULEURS.attend : actif ? COULEURS.en_cours : etat === "verifie" ? COULEURS.verifie : "rgba(220,220,220,0.52)";
   const sous = controle ? `Vérifiée par ${t.verificateur_fr}` : `${libelleEtat(t)}${t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
   const derniere = agent && agent.lignes.length ? agent.lignes[agent.lignes.length - 1] : "";
-  const activite = derniere ? `<text class="s-milieu s-activite" x="${cx}" y="${y + 137}">${propre(couper(derniere, 30))}</text>` : "";
   const ouvrir = agent ? ` data-action="derouler" data-nom="${propre(agent.nom)}" role="button" tabindex="0" aria-label="Activité de la tâche ${propre(t.id)} : ${propre(derniere || "aucune ligne pour l'instant")}"` : "";
-  return `<g class="${classes}${agent ? " poste-actif" : ""}"${ouvrir}>${derniere ? `<title>${propre(derniere)}</title>` : ""}
-    ${actif || controle ? `<path class="descente" d="M${cx} ${y + 4} v10"/>` : ""}
-    ${personnes}${marque}
-    <rect class="bureau" x="${cx - 46}" y="${y + 56}" width="92" height="20" rx="5"/>
-    <rect class="ecran" x="${cx - 13}" y="${y + 54}" width="26" height="3" rx="1.5"/>
-    <text class="s-milieu s-titre" x="${cx}" y="${y + 94}"><tspan class="s-id">${propre(t.id)}</tspan> ${propre(couper(t.titre, 25 - t.id.length))}</text>
-    <text class="s-milieu" x="${cx}" y="${y + 108}">${propre(t.dosage_fr)}</text>
-    <text class="s-milieu s-faible" x="${cx}" y="${y + 122}">${propre(sous)}</text>${activite}</g>`;
+  const classes = [t.etat, agent ? "poste-actif" : "", etat === "attend" ? "attendue" : ""].filter(Boolean).join(" ");
+  const largeur = POSTE.l - 24;
+  return `<g class="${classes}"${ouvrir}>${derniere ? `<title>${propre(derniere)}</title>` : ""}
+    <rect class="s-fond" x="${x}" y="${y}" width="${POSTE.l}" height="${POSTE.h}" rx="12"/>
+    <text class="s-id" x="${x + 12}" y="${y + 32}">${propre(t.id)}</text>
+    <text class="s-etat" x="${x + POSTE.l - 12}" y="${y + 26}" fill="${couleur}">${propre(motEtat(t, etat))}</text>
+    ${courbePoints(rythme, etat, x + 12, y + 46, largeur, 60)}
+    <text class="s-titre" x="${x + 12}" y="${y + 130}">${propre(couper(t.titre, 24))}</text>
+    <text class="s-dose" x="${x + 12}" y="${y + 148}">${propre(doseCourte(t))}</text>
+    <text class="s-faible" x="${x + 12}" y="${y + 166}">${propre(couper(sous, 28))}</text>
+    ${derniere ? `<text class="s-activite" x="${x + 12}" y="${y + 184}">${propre(couper(derniere, 29))}</text>` : ""}</g>`;
 }
+function salle(vue) {
+  const largeur = POSTE.parRang * POSTE.l + (POSTE.parRang - 1) * POSTE.ecart;
+  if (!vue.taches.length) {
+    return `<svg class="salle" viewBox="0 0 ${largeur} 120" role="img" aria-label="La salle est vide"><text class="s-vide" x="${largeur / 2}" y="64">Les postes apparaîtront ici dès que le plan sera proposé.</text></svg>`;
+  }
+  const attend = attendDe(vue), rangs = Math.ceil(vue.taches.length / POSTE.parRang);
+  const hauteur = rangs * POSTE.h + (rangs - 1) * POSTE.ecart;
+  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
+  const postes = vue.taches.map((t, i) => {
+    const x = (i % POSTE.parRang) * (POSTE.l + POSTE.ecart), y = Math.floor(i / POSTE.parRang) * (POSTE.h + POSTE.ecart);
+    return poste(t, x, y, agentsDe(vue).filter((a) => a.tache === t.id).pop(), rythmeDe(vue, t), etatVu(t, attend));
+  }).join("");
+  return `<svg class="salle" viewBox="0 0 ${largeur} ${hauteur}" role="img" aria-label="La salle : ${actifs} agents au travail">${postes}</svg>`;
+}
+const auTravail = (vue) => agentsDe(vue).length;
+const agentsTexte = (n) => (n ? `${n} agent${n > 1 ? "s" : ""} au travail` : "");
+function compteursHtml(vue) {
+  const n = (etats) => vue.taches.filter((t) => etats.includes(t.etat)).length;
+  return `<div><span>En cours</span><b>${n(["en_cours", "en_verification"])}</b></div><i></i>
+    <div><span>À lancer</span><b>${n(["a_lancer"])}</b></div><i></i>
+    <div><span>Revenues</span><b>${n(["revenu"])}</b></div>`;
+}
+function dosageHtml(vue) {
+  const groupe = (classe, n) => Array.from({ length: n }, () => `<span class="${classe}">${"<i></i>".repeat(6)}</span>`).join("");
+  return vue.statistiques.map((s) => `<div class="rang"><span class="nom">${propre(s.type)}</span>
+      <div class="essais-points" role="img" aria-label="${s.premier_coup} du premier coup, ${s.refus} refus">${groupe("r", s.premier_coup)}${groupe("f", s.refus)}</div>
+      <span class="compte">${s.premier_coup} · ${s.refus} refus</span></div>`).join("") || `<p class="calme">Aucune tâche.</p>`;
+}
+const noteAttente = (vue) => {
+  if (contratEnAttente(vue)) return "● Contrat à valider";
+  const a = autorisationsDe(vue).length, d = ouvertes(vue).length;
+  return a ? `● ${pluriel(a, "autorisation")}` : d ? `● ${pluriel(d, "décision")}` : "";
+};
 
 function aFaire(vue) {
   const d = ouvertes(vue).length, a = autorisationsDe(vue).length;
@@ -1040,36 +1222,6 @@ function agentsHtml(vue) {
       ${arretable ? boutonArret(cle, a.tache || "") : ""}</div>
       ${ouvert ? `<ol class="journal" data-garde="${propre(a.nom)}" aria-label="Dernières lignes d'activité">${lignes.slice(-30).map((l) => `<li>${propre(l)}</li>`).join("")}</ol>` : ""}</div>`;
   }).join("");
-}
-
-function salle(vue) {
-  const parRang = 4, pas = 180, rangH = 156, gauche = 232, haut = 8;
-  const rangs = Math.max(1, Math.ceil(vue.taches.length / parRang)), hauteur = Math.max(150, haut + rangs * rangH), largeur = 1160;
-  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
-  const attendue = ilFautRepondre(vue), milieu = hauteur / 2;
-  const role = vue.occupe ? "répond dans la conversation" : actifs ? `suit ${actifs} agent${actifs > 1 ? "s" : ""}`
-    : attendue ? "t'attend" : vue.termine ? "a clos le chantier" : "au repos";
-  let dessin = `<rect class="mur" x="1" y="${milieu - 66}" width="196" height="132" rx="14"/>
-    <text class="s-titre" x="16" y="${milieu - 44}">Orchestrateur</text>
-    ${buste(99, milieu - 14)}${vue.occupe || actifs ? pense(99, milieu - 28) : ""}
-    <rect class="bureau" x="53" y="${milieu + 4}" width="92" height="20" rx="5"/>
-    <text class="s-milieu" x="99" y="${milieu + 42}">Fable, effort élevé</text>
-    <text class="s-milieu s-faible" x="99" y="${milieu + 56}">${propre(role)}</text>`;
-  vue.taches.forEach((t, i) => {
-    const rang = Math.floor(i / parRang), x = gauche + (i % parRang) * pas, y = haut + rang * rangH;
-    if (i % parRang === 0) {
-      const fin = gauche + (Math.min(parRang, vue.taches.length - i) - 1) * pas + 86;
-      dessin += `<path class="couloir" d="M197 ${milieu} C216 ${milieu} 216 ${y + 4} ${gauche + 20} ${y + 4} H${fin}"/>`;
-    }
-    dessin += poste(t, x, y, agentsDe(vue).filter((a) => a.tache === t.id).pop());
-  });
-  const toi = `<g class="${attendue ? "attendue" : ""}"><rect class="mur" x="${largeur - 181}" y="${milieu - 66}" width="180" height="132" rx="14"/>
-    <text class="s-titre" x="${largeur - 166}" y="${milieu - 44}">Toi</text>
-    ${buste(largeur - 91, milieu - 14)}${attendue ? `<circle class="signal" cx="${largeur - 71}" cy="${milieu - 22}" r="4"/>` : ""}
-    <text class="s-milieu" x="${largeur - 91}" y="${milieu + 42}">${aFaire(vue)}</text>
-    <text class="s-milieu s-faible" x="${largeur - 91}" y="${milieu + 56}">${attendue ? "voir « Ce qui t'attend »" : "je te préviens au besoin"}</text></g>`;
-  if (!vue.taches.length) dessin += `<text class="s-milieu s-faible" x="${largeur / 2}" y="${milieu + 4}">Les postes apparaîtront ici dès que le plan sera proposé.</text>`;
-  return `<svg class="salle" viewBox="0 0 ${largeur} ${hauteur}" role="img" aria-label="La salle : ${actifs} agents au travail">${dessin}${toi}</svg>`;
 }
 
 /* ---------- Mode des ouvriers : la page montre le mode que la vue annonce, jamais celui qu'elle vient d'envoyer ---------- */
@@ -1131,30 +1283,28 @@ async function choisirMode(mode) {
 
 function afficherChantier(vue) {
   const c = vue.contrat;
-  poser("anneau", vue.taches.length ? anneau(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length) : "");
+  poser("anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue)) : "");
+  poser("compteurs", vue.taches.length ? compteursHtml(vue) : "");
   poser("salle", salle(vue));
+  document.getElementById("salle-note").textContent = agentsTexte(auTravail(vue));
+  document.getElementById("carte-attente").classList.toggle("attend", ilFautRepondre(vue));
+  document.getElementById("attente-note").textContent = noteAttente(vue);
+  document.getElementById("lignes-note").textContent = vue.taches.length ? `${vue.taches.length} au contrat` : "";
   poser("agents", agentsHtml(vue));
   document.getElementById("point").textContent = vue.point_d_etape;
   document.getElementById("objectif").textContent = c.objectif;
   poser("attente", attenteHtml(vue));
   afficherMode(vue);
   afficherArchives(vue);
-  poser("tuiles", vue.statistiques.map((s) => {
-    const total = Math.max(1, s.premier_coup + s.refus);
-    return `<div class="rang"><span class="nom">${propre(s.type)}</span>
-      <div class="duo" role="img" aria-label="${s.premier_coup} du premier coup, ${s.refus} refus">
-        <i class="r" style="width: ${(s.premier_coup / total) * 100}%"></i>
-        <i class="f" style="width: ${(s.refus / total) * 100}%"></i></div>
-      <span class="compte"><b class="r">${s.premier_coup}</b> du 1er coup · <b class="f">${s.refus}</b> refus</span></div>`;
-  }).join("") || `<p class="calme">Aucune tâche.</p>`);
+  poser("tuiles", dosageHtml(vue));
   poser("jauges", jauge("Agents lancés", vue.agents_lances, c.max_agents)
     + jauge("Montées en gamme", vue.montees, c.max_montees)
-    + `<div class="chiffres"><div><span>Coût équivalent</span><b>${euros(vue.cout_usd)}</b></div>
-       <div><span>Tokens</span><b>${nombre(vue.tokens)}</b></div></div>`);
+    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${euros(vue.cout_usd).replace(" $", "$")}</b></div>
+       <div><span>Tokens</span><b>${vue.tokens >= 1e6 ? (vue.tokens / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + "M" : vue.tokens >= 1e3 ? Math.round(vue.tokens / 1e3) + "k" : nombre(vue.tokens)}</b></div></div>`);
   poser("lignes", vue.taches.map((t) => `<tr>
     <td><span class="puce">${propre(t.id)}</span></td>
     <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}</td>
-    <td>${propre(t.dosage_fr)}</td>
+    <td class="dose">${propre(doseCourte(t))}${t.montees ? " ↑" : ""}</td>
     <td class="droite">${t.tentatives}</td>
     <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span></td>
     <td class="droite">${euros(t.cout_usd)}</td><td class="droite petit">${nombre(t.tokens)}</td></tr>`).join("")
@@ -1165,7 +1315,10 @@ function afficherChantier(vue) {
     || `<li style="display:block" class="calme">Rien encore.</li>`);
 }
 
-/* ---------- Plan : le graphe des tâches ---------- */
+/* ---------- Plan : le câblage des tâches ----------
+   À gauche l'orchestrateur, puis une colonne par étape (ce qui peut partir ensemble), à droite la livraison.
+   La couleur d'un fil dit l'état de ce qui le parcourt : blanc vérifié, bleu acier en cours, ambre t'attend,
+   pointillé à venir. Une tâche qui t'attend tire un fil ambre jusqu'au nœud « Toi ». */
 function disposer(taches) {
   const parId = Object.fromEntries(taches.map((t) => [t.id, t]));
   const parents = (t) => (t.depend_de || []).filter((id) => parId[id]);
@@ -1180,46 +1333,91 @@ function disposer(taches) {
   taches.forEach((t) => profondeur(t, new Set()));
   const couches = [];
   taches.forEach((t) => { (couches[rang[t.id] - 1] = couches[rang[t.id] - 1] || []).push(t); });
-  return { couches: couches.filter(Boolean), parents };
-}
-
-function graphe(vue) {
-  const L = 204, H = 60, ecartX = 18, ecartY = 46, marge = 12, racine = { l: 150, h: 28 };
-  const { couches, parents } = disposer(vue.taches);
-  const large = Math.max(...couches.map((c) => c.length)) * (L + ecartX) - ecartX;
-  const lieu = {};
-  couches.forEach((couche, n) => {
-    const centre = (t) => { const p = parents(t).map((id) => lieu[id]?.x ?? 0); return p.length ? p.reduce((a, b) => a + b, 0) / p.length : 0; };
+  const rangees = couches.filter(Boolean);
+  // Dans chaque étape, près de ce dont une tâche dépend, pour croiser le moins de fils possible.
+  const place = {};
+  rangees.forEach((couche, n) => {
+    const centre = (t) => { const p = parents(t).map((id) => place[id] ?? 0); return p.length ? p.reduce((a, b) => a + b, 0) / p.length : 0; };
     if (n) couche.sort((a, b) => centre(a) - centre(b));
-    const debut = marge + (large - (couche.length * (L + ecartX) - ecartX)) / 2;
-    couche.forEach((t, i) => { lieu[t.id] = { x: debut + i * (L + ecartX), y: marge + racine.h + ecartY + n * (H + ecartY) }; });
+    couche.forEach((t, i) => { place[t.id] = i - (couche.length - 1) / 2; });
   });
-  const largeur = large + 2 * marge, hauteur = marge * 2 + racine.h + couches.length * (H + ecartY);
-  const courbe = (x1, y1, x2, y2, fait) => { const m = (y1 + y2) / 2; return `<path class="lien ${fait ? "fait" : ""}" d="M${x1} ${y1} C${x1} ${m} ${x2} ${m} ${x2} ${y2}"/>`; };
-  const etatDe = Object.fromEntries(vue.taches.map((t) => [t.id, t.etat]));
-  let liens = "", noeuds = "";
-  for (const t of vue.taches) {
-    const { x, y } = lieu[t.id], amont = parents(t);
-    if (!amont.length) liens += courbe(largeur / 2, marge + racine.h, x + L / 2, y, vue.contrat.valide);
-    amont.forEach((id) => { liens += courbe(lieu[id].x + L / 2, lieu[id].y + H, x + L / 2, y, etatDe[id] === "verifie"); });
-    const classes = ["noeud", t.etat, t.ajoutee ? "ajoutee" : "", t.id === choisie ? "choisie" : ""].join(" ");
-    noeuds += `<g class="${classes}" transform="translate(${x} ${y})" data-action="choisir" data-id="${propre(t.id)}" tabindex="0" role="button"
-      aria-label="Tâche ${propre(t.id)}, ${propre(t.titre)}, ${propre(libelleEtat(t))}">
-      <rect width="${L}" height="${H}" rx="8"/>
-      <text class="n-id" x="12" y="19">${propre(t.id)}</text>
-      <text class="n-etat" x="${L - 24}" y="19">${propre(libelleEtat(t))}</text>
-      <circle class="c-${propre(t.etat)}" cx="${L - 14}" cy="15.5" r="3"/>
-      <text class="n-titre" x="12" y="37">${propre(couper(t.titre, 29))}</text>
-      <text class="n-dose" x="12" y="51">${propre(t.dosage_fr)}${t.ajoutee ? " · ajoutée" : ""}</text></g>`;
+  return { couches: rangees, parents };
+}
+/* Un fil orthogonal, aux coins arrondis, qui passe par les points donnés. */
+function trace(points, rayon = 10) {
+  const net = points.filter((p, i) => !i || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1]);
+  let d = `M${net[0][0]},${net[0][1]}`;
+  for (let i = 1; i < net.length - 1; i++) {
+    const [a, b, c] = [net[i - 1], net[i], net[i + 1]];
+    const r = Math.min(rayon, Math.hypot(b[0] - a[0], b[1] - a[1]) / 2, Math.hypot(c[0] - b[0], c[1] - b[1]) / 2);
+    const v1 = [Math.sign(b[0] - a[0]), Math.sign(b[1] - a[1])], v2 = [Math.sign(c[0] - b[0]), Math.sign(c[1] - b[1])];
+    d += ` L${b[0] - v1[0] * r},${b[1] - v1[1] * r} Q${b[0]},${b[1]} ${b[0] + v2[0] * r},${b[1] + v2[1] * r}`;
   }
-  const tete = `<g class="racine ${vue.contrat.valide ? "fait" : ""}" transform="translate(${(largeur - racine.l) / 2} ${marge})">
-    <rect width="${racine.l}" height="${racine.h}" rx="14"/><text x="${racine.l / 2}" y="18">${vue.contrat.valide ? "Contrat validé" : "Contrat à valider"}</text></g>`;
-  return `<svg width="${largeur}" height="${hauteur}" viewBox="0 0 ${largeur} ${hauteur}" role="group" aria-label="Graphe des tâches">${liens}${tete}${noeuds}</svg>`;
+  const fin = net[net.length - 1];
+  return `${d} L${fin[0]},${fin[1]}`;
+}
+const ICONES = {
+  verifie: '<svg width="14" height="14" aria-hidden="true"><path d="M3 7.5l2.6 2.6L11 4.5" fill="none" stroke="#fff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  attend: '<svg width="14" height="14" aria-hidden="true"><path d="M7 3v5" stroke="#e8953a" stroke-width="1.7" stroke-linecap="round"/><circle cx="7" cy="11" r="1" fill="#e8953a"/></svg>',
+  en_cours: '<svg width="16" height="16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" fill="none" stroke="rgba(220,220,220,.15)" stroke-width="1.6"/><path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" fill="none" stroke="#8297c4" stroke-width="1.6" stroke-linecap="round"/></svg>',
+  revenu: '<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.2" fill="none" stroke="#dcdcdc" stroke-width="1.5"/></svg>',
+  a_lancer: '<svg width="14" height="14" aria-hidden="true"><circle cx="7" cy="7" r="4.5" fill="none" stroke="rgba(220,220,220,.35)" stroke-dasharray="2 2"/></svg>',
+  toi: '<svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true"><circle cx="7" cy="5" r="2.6" fill="none" stroke="#e8953a" stroke-width="1.4"/><path d="M2.5 12.5c.6-2.4 2.4-3.6 4.5-3.6s3.9 1.2 4.5 3.6" fill="none" stroke="#e8953a" stroke-width="1.4"/></svg>',
+};
+const iconeDe = (etat) => ICONES[etat] || (etat === "en_verification" ? ICONES.en_cours : ICONES.a_lancer);
+function graphe(vue) {
+  const L = 216, H = 66, PAS_X = 276, PAS_Y = 92, RACINE = 196;
+  const { couches, parents } = disposer(vue.taches);
+  const attend = attendDe(vue), toi = ilFautRepondre(vue), parId = Object.fromEntries(vue.taches.map((t) => [t.id, t]));
+  const haut = toi ? 108 : 34, lignes = Math.max(...couches.map((c) => c.length));
+  const milieu = haut + ((lignes - 1) * PAS_Y) / 2;
+  const lieu = {};
+  couches.forEach((couche, n) => couche.forEach((t, i) => {
+    lieu[t.id] = { x: RACINE + 56 + n * PAS_X, y: milieu + (i - (couche.length - 1) / 2) * PAS_Y };
+  }));
+  const xLivre = RACINE + 56 + couches.length * PAS_X, largeur = xLivre + L, hauteur = haut + lignes * PAS_Y;
+  const racine = { x: 0, y: milieu }, livre = { x: xLivre, y: milieu }, nToi = { x: xLivre, y: 0 };
+  const enfants = new Set(vue.taches.flatMap((t) => parents(t)));
+  const fils = [];
+  const fil = (points, etat) => fils.push({ d: trace(points), etat });
+  for (const t of vue.taches) {
+    const { x, y } = lieu[t.id], etat = etatVu(t, attend), amont = parents(t);
+    if (!amont.length) fil([[racine.x + RACINE, racine.y + H / 2], [RACINE + 34, racine.y + H / 2], [RACINE + 34, y + H / 2], [x, y + H / 2]], vue.contrat.valide ? etatFil(etat) : "a_venir");
+    amont.forEach((id) => { const p = lieu[id]; fil([[p.x + L, p.y + H / 2], [x - 34, p.y + H / 2], [x - 34, y + H / 2], [x, y + H / 2]], parId[id].etat === "verifie" ? "verifie" : "a_venir"); });
+    if (!enfants.has(t.id)) fil([[x + L, y + H / 2], [xLivre - 34, y + H / 2], [xLivre - 34, livre.y + H / 2], [xLivre, livre.y + H / 2]], etat === "attend" ? "a_venir" : etatFil(etat));
+    if (toi && etat === "attend") fil([[x + L / 2, y], [x + L / 2, nToi.y + H / 2], [nToi.x, nToi.y + H / 2]], "attend");
+  }
+  if (toi && contratEnAttente(vue)) fil([[RACINE / 2, racine.y], [RACINE / 2, nToi.y + H / 2], [nToi.x, nToi.y + H / 2]], "attend");
+  const vivants = fils.filter((f) => f.etat === "en_cours" || f.etat === "attend");
+  const impulsions = MOUVEMENT_REDUIT ? "" : vivants.map((f, i) => `<g><circle class="impulsion-halo" r="6" fill="${COULEURS[f.etat]}"/><circle class="impulsion" r="2.4"/>
+    <animateMotion dur="${f.etat === "attend" ? 2.6 : 3.4}s" begin="-${(i * 0.7).toFixed(1)}s" repeatCount="indefinite" path="${f.d}"/></g>`).join("");
+  const svg = `<svg class="fils" width="${largeur}" height="${hauteur}" viewBox="0 0 ${largeur} ${hauteur}" aria-hidden="true">
+    <defs><filter id="lueur-fil" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5"/></filter></defs>
+    ${fils.filter((f) => f.etat !== "a_venir").map((f) => `<path class="fil-lueur ${f.etat}" d="${f.d}"/>`).join("")}
+    ${fils.map((f) => `<path class="fil-lien ${f.etat}" d="${f.d}"/>`).join("")}${impulsions}</svg>`;
+  const titres = couches.map((couche, n) => `<span class="etage-titre" style="left: ${RACINE + 56 + n * PAS_X}px; top: ${haut - 26}px">Étape ${n + 1}${couche.length > 1 ? " · en parallèle" : ""}${n ? ` · après l'étape ${n}` : ""}</span>`).join("");
+  const noeuds = vue.taches.map((t) => {
+    const { x, y } = lieu[t.id], etat = etatVu(t, attend);
+    const classes = ["noeud", etat, t.ajoutee ? "ajoutee" : "", t.id === choisie ? "choisie" : ""].filter(Boolean).join(" ");
+    return `<div class="${classes}" style="left: ${x}px; top: ${y}px" data-action="choisir" data-id="${propre(t.id)}" tabindex="0" role="button"
+      aria-label="Tâche ${propre(t.id)}, ${propre(t.titre)}, ${propre(motEtat(t, etat))}" title="${propre(t.titre)}">
+      <span class="ic">${iconeDe(etat)}</span><div><div class="t"><b>${propre(t.id)}</b>${propre(t.titre)}</div>
+      <div class="d"><span>${propre(doseCourte(t))}</span><span class="etat-mot ${etat}">${propre(motEtat(t, etat))}</span></div></div>
+      <i class="port g"></i><i class="port d"></i></div>`;
+  }).join("");
+  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  const fixe = (classe, x, y, icone, titre, detail, couleur) => `<div class="noeud fixe ${classe}" style="left: ${x}px; top: ${y}px${classe === "racine" ? `; width: ${RACINE}px` : ""}">
+    <span class="ic">${icone}</span><div><div class="t">${titre}</div><div class="d"><span class="etat-mot ${couleur}">${detail}</span></div></div><i class="port d"></i></div>`;
+  const tete = fixe("racine", racine.x, racine.y, vue.contrat.valide ? ICONES.en_cours : ICONES.a_lancer, "Orchestrateur", vue.contrat.valide ? "Contrat validé" : "Contrat à valider", vue.contrat.valide ? "en_cours" : contratEnAttente(vue) ? "attend" : "");
+  const fin = fixe(verifiees === vue.taches.length ? "verifie" : "", livre.x, livre.y, verifiees ? ICONES.verifie : ICONES.a_lancer, "Livré sur main", `${verifiees} / ${vue.taches.length} tâches`, verifiees ? "verifie" : "");
+  const noeudToi = toi ? fixe("attend", nToi.x, nToi.y, ICONES.toi, "Toi", propre(aFaire(vue)), "attend") : "";
+  return `<div class="cablage" style="width: ${largeur}px; height: ${hauteur}px" role="group" aria-label="Graphe des tâches">${svg}${titres}${tete}${noeuds}${fin}${noeudToi}</div>`;
 }
 
 function fiche(vue) {
   const t = vue.taches.find((x) => x.id === choisie);
   if (!t) return `<p class="calme">Choisis une tâche dans le graphe pour lire ses critères et son périmètre.</p>`;
+  const etat = etatVu(t, attendDe(vue));
   const liste = (elements, classe) => `<ul class="${classe || ""}">${elements.map((e) => `<li>${propre(e)}</li>`).join("")}</ul>`;
   const essais = (t.historique || []).map((h) => {
     const ok = h.issue === "valide", stoppee = h.issue === "arretee";
@@ -1227,8 +1425,10 @@ function fiche(vue) {
     return `<li><span class="${ok ? "ok" : stoppee ? "neutre" : "non"}">${ok ? "✓" : stoppee ? "–" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(modele.charAt(0).toUpperCase() + modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
       stoppee ? `<br><span class="petit">Arrêtée par toi.</span>` : h.detail ? `<br><span class="petit">${propre(h.detail)}</span>` : ""}</span></li>`;
   }).join("");
-  return `<header><span class="puce">${propre(t.id)}</span><h2>${propre(t.titre)}</h2>
-      <span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span></header>
+  const demandes = autorisationsDe(vue).filter((a) => tacheDeAgent(a.agent) === t.id).map(autorisationHtml).join("");
+  return `<header><div class="fiche-id"><span class="puce">${propre(t.id)}</span><span class="etat ${propre(t.etat)} etat-mot ${etat}">${propre(etat === "attend" ? "● t'attend" : libelleEtat(t))}</span></div>
+      <h2>${propre(t.titre)}</h2></header>
+    ${demandes}
     <section><h3>Agent</h3><p>${propre(t.dosage_fr)} · tâche ${propre(TYPES[t.type] || t.type)}${t.ajoutee ? " · ajoutée en route" : ""}</p></section>
     ${t.pourquoi ? `<section><h3>Pourquoi</h3><p class="calme">${propre(t.pourquoi)}</p></section>` : ""}
     <section><h3>Critères de vérification</h3>${t.criteres.length ? `<ol>${t.criteres.map((c) => `<li>${propre(c)}</li>`).join("")}</ol>` : `<p class="calme">Aucun critère.</p>`}</section>
@@ -1242,14 +1442,148 @@ function afficherPlan(vue) {
     poser("toile", `<p class="calme" style="margin: auto; max-width: 380px; text-align: center">Pas encore de plan. Décris ton objectif dans la conversation : le découpage s'affichera ici, avec ce qui attend quoi.</p>`);
     return poser("fiche", "");
   }
-  if (!vue.taches.some((t) => t.id === choisie)) choisie = (vue.taches.find((t) => t.etat === "revenu") || vue.taches[0]).id;
+  if (!vue.taches.some((t) => t.id === choisie)) choisie = (vue.taches.find((t) => attendDe(vue).has(t.id)) || vue.taches.find((t) => t.etat === "revenu") || vue.taches[0]).id;
   const bandeau = contratEnAttente(vue)
     ? `<div class="bandeau"><p>Relis le découpage : clique une tâche pour voir ses critères et les fichiers qu'elle a le droit de toucher. Rien ne démarre avant ta validation.</p>${boutonValider}</div>` : "";
-  const legende = `<div class="legende"><span><i class="rond"></i>À lancer</span><span><i class="rond en_cours"></i>En cours</span>
-    <span><i class="rond verifie"></i>Vérifiée</span><span><i class="rond revenu"></i>Revenue vers toi</span><span>Contour pointillé : ajoutée en route</span></div>`;
+  const legende = `<div class="legende"><span><i style="border-color: var(--verifie)"></i>Vérifiée</span><span><i style="border-color: var(--en-cours)"></i>En cours</span>
+    <span><i style="border-color: var(--attend)"></i>T'attend</span><span><i style="border-top: 1px dashed var(--faible)"></i>À venir</span><span>Contour pointillé : ajoutée en route</span></div>`;
   poser("toile", bandeau + graphe(vue) + legende);
   poser("fiche", fiche(vue));
 }
+
+/* ---------- Salle : le chantier vu d'en haut, en perspective isométrique ----------
+   Une colonne de lumière par poste, posée dans un anneau au sol : sa hauteur dit l'effort, sa couleur l'état.
+   Des routes au sol relient l'orchestrateur aux tâches, les tâches entre elles, et les dernières à la livraison.
+   Le plan se recalcule à la taille de la fenêtre. */
+const HAUTEUR_EFFORT = { low: 0.8, medium: 1.3, high: 1.8, xhigh: 2.1, max: 2.4 };
+function melange(hex, t) {
+  const fond = [14, 18, 32], c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
+  return `rgb(${c.map((v, i) => Math.round(fond[i] + (v - fond[i]) * t)).join(",")})`;
+}
+function stationsDe(vue) {
+  const { couches, parents } = disposer(vue.taches), attend = attendDe(vue), PAS_U = 9, PAS_V = 5.2;
+  const stations = [];
+  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
+  stations.push({ cle: "@orchestrateur", u: -PAS_U, v: 0, etat: vue.occupe || actifs ? "en_cours" : "repos", h: 1.1, cote: "g",
+    titre: "Orchestrateur", detail: "Fable · élevé", mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
+  couches.forEach((couche, c) => couche.forEach((t, i) => {
+    const etat = etatVu(t, attend);
+    stations.push({ cle: t.id, tache: t, u: c * PAS_U + (i % 2) * 3.5, v: (i - (couche.length - 1) / 2) * PAS_V, etat,
+      h: HAUTEUR_EFFORT[t.effort] || 1.3, cote: c === 0 && i % 2 === 0 ? "g" : "d", id: t.id, titre: t.titre, detail: doseCourte(t), mot: motEtat(t, etat) });
+  }));
+  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  stations.push({ cle: "@livre", u: couches.length * PAS_U + 1, v: PAS_V * 0.7, etat: verifiees ? "verifie" : "a_lancer", h: 0.5, cote: "d",
+    titre: "Livré sur main", detail: `${verifiees} / ${vue.taches.length} tâches`, mot: "" });
+  const routes = [], parId = Object.fromEntries(vue.taches.map((t) => [t.id, t])), enfants = new Set(vue.taches.flatMap((t) => parents(t)));
+  for (const t of vue.taches) {
+    const etat = etatVu(t, attend), amont = parents(t);
+    if (!amont.length) routes.push(["@orchestrateur", t.id, vue.contrat.valide ? etatFil(etat) : "a_venir"]);
+    amont.forEach((id) => routes.push([id, t.id, parId[id].etat === "verifie" ? "verifie" : "a_venir"]));
+    if (!enfants.has(t.id)) routes.push([t.id, "@livre", etat === "attend" ? "a_venir" : etatFil(etat)]);
+  }
+  return { stations, routes };
+}
+function solHtml(vue, largeur, hauteur) {
+  const { stations, routes } = stationsDe(vue);
+  // L'échelle : tout le chantier tient dans la zone libre, entre les panneaux, étiquettes comprises.
+  const us = stations.map((s) => s.u), vs = stations.map((s) => s.v), hMax = Math.max(...stations.map((s) => s.h));
+  // À droite, le panneau « Ce qui t'attend » prend sa place quand il est ouvert.
+  // Sous les panneaux du haut ; un peu à gauche quand « Ce qui t'attend » est ouvert à droite.
+  const panneau = ilFautRepondre(vue) && largeur > 900 ? 190 : 0;
+  // Sur un petit écran, les panneaux passent dessous : le sol a toute sa boîte.
+  const large = largeur > 900;
+  const zone = large ? { x: 40, y: largeur > 1100 ? 230 : 150, l: largeur - 80 - panneau, h: hauteur - (largeur > 1100 ? 300 : 210) }
+    : { x: 10, y: 40, l: largeur - 20, h: hauteur - 80 };
+  const etendueU = Math.max(...us) - Math.min(...us), etendueV = Math.max(...vs) - Math.min(...vs);
+  const S = Math.max(large ? 22 : 12, Math.min(46, (zone.l - (large ? 420 : 90)) / (etendueU * 0.866 || 1), zone.h / (etendueV * 0.5 + hMax + 1.6)));
+  const cx = zone.x + zone.l / 2 - ((Math.max(...us) + Math.min(...us)) / 2) * 0.866 * S;
+  const cy = zone.y + zone.h / 2 - ((Math.max(...vs) + Math.min(...vs)) / 2) * 0.5 * S + (hMax * S) / 2 - 0.4 * S;
+  const P = (x, y, z = 0) => [cx + (x - y) * S * 0.866, cy + (x + y) * S * 0.5 - z * S];
+  const sol = (s) => [(s.u + s.v) / 2, (s.v - s.u) / 2];
+  const parCle = Object.fromEntries(stations.map((s) => [s.cle, s]));
+  // La grille du sol, effacée vers les bords
+  const [x0, y0] = sol(stations[0]);
+  let grille = "";
+  for (let i = -16; i <= 16; i++) {
+    const a = P(x0 + i, y0 - 16), b = P(x0 + i, y0 + 16), c = P(x0 - 16, y0 + i), d = P(x0 + 16, y0 + i);
+    grille += `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}"/><line x1="${c[0].toFixed(1)}" y1="${c[1].toFixed(1)}" x2="${d[0].toFixed(1)}" y2="${d[1].toFixed(1)}"/>`;
+  }
+  // Les routes, en L le long des axes du sol
+  let lignes = "";
+  for (const [de, vers, etat] of routes) {
+    const a = sol(parCle[de]), b = sol(parCle[vers]), coude = parCle[vers].v < parCle[de].v ? [a[0], b[1]] : [b[0], a[1]];
+    const points = [a, coude, b].map((p) => P(p[0], p[1]).map((n) => n.toFixed(1)).join(",")).join(" "), c = COULEURS[etat];
+    if (etat !== "a_venir") lignes += `<polyline points="${points}" fill="none" stroke="${c}" stroke-width="6" opacity="0.32" filter="url(#flou-sol)"/>`;
+    lignes += `<polyline points="${points}" fill="none" stroke="${c}" stroke-width="${etat === "a_venir" ? 1.2 : 2}" ${etat === "a_venir" ? 'stroke-dasharray="4 5"' : ""} stroke-linejoin="round"/>`;
+    if (etat !== "a_venir") { const m = P(coude[0], coude[1]); lignes += `<circle cx="${m[0].toFixed(1)}" cy="${m[1].toFixed(1)}" r="3" fill="${c}"/>`; }
+  }
+  // Les colonnes, des plus lointaines aux plus proches ; l'anneau au sol passe derrière puis devant chacune.
+  let colonnes = "", etiquettes = "";
+  for (const s of [...stations].sort((a, b) => a.v - b.v)) {
+    const [x, y] = sol(s), [px, py] = P(x, y), w = 0.42, h = s.h;
+    const vide = s.etat === "a_lancer" || s.etat === "abandonnee" || s.etat === "repos";
+    const c = s.etat === "repos" ? "#dcdcdc" : COULEURS[s.etat] && COULEURS[s.etat].startsWith("#") ? COULEURS[s.etat] : "#dcdcdc";
+    const rx = 0.95 * S * 1.22, ry = rx * 0.577;
+    const demi = (k, avant) => `M${(px - rx * k).toFixed(1)},${py.toFixed(1)} A${(rx * k).toFixed(1)},${(ry * k).toFixed(1)} 0 0 ${avant ? 0 : 1} ${(px + rx * k).toFixed(1)},${py.toFixed(1)}`;
+    const anneaux = (avant) => `<path d="${demi(1, avant)}" fill="none" stroke="${c}" stroke-width="${vide ? 1 : 1.5}" opacity="${vide ? 0.3 : 0.8}" ${vide ? 'stroke-dasharray="3 4"' : ""}/>
+      <path class="${s.etat === "attend" ? "s-pulse" : ""}" d="${demi(0.68, avant)}" fill="none" stroke="${c}" stroke-width="${s.etat === "attend" || s.etat === "en_cours" ? 3 : 1}" opacity="${vide ? 0.15 : 0.5}" ${s.etat === "en_cours" ? 'stroke-dasharray="14 8"' : ""}/>`;
+    const p = (dx, dy, z) => P(x + dx, y + dy, z).map((n) => n.toFixed(1)).join(",");
+    const dessus = [p(-w, -w, h), p(w, -w, h), p(w, w, h), p(-w, w, h)].join(" ");
+    const gauche = [p(-w, w, 0), p(w, w, 0), p(w, w, h), p(-w, w, h)].join(" ");
+    const droite = [p(w, -w, 0), p(w, w, 0), p(w, w, h), p(w, -w, h)].join(" ");
+    colonnes += vide ? "" : `<ellipse cx="${px.toFixed(1)}" cy="${py.toFixed(1)}" rx="${(rx * 1.25).toFixed(1)}" ry="${(ry * 1.25).toFixed(1)}" fill="${c}" opacity="0.12" filter="url(#flou-halo)"/>`;
+    colonnes += anneaux(false);
+    if (vide) colonnes += [gauche, droite, dessus].map((f) => `<polygon points="${f}" fill="#0e1220" stroke="rgba(220,220,220,0.32)" stroke-dasharray="3 3"/>`).join("");
+    else {
+      const arete = [P(x + w, y + w, 0), P(x + w, y + w, h)];
+      colonnes += `<polygon points="${gauche}" fill="${melange(c, 0.42)}"/><polygon points="${droite}" fill="${melange(c, 0.26)}"/>
+        <polygon points="${dessus}" fill="${c}" opacity="0.55" filter="url(#flou-sol)"/><polygon points="${dessus}" fill="${c}"/>
+        <line x1="${arete[0][0].toFixed(1)}" y1="${arete[0][1].toFixed(1)}" x2="${arete[1][0].toFixed(1)}" y2="${arete[1][1].toFixed(1)}" stroke="#fff" stroke-opacity="0.45"/>`;
+    }
+    colonnes += anneaux(true);
+    const [tx, ty] = P(x, y, h), gauche_ = s.cote === "g";
+    const etatClasse = s.etat === "en_verification" ? "en_cours" : s.etat;
+    const action = s.tache ? ` data-action="voir-tache" data-id="${propre(s.id)}" role="button" tabindex="0"` : "";
+    etiquettes += `<div class="s-tag ${etatClasse} ${s.cote}" style="left: ${(gauche_ ? tx - 30 : tx + 30).toFixed(0)}px; top: ${(ty + 2).toFixed(0)}px"${action} title="${propre(s.titre)}">
+      <div class="t">${s.id ? `<b>${propre(s.id)}</b>` : ""}${propre(couper(s.titre, 30))}</div><div class="d">${propre(s.detail)}${s.mot ? ` · <span>${propre(s.mot)}</span>` : ""}</div></div>`;
+  }
+  const svg = `<defs><filter id="flou-sol" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="flou-halo" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="12"/></filter>
+    <radialGradient id="fondu-sol" cx="50%" cy="58%" r="55%"><stop offset="0" stop-color="#fff"/><stop offset=".7" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+    <mask id="masque-sol"><rect width="${largeur}" height="${hauteur}" fill="url(#fondu-sol)"/></mask></defs>
+    <g mask="url(#masque-sol)" stroke="rgba(255,255,255,0.055)">${grille}</g><g>${lignes}</g><g>${colonnes}</g>`;
+  return { svg, etiquettes };
+}
+function afficherSalle(vue) {
+  if (location.hash !== "#salle" || !vue || vue.aucun_projet) return;
+  const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length, attendue = ilFautRepondre(vue);
+  poser("salle-orch", `<div class="rail-tete">${anneauPoints(verifiees, vue.taches.length, attendue, 64)}<div><span class="etiquette">Orchestrateur · Fable élevé</span><p>${propre(vue.point_d_etape)}</p></div></div>
+    ${c.objectif ? `<p class="calme">${propre(c.objectif)}</p>` : ""}
+    <div class="boutons"><button type="button" data-action="vers-conversation">Écrire à l'orchestrateur</button><button type="button" data-action="voir-plan">Plan</button></div>`);
+  const millions = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}<small> M</small>` : n >= 1e3 ? `${Math.round(n / 1e3)}<small> k</small>` : nombre(n));
+  poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}<small> / ${c.max_agents}</small></b></div>
+    <div><span>Montées</span><b>${vue.montees}<small> / ${c.max_montees}</small></b></div>
+    <div><span>Coût équiv.</span><b>${Number(vue.cout_usd || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small> $</small></b></div>
+    <div><span>Tokens</span><b>${millions(vue.tokens || 0)}</b></div>` : "");
+  const attente = document.getElementById("salle-attente");
+  attente.classList.toggle("attend", attendue);
+  attente.hidden = !attendue && !avisTexte;
+  poser("salle-attente", attendue || avisTexte ? `<h2>● Ce qui t'attend</h2>${attenteHtml(vue)}` : "");
+  const moteur = vue.evenements.filter((e) => (e.auteur || "moteur") === "moteur").slice(-3).reverse();
+  poser("salle-fil", moteur.length ? `<span class="etiquette">Fil</span>${moteur.map((e) => `<div><time>${propre(String(e.heure).slice(0, 5))}</time><b>${propre(e.tache || "—")}</b><span title="${propre(e.texte)}">${propre(e.texte)}</span></div>`).join("")}` : "");
+  const cadre = document.getElementById("salle-sol-cadre"), boite = cadre.getBoundingClientRect();
+  if (!vue.taches.length) {
+    poser("salle-sol", "");
+    return poser("salle-etiquettes", `<p class="salle-vide">La salle se remplit quand le plan est proposé : un poste par tâche, posé sur le sol du chantier.</p>`);
+  }
+  if (!boite.width || !boite.height) return;
+  const { svg, etiquettes } = solHtml(vue, boite.width, boite.height);
+  const sol = document.getElementById("salle-sol");
+  sol.setAttribute("viewBox", `0 0 ${boite.width} ${boite.height}`);
+  poser("salle-sol", svg);
+  poser("salle-etiquettes", etiquettes);
+}
+new ResizeObserver(() => { if (derniere && location.hash === "#salle") afficherSalle(derniere); }).observe(document.getElementById("vue-salle"));
 
 /* ---------- Ensemble ---------- */
 function afficherSansProjet(vue) {
@@ -1284,8 +1618,8 @@ function afficher(vue) {
     distant.title = lien.probleme || lien.adresse || "";
   }
   document.getElementById("mode").textContent = rejoue ? "Démonstration rejouée" : vue.mode === "réel" ? "" : "Démonstration";
-  document.getElementById("pastille-agents").textContent = vue.taches.length ? `Agents ${vue.agents_lances} / ${c.max_agents}` : "";
-  document.getElementById("pastille-cout").textContent = vue.cout_usd ? `Coût équivalent ${euros(vue.cout_usd)}` : "";
+  document.getElementById("pastille-agents").textContent = agentsTexte(auTravail(vue));
+  document.getElementById("pastille-cout").textContent = "";
   const infos = document.getElementById("infos");
   infos.hidden = ![...infos.children].some((e) => e.textContent);
   document.getElementById("cpt-chantier").textContent = vue.taches.length ? `${verifiees}/${vue.taches.length}` : "";
@@ -1300,11 +1634,12 @@ function afficher(vue) {
   afficherConversation(vue);
   afficherChantier(vue);
   afficherPlan(vue);
+  afficherSalle(vue);
 }
 
 function onglet() {
   const demande = location.hash.slice(1);
-  const nom = ["accueil", "conversation", "chantier", "plan", "code"].includes(demande) ? demande : rejoue ? "conversation" : "accueil";
+  const nom = ["accueil", "conversation", "chantier", "salle", "plan", "code"].includes(demande) ? demande : rejoue ? "conversation" : "accueil";
   document.querySelector(".app").classList.toggle("sur-accueil", nom === "accueil");
   document.querySelectorAll(".vue").forEach((v) => v.classList.toggle("active", v.id === `vue-${nom}`));
   document.querySelectorAll(".onglets a").forEach((a) => {
@@ -1312,6 +1647,7 @@ function onglet() {
   });
   if (nom === "conversation") { const cadre = document.getElementById("fil"); cadre.scrollTop = cadre.scrollHeight; }
   if (nom === "code" && derniere) { afficherCode(derniere); chargerCarte(true); }
+  if (nom === "salle" && derniere) afficherSalle(derniere);
   if (nom === "accueil") chargerAccueil();
 }
 window.addEventListener("hashchange", onglet);
@@ -1345,6 +1681,8 @@ function rafraichir() {
   if (!derniere || derniere.aucun_projet) return;
   afficherConversation(derniere);
   afficherChantier(derniere);
+  afficherSalle(derniere);
+  afficherPlan(derniere);
 }
 
 /* Rend la vue du serveur, ou null si la réponse n'est pas bonne. */
@@ -1583,10 +1921,10 @@ document.getElementById("fermer-archive").addEventListener("click", () => docume
 /* ---------- Code : l'explorateur, le plan, la vue d'un fichier et la fiche ----------
    Le serveur garde la carte du code (vue.carte en donne l'état ; /api/carte/lire la carte complète, relue quand sa
    version change). Les fichiers qu'un agent modifie en ce moment arrivent avec chaque vue et clignotent. */
-let carteComplete = null, carteVersion = -1, carteChargement = false, vueCode = "explorateur", fichierChoisi = "";
+let carteComplete = null, carteVersion = -1, carteChargement = false, vueCode = "plan", fichierChoisi = "";
 let estimationCarte = null, codePhrase = "";
 const dossiersOuverts = new Set(), fichiersOuverts = new Set();
-const VUES_CODE = ["explorateur", "plan", "voisinage"], SEP = "\u0000";
+const VUES_CODE = ["plan", "voisinage"], SEP = "\u0000";
 const GENRES_FR = { code: "Code", tests: "Tests", page: "Interface", "réglages": "Réglages", documentation: "Documentation", autre: "Autre" };
 const genreClasse = (g) => "g-" + (g === "réglages" ? "reglages" : g);
 const carteDe = (vue) => (vue && vue.carte) || { etat: "absente", en_cours: [] };
@@ -1682,9 +2020,15 @@ function afficherCode(vue) {
   poser("code-actions", actionsCodeHtml(resume));
   poser("code-vide", videCodeHtml(resume));
   const pret = Boolean(carteComplete) && resume.etat === "prete";
+  if (vueCode === "explorateur") vueCode = "plan"; // l'explorateur est toujours là, à gauche
   document.querySelectorAll('[data-action="code-vue"]').forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.vue === vueCode)));
   for (const v of VUES_CODE) document.getElementById(v).hidden = !pret || vueCode !== v;
-  if (pret && vueCode === "explorateur") poser("explorateur", arbreHtml(arbreDe(carteFusionnee().fichiers), 0, enCours));
+  document.getElementById("explorateur-cadre").hidden = !pret;
+  document.getElementById("explorateur").hidden = !pret;
+  if (pret) {
+    document.getElementById("explorateur-titre").textContent = `Fichiers · ${carteFusionnee().fichiers.length}`;
+    poser("explorateur", arbreHtml(arbreDe(carteFusionnee().fichiers), 0, enCours));
+  }
   if (pret && vueCode === "plan") { poser("plan", planHtml(enCours)); flechesPlan(); }
   if (pret && vueCode === "voisinage") { poser("voisinage", voisinageHtml(enCours)); flechesVoisinage(); }
   poser("fiche-code", pret ? ficheCodeHtml(enCours) : "");
@@ -1727,10 +2071,13 @@ function fichierHtml(f, profondeur, enCours) {
   const classes = `ligne-arbre fichier ${genreClasse(f.genre)}${f.fantome ? " fantome" : ""}${enCours.has(f.chemin) ? " en-cours" : ""}${f.chemin === fichierChoisi ? " choisi" : ""}`;
   let html = `<button type="button" class="${classes}" style="--p:${profondeur}" data-action="fichier" data-chemin="${propre(f.chemin)}" aria-expanded="${ouvert}" title="${propre(f.chemin)}">
     <span class="chevron" aria-hidden="true">${ouvert ? "▾" : "▸"}</span><i class="pastille-genre" aria-hidden="true"></i><span class="nom">${propre(nomCourt(f.chemin))}</span>
-    <span class="marques">${badgesHtml(f, enCours)}</span><span class="petit">${f.lignes} l.</span></button>`;
+    <span class="marques">${badgesHtml(f, enCours)}</span><span class="taille-points" title="${f.lignes} lignes" aria-label="${f.lignes} lignes">${taillePoints(f.lignes)}</span></button>`;
   if (ouvert) html += `<div class="fichier-ouvert" style="--p:${profondeur}"><p>${propre(f.resume)}</p>${piecesHtml(f)}</div>`;
   return html;
 }
+/* La taille d'un fichier en dix points : un point par palier, de 20 lignes à plus de 1 000. */
+const PALIERS_TAILLE = [1, 20, 50, 100, 150, 200, 300, 450, 650, 1000];
+const taillePoints = (lignes) => PALIERS_TAILLE.map((p) => `<i${lignes >= p ? ' class="on"' : ""}></i>`).join("");
 function piecesHtml(f) {
   if (!f.pieces.length) return "";
   const publiques = f.pieces.filter((p) => !p.nom.startsWith("_")), internes = f.pieces.length - publiques.length;
@@ -1854,7 +2201,7 @@ function planHtml(enCours) {
     .join(`<span aria-hidden="true">›</span>`);
   const notes = [];
   if (planChemin && (niveau.dehors || niveau.venus)) notes.push(`Hors de ce dossier : il se sert de ${pluriel(niveau.dehors, "fichier")}, et ${pluriel(niveau.venus, "fichier")} se ${niveau.venus > 1 ? "servent" : "sert"} de lui.`);
-  for (const g of mutuels.slice(0, 3)) notes.push(`<span class="souci">${propre(g.map(nomCourt).sort().join(" et "))} dépendent l'un de l'autre (flèches roses) : les modifier séparément est délicat.</span>`);
+  for (const g of mutuels.slice(0, 3)) notes.push(`<span class="souci">${propre(g.map(nomCourt).sort().join(" et "))} dépendent l'un de l'autre (flèches en pointillés blancs) : les modifier séparément est délicat.</span>`);
   const bascule = niveau.isoles.length
     ? `<button type="button" class="discret" data-action="plan-tout">${planTout ? "Cacher" : "Montrer"} ${pluriel(niveau.isoles.length, "élément")} sans lien</button>` : "";
   const corps = etages.filter((e) => e.length).map((e) => `<div class="etage">${e.map((b) => blocHtml(b, enCours, choisi, proches)).join("")}</div>`).join("");
@@ -1973,13 +2320,13 @@ function flechesVoisinage() {
   }
   tracer(toile, "#voisinage .voisin-carte", traits, "horizontal");
 }
-new ResizeObserver(() => { if (vueCode === "plan") flechesPlan(); if (vueCode === "fichier") flechesVoisinage(); }).observe(document.getElementById("vue-code"));
+new ResizeObserver(() => { if (vueCode === "plan") flechesPlan(); if (vueCode === "voisinage") flechesVoisinage(); }).observe(document.getElementById("vue-code"));
 
 /* La fiche d'un fichier : à quoi il sert, ses parties, de qui il se sert et qui se sert de lui. */
 function legendeCodeHtml() {
   const genres = ["code", "tests", "page", "réglages", "documentation"].map((g) => `<span class="${genreClasse(g)}"><i class="pastille-genre"></i>${GENRES_FR[g]}</span>`).join("");
   return `<div class="legende-code">${genres}</div>
-    <p class="petit">Point jaune : nouveau ou modifié dans la dernière version. Orange qui clignote : un agent y travaille en ce moment. Pointillés orange : ce qu'un agent est en train d'écrire, pas encore vérifié.</p>`;
+    <p class="petit">Rond creux : nouveau ou modifié dans la dernière version. Bleu qui clignote : un agent y travaille en ce moment. Pointillés bleus : ce qu'un agent est en train d'écrire, pas encore vérifié.</p>`;
 }
 function listeFichiersHtml(titre, chemins) {
   if (!chemins.length) return "";
@@ -2016,10 +2363,8 @@ function choisirFichier(chemin) {
     const bloc = [...document.querySelectorAll("#plan .bloc")].find((b) => b.dataset.chemin === chemin);
     if (bloc) bloc.scrollIntoView({ block: "nearest" });
   }
-  if (vueCode === "explorateur") {
-    const ligne = [...document.querySelectorAll("#explorateur .ligne-arbre.fichier")].find((b) => b.dataset.chemin === chemin);
-    if (ligne) ligne.scrollIntoView({ block: "nearest" });
-  }
+  const ligne = [...document.querySelectorAll("#explorateur .ligne-arbre.fichier")].find((b) => b.dataset.chemin === chemin);
+  if (ligne) ligne.scrollIntoView({ block: "nearest" });
 }
 async function analyserCode() {
   if (rejoue) return;
@@ -2190,6 +2535,7 @@ function agir(cible) {
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();
   if (action === "choisir") { choisie = cible.dataset.id; afficherPlan(derniere); }
+  if (action === "voir-tache") { choisie = cible.dataset.id; location.hash = "#plan"; if (derniere) afficherPlan(derniere); }
 }
 document.addEventListener("click", (e) => {
   const cible = e.target.closest("[data-action]");

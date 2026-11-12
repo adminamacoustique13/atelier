@@ -117,7 +117,7 @@ async function main() {
     await ligne.locator("button.agent-ligne").click();
     const lignes = await page.locator("#agents .journal li").allInnerTexts();
     verifier("un clic déroule les dernières lignes (de 2 à 30)", lignes.length >= 2 && lignes.length <= 30 && lignes[0] === "Lit la consigne", lignes);
-    await capture(page.locator("#vue-chantier .carte").nth(2), "activite-deroulee");
+    await capture(page.locator("#vue-chantier .carte", { hasText: "La salle" }), "activite-deroulee");
     const nomAgent = await ligne.locator("button.agent-ligne").getAttribute("data-nom");
     await page.locator(`svg.salle .poste-actif[data-nom="${nomAgent}"]`).click();
     verifier("un clic sur le poste de la salle replie le journal correspondant", (await page.locator("#agents .journal").count()) === 0);
@@ -207,11 +207,11 @@ async function main() {
     const rang = page.locator("#agents .agent").filter({ has: page.locator(`button.agent-ligne .id`, { hasText: new RegExp(`^${cible.tache}$`) }) });
     const bouton = rang.locator('button[data-action="arreter"]');
     verifier("le bouton « Arrêter » est présent et discret", (await bouton.innerText()) === "Arrêter" && (await bouton.evaluate((b) => b.classList.contains("discret") && b.getBoundingClientRect().height <= 28)));
-    await capture(page.locator("#vue-chantier .carte").nth(2), "arret-bouton");
+    await capture(page.locator("#vue-chantier .carte", { hasText: "La salle" }), "arret-bouton");
     await bouton.click();
     verifier("un premier clic demande confirmation, au même endroit", (await bouton.innerText()) === "Confirmer l'arrêt");
     verifier("rien n'est parti au premier clic", requetes.filter((r) => r.url === "/api/arreter").length === 0);
-    await capture(page.locator("#vue-chantier .carte").nth(2), "arret-confirmation");
+    await capture(page.locator("#vue-chantier .carte", { hasText: "La salle" }), "arret-confirmation");
     await PAUSE(5600);
     verifier("la confirmation s'efface d'elle-même", (await bouton.innerText()) === "Arrêter");
     await bouton.dblclick();
@@ -370,15 +370,15 @@ async function main() {
       await p.route("**/api/etat", (route) => route.fulfill({ json: longue }));
       await p.goto(s1.url + "#conversation");
       await aller(p, "chantier");
-      await p.waitForSelector("#anneau svg.anneau");
+      await p.waitForSelector("#anneau svg.anneau-points");
       const m = await p.evaluate(() => {
         const r = (e) => { const b = e.getBoundingClientRect(); return { x: b.x, y: b.y, w: b.width, h: b.height, d: b.right, bas: b.bottom }; };
         const texte = document.getElementById("objectif");
-        return { anneau: r(document.querySelector("#anneau svg.anneau")), texte: r(texte.parentElement), lignes: Math.round(texte.getBoundingClientRect().height / parseFloat(getComputedStyle(texte).lineHeight)) };
+        return { anneau: r(document.querySelector("#anneau svg.anneau-points")), texte: r(texte.parentElement), lignes: Math.round(texte.getBoundingClientRect().height / parseFloat(getComputedStyle(texte).lineHeight)) };
       });
       const chevauche = m.anneau.x < m.texte.d && m.texte.x < m.anneau.d && m.anneau.y < m.texte.bas && m.texte.y < m.anneau.bas;
       verifier(`objectif long à ${largeur} px : au moins 4 lignes`, m.lignes >= 4, m.lignes);
-      verifier(`objectif long à ${largeur} px : l'anneau garde 78 px`, Math.round(m.anneau.w) === 78 && Math.round(m.anneau.h) === 78, m.anneau);
+      verifier(`objectif long à ${largeur} px : l'anneau de points garde 132 px`, Math.round(m.anneau.w) === 132 && Math.round(m.anneau.h) === 132, m.anneau);
       verifier(`objectif long à ${largeur} px : l'anneau et le texte ne se chevauchent pas`, !chevauche, m);
       if (largeur === 1280) await capture(p.locator("#vue-chantier .carte").first(), "anneau");
       await ctx.close();
@@ -448,7 +448,7 @@ async function main() {
       const mesure = () => page.evaluate(() => { const j = document.querySelector("#agents .journal"); return { n: j.children.length, haut: j.scrollTop, reste: j.scrollHeight - j.scrollTop - j.clientHeight, deborde: j.scrollHeight > j.clientHeight, derniere: j.lastElementChild.textContent.slice(0, 9) }; });
       let m = await mesure();
       verifier("le journal de 30 lignes déborde et s'ouvre sur les plus récentes", m.n === 30 && m.deborde && m.reste <= 2 && m.derniere === "Ligne 30 ", m);
-      await capture(page.locator("#vue-chantier .carte").nth(2), "journal");
+      await capture(page.locator("#vue-chantier .carte", { hasText: "La salle" }), "journal");
       await page.evaluate(() => { document.querySelector("#agents .journal").scrollTop = 120; });
       vue.agents[0].lignes = lignesDe(2, 31);
       await page.evaluate(() => charger());
