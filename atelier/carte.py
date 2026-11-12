@@ -21,6 +21,7 @@ from pathlib import Path
 
 from atelier.archives import cout_fr, date_fr
 from atelier.consignes import dernier_json
+from atelier.git import lancer_git
 
 FICHIER = Path(".atelier") / "carte.json"
 DOSSIERS_IGNORES = set(
@@ -79,15 +80,8 @@ def genre(chemin: str) -> str:
 
 
 def _git(depot: Path, *arguments: str) -> str:
-    environnement = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    resultat = subprocess.run(
-        ["git", "-C", str(depot), *arguments],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        stdin=subprocess.DEVNULL,
-        env=environnement,
-    )
+    # Un code d'erreur de git devient une OSError, comme un git introuvable.
+    resultat = lancer_git(depot, *arguments, delai=60)
     if resultat.returncode != 0:
         raise OSError(resultat.stderr.strip() or "git a échoué")
     return resultat.stdout

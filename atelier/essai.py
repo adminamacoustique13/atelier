@@ -24,6 +24,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from atelier.git import IDENTITE_DE_REPLI, lancer_git
 from atelier.moteur import ARRETEE
 
 NOM_PROJET = "Essai de l'Atelier"
@@ -99,9 +100,10 @@ class Rapport:
 
 
 def _git(dossier: Path, *arguments: str) -> str:
-    return subprocess.run(
-        ["git", *arguments], cwd=dossier, capture_output=True, text=True, check=True
-    ).stdout
+    # Un échec de git lève CalledProcessError : l'essai s'arrête là, avec le message de git.
+    resultat = lancer_git(dossier, *arguments)
+    resultat.check_returncode()
+    return resultat.stdout
 
 
 def creer_projet_d_essai(dossier: Path, python: str) -> None:
@@ -121,7 +123,7 @@ def creer_projet_d_essai(dossier: Path, python: str) -> None:
     (dossier / "chantier" / "profil.json").write_text(texte, "utf-8")
     (dossier / ".gitignore").write_text(".atelier/\n", "utf-8")
     _git(dossier, "init", "-q", "-b", "main")
-    identite = ["-c", "user.name=Atelier", "-c", "user.email=atelier@localhost"]
+    identite = IDENTITE_DE_REPLI
     _git(dossier, "add", "-A")
     _git(dossier, *identite, "commit", "-q", "-m", "Création du projet d'essai")
 

@@ -16,7 +16,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M3b. Serveur et rythme : nom d'agent, coupe aux balises, phrases du profil | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (2 nouveaux) ; remplacements d'expressions identiques |
 | M4. Serveur : une seule lecture et une seule écriture du profil | vérifié | Opus | complète, Fable : accepté | 1 | 761 tests (3 nouveaux, rouges sur le code de départ) ; 1 104 scénarios comparés avant/après sans différence ; 13 casses sur 14 vues par les tests |
 | M6b. Page : envois au serveur, minuteries de message, tracés de fil | vérifié | Opus | bornée, Fable : accepté | 1 | 365 vérifications dans le navigateur ; 211 comparaisons avant/après par le vérificateur, pannes du serveur comprises, sans différence |
-| M5a. Une base commune pour appeler git, adoptée par `projets`, `essai`, `carte` | en cours | Opus | complète, Fable | 1 | |
+| M5a. Une base commune pour appeler git, adoptée par `projets`, `essai`, `carte` | vérifié | Opus | complète, Fable : accepté | 1 | 772 tests (7 nouveaux) ; 82 cas comparés avant/après, 78 identiques et 4 écarts attendus ou sans effet ; 20 casses de la base sur 21 vues par ses tests |
 | M5b. La base git adoptée par `controles` et `mise_a_jour` | à lancer, après M5a | Opus | complète, Fable | | |
 | M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 765 tests (1 nouveau, rouge sur le code de départ) ; le texte de l'arrêt n'est plus écrit qu'une fois dans `atelier/` |
 | M9. Profil : écriture d'un seul geste, réglage d'outils qu'on peut réessayer, valeur mal formée refusée | en cours | Opus | complète, Fable | 1 | |
@@ -63,6 +63,12 @@ Ils changeraient un comportement : ils attendent la décision de la personne res
 
 ### M9 : un arbitrage de l'orchestrateur
 L'ouvrier s'est arrêté avant d'écrire : un test né de M4 simulait un profil non écrit en bloquant l'écriture en place, ce que l'écriture d'un seul geste contourne. Arbitrage : ce cas de test, et lui seul, change sa façon de simuler l'échec ; ses vérifications restent. La phrase du fil reste celle que le test exige, et l'invitation à réessayer va dans une deuxième ligne.
+
+### M5a : ce que le vérificateur a relevé, repris dans la consigne de M5b
+- Écart accepté : `carte._git` passait le dépôt par `git -C`, la base passe par le dossier de travail. Sur un dossier supprimé, l'erreur garde son type mais pas son message ; les deux appelants l'avalent, rien d'observable ne change.
+- Trois lancements de git vivent encore hors de la base : `projets.py` (`git config user.email`) et deux dans `controles.py`. Tant qu'ils restent, la première ligne de `git.py` (« le seul endroit ») est fausse.
+- Un test manque : une variable passée par l'appelant doit primer sur celle du processus (`mise_a_jour` dépend de `LC_ALL=C`).
+- Mineur : `IDENTITE_DE_REPLI` est une liste modifiable partagée ; un alias inutile et un commentaire inexact dans `essai.py`.
 
 ## Contrôles communs
 
