@@ -40,8 +40,8 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
 | M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | vérifié | Opus | bornée, Fable : recalé puis seconde passe mécanique | 2 | essai nouveau PANNES-reseau 34 sur 34 (9 ECHEC sur la première passe) ; les sept autres essais à leurs comptes, CODE-carte excepté (instable, diagnostiqué) |
 | M11. Le code qui ne vit que pour les tests : sorti du produit ou retiré | à lancer, après M5 et M9 | Opus | bornée, Fable | | |
-| M12. `serveur.py` découpé en modules | à lancer, après M9 et M11 | Opus | complète, Fable | | |
-| M13. La page découpée en fichiers | à lancer, après M8 | Opus | complète, Fable | | |
+| M12. `serveur.py` découpé en modules | reporté à un prochain chantier (plan prêt : `plan-decoupage-serveur.md`) | | | | |
+| M13. La page découpée en fichiers | reporté à un prochain chantier (plan prêt : `plan-decoupage-page.md`) | | | | |
 | M6a. Page : les petits calculs écrits plusieurs fois | vérifié | Opus | bornée, Opus : accepté | 1 | 758 tests, 365 vérifications dans le navigateur ; égalité avant/après prouvée par deux scripts indépendants (ouvrier, vérificateur) |
 | M7. Moteur et carte : doublons internes | vérifié | Opus | complète, Fable : accepté | 1 | 758 tests inchangés et verts ; plus de 150 000 scénarios comparés avant/après sans écart ; 12 casses sur 28 vues par les tests, le reste couvert par la comparaison |
 
