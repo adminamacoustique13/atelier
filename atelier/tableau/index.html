@@ -326,6 +326,8 @@ td.droite, th.droite { text-align: right; }
 .noeud.fixe { cursor: default; }
 .noeud .port { position: absolute; top: 29px; width: 7px; height: 7px; border-radius: 50%; background: var(--fond); border: 1.5px solid rgba(220, 220, 220, 0.35); }
 .noeud .port.g { left: -4px; } .noeud .port.d { right: -4px; }
+.noeud .port.h, .noeud .port.b { left: calc(50% - 3.5px); } .noeud .port.h { top: -4px; } .noeud .port.b { top: auto; bottom: -4px; }
+.etage-titre.vertical { width: 84px; line-height: 1.5; white-space: normal; }
 .etat-mot.verifie { color: var(--verifie); } .etat-mot.attend { color: var(--attend); } .etat-mot.en_cours, .etat-mot.en_verification { color: var(--en-cours); }
 .legende { display: flex; flex-wrap: wrap; gap: 6px 22px; font: 500 10.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
 .legende span { display: inline-flex; align-items: center; gap: 7px; }
@@ -1366,28 +1368,44 @@ const ICONES = {
 };
 const iconeDe = (etat) => ICONES[etat] || (etat === "en_verification" ? ICONES.en_cours : ICONES.a_lancer);
 function graphe(vue) {
-  const L = 216, H = 66, PAS_X = 276, PAS_Y = 92, RACINE = 196;
+  // De haut en bas : l'orchestrateur, une rangée par étape (les tâches parallèles côte à côte), la livraison.
+  const L = 216, H = 66, PAS_X = 236, PAS_Y = 118, MARGE = 96, BUS = 22;
   const { couches, parents } = disposer(vue.taches);
   const attend = attendDe(vue), toi = ilFautRepondre(vue), parId = Object.fromEntries(vue.taches.map((t) => [t.id, t]));
-  const haut = toi ? 108 : 34, lignes = Math.max(...couches.map((c) => c.length));
-  const milieu = haut + ((lignes - 1) * PAS_Y) / 2;
+  const colonnes = Math.max(...couches.map((c) => c.length));
+  const contenu = Math.max(L, (colonnes - 1) * PAS_X + L), centre = MARGE + contenu / 2;
+  // « Toi » se range en haut à droite, dans la rangée de l'orchestrateur s'il y a la place, sinon dans sa propre colonne.
+  const toiDedans = contenu >= L * 3 + 80;
+  const rail = MARGE + contenu + 28, xToi = toiDedans ? MARGE + contenu - L : rail + 30;
+  const railToi = rail + 12, largeur = toi && !toiDedans ? xToi + L : railToi + 12;
+  const rangY = (n) => 8 + n * PAS_Y;
   const lieu = {};
   couches.forEach((couche, n) => couche.forEach((t, i) => {
-    lieu[t.id] = { x: RACINE + 56 + n * PAS_X, y: milieu + (i - (couche.length - 1) / 2) * PAS_Y };
+    lieu[t.id] = { x: centre + (i - (couche.length - 1) / 2) * PAS_X - L / 2, y: rangY(n + 1), rang: n + 1 };
   }));
-  const xLivre = RACINE + 56 + couches.length * PAS_X, largeur = xLivre + L, hauteur = haut + lignes * PAS_Y;
-  const racine = { x: 0, y: milieu }, livre = { x: xLivre, y: milieu }, nToi = { x: xLivre, y: 0 };
+  const racine = { x: centre - L / 2, y: rangY(0), rang: 0 }, livre = { x: centre - L / 2, y: rangY(couches.length + 1), rang: couches.length + 1 };
+  const nToi = { x: xToi, y: rangY(0) }, hauteur = livre.y + H + 8;
   const enfants = new Set(vue.taches.flatMap((t) => parents(t)));
   const fils = [];
   const fil = (points, etat) => fils.push({ d: trace(points), etat });
+  // Du bas d'un nœud au haut d'un autre : tout droit d'une rangée à la suivante, par le rail de droite au-delà.
+  const relier = (a, b, etat) => {
+    const ax = a.x + L / 2, bx = b.x + L / 2;
+    if (b.rang - a.rang <= 1) return fil([[ax, a.y + H], [ax, b.y - BUS], [bx, b.y - BUS], [bx, b.y]], etat);
+    fil([[ax, a.y + H], [ax, a.y + H + 14], [rail, a.y + H + 14], [rail, b.y - BUS], [bx, b.y - BUS], [bx, b.y]], etat);
+  };
   for (const t of vue.taches) {
-    const { x, y } = lieu[t.id], etat = etatVu(t, attend), amont = parents(t);
-    if (!amont.length) fil([[racine.x + RACINE, racine.y + H / 2], [RACINE + 34, racine.y + H / 2], [RACINE + 34, y + H / 2], [x, y + H / 2]], vue.contrat.valide ? etatFil(etat) : "a_venir");
-    amont.forEach((id) => { const p = lieu[id]; fil([[p.x + L, p.y + H / 2], [x - 34, p.y + H / 2], [x - 34, y + H / 2], [x, y + H / 2]], parId[id].etat === "verifie" ? "verifie" : "a_venir"); });
-    if (!enfants.has(t.id)) fil([[x + L, y + H / 2], [xLivre - 34, y + H / 2], [xLivre - 34, livre.y + H / 2], [xLivre, livre.y + H / 2]], etat === "attend" ? "a_venir" : etatFil(etat));
-    if (toi && etat === "attend") fil([[x + L / 2, y], [x + L / 2, nToi.y + H / 2], [nToi.x, nToi.y + H / 2]], "attend");
+    const n = lieu[t.id], etat = etatVu(t, attend), amont = parents(t);
+    if (!amont.length) relier(racine, n, vue.contrat.valide ? etatFil(etat) : "a_venir");
+    amont.forEach((id) => relier(lieu[id], n, parId[id].etat === "verifie" ? "verifie" : "a_venir"));
+    if (!enfants.has(t.id)) relier(n, livre, etat === "attend" ? "a_venir" : etatFil(etat));
+    // Vers « Toi » : sous la rangée (sans traverser les voisines), puis le rail de droite jusqu'en haut.
+    if (toi && etat === "attend") {
+      const bas = n.y + H + 10, entree = toiDedans ? nToi.x + L : nToi.x;
+      fil([[n.x + L - 28, n.y + H], [n.x + L - 28, bas], [railToi, bas], [railToi, nToi.y + H / 2], [entree, nToi.y + H / 2]], "attend");
+    }
   }
-  if (toi && contratEnAttente(vue)) fil([[RACINE / 2, racine.y], [RACINE / 2, nToi.y + H / 2], [nToi.x, nToi.y + H / 2]], "attend");
+  if (toi && contratEnAttente(vue)) fil([[racine.x + L, racine.y + H / 2], [nToi.x, nToi.y + H / 2]], "attend");
   const vivants = fils.filter((f) => f.etat === "en_cours" || f.etat === "attend");
   const impulsions = MOUVEMENT_REDUIT ? "" : vivants.map((f, i) => `<g><circle class="impulsion-halo" r="6" fill="${COULEURS[f.etat]}"/><circle class="impulsion" r="2.4"/>
     <animateMotion dur="${f.etat === "attend" ? 2.6 : 3.4}s" begin="-${(i * 0.7).toFixed(1)}s" repeatCount="indefinite" path="${f.d}"/></g>`).join("");
@@ -1395,7 +1413,7 @@ function graphe(vue) {
     <defs><filter id="lueur-fil" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3.5"/></filter></defs>
     ${fils.filter((f) => f.etat !== "a_venir").map((f) => `<path class="fil-lueur ${f.etat}" d="${f.d}"/>`).join("")}
     ${fils.map((f) => `<path class="fil-lien ${f.etat}" d="${f.d}"/>`).join("")}${impulsions}</svg>`;
-  const titres = couches.map((couche, n) => `<span class="etage-titre" style="left: ${RACINE + 56 + n * PAS_X}px; top: ${haut - 26}px">Étape ${n + 1}${couche.length > 1 ? " · en parallèle" : ""}${n ? ` · après l'étape ${n}` : ""}</span>`).join("");
+  const titres = couches.map((couche, n) => `<span class="etage-titre vertical" style="left: 0; top: ${rangY(n + 1) + H / 2 - 14}px">Étape ${n + 1}${couche.length > 1 ? "<br>en parallèle" : ""}</span>`).join("");
   const noeuds = vue.taches.map((t) => {
     const { x, y } = lieu[t.id], etat = etatVu(t, attend);
     const classes = ["noeud", etat, t.ajoutee ? "ajoutee" : "", t.id === choisie ? "choisie" : ""].filter(Boolean).join(" ");
@@ -1403,14 +1421,14 @@ function graphe(vue) {
       aria-label="Tâche ${propre(t.id)}, ${propre(t.titre)}, ${propre(motEtat(t, etat))}" title="${propre(t.titre)}">
       <span class="ic">${iconeDe(etat)}</span><div><div class="t"><b>${propre(t.id)}</b>${propre(t.titre)}</div>
       <div class="d"><span>${propre(doseCourte(t))}</span><span class="etat-mot ${etat}">${propre(motEtat(t, etat))}</span></div></div>
-      <i class="port g"></i><i class="port d"></i></div>`;
+      <i class="port h"></i><i class="port b"></i></div>`;
   }).join("");
   const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
-  const fixe = (classe, x, y, icone, titre, detail, couleur) => `<div class="noeud fixe ${classe}" style="left: ${x}px; top: ${y}px${classe === "racine" ? `; width: ${RACINE}px` : ""}">
-    <span class="ic">${icone}</span><div><div class="t">${titre}</div><div class="d"><span class="etat-mot ${couleur}">${detail}</span></div></div><i class="port d"></i></div>`;
-  const tete = fixe("racine", racine.x, racine.y, vue.contrat.valide ? ICONES.en_cours : ICONES.a_lancer, "Orchestrateur", vue.contrat.valide ? "Contrat validé" : "Contrat à valider", vue.contrat.valide ? "en_cours" : contratEnAttente(vue) ? "attend" : "");
-  const fin = fixe(verifiees === vue.taches.length ? "verifie" : "", livre.x, livre.y, verifiees ? ICONES.verifie : ICONES.a_lancer, "Livré sur main", `${verifiees} / ${vue.taches.length} tâches`, verifiees ? "verifie" : "");
-  const noeudToi = toi ? fixe("attend", nToi.x, nToi.y, ICONES.toi, "Toi", propre(aFaire(vue)), "attend") : "";
+  const fixe = (classe, x, y, icone, titre, detail, couleur, ports) => `<div class="noeud fixe ${classe}" style="left: ${x}px; top: ${y}px">
+    <span class="ic">${icone}</span><div><div class="t">${titre}</div><div class="d"><span class="etat-mot ${couleur}">${detail}</span></div></div>${ports}</div>`;
+  const tete = fixe("racine", racine.x, racine.y, vue.contrat.valide ? ICONES.en_cours : ICONES.a_lancer, "Orchestrateur", vue.contrat.valide ? "Contrat validé" : "Contrat à valider", vue.contrat.valide ? "en_cours" : contratEnAttente(vue) ? "attend" : "", '<i class="port b"></i>');
+  const fin = fixe(verifiees === vue.taches.length ? "verifie" : "", livre.x, livre.y, verifiees ? ICONES.verifie : ICONES.a_lancer, "Livré sur main", `${verifiees} / ${vue.taches.length} tâches`, verifiees ? "verifie" : "", '<i class="port h"></i>');
+  const noeudToi = toi ? fixe("attend", nToi.x, nToi.y, ICONES.toi, "Toi", propre(aFaire(vue)), "attend", '<i class="port b"></i>') : "";
   return `<div class="cablage" style="width: ${largeur}px; height: ${hauteur}px" role="group" aria-label="Graphe des tâches">${svg}${titres}${tete}${noeuds}${fin}${noeudToi}</div>`;
 }
 
@@ -1448,6 +1466,9 @@ function afficherPlan(vue) {
   const legende = `<div class="legende"><span><i style="border-color: var(--verifie)"></i>Vérifiée</span><span><i style="border-color: var(--en-cours)"></i>En cours</span>
     <span><i style="border-color: var(--attend)"></i>T'attend</span><span><i style="border-top: 1px dashed var(--faible)"></i>À venir</span><span>Contour pointillé : ajoutée en route</span></div>`;
   poser("toile", bandeau + graphe(vue) + legende);
+  // Un plan plus large que sa zone se réduit (jusqu'aux deux tiers), plutôt que de défiler de côté.
+  const cablage = document.querySelector("#toile .cablage"), dispo = document.getElementById("toile").clientWidth - 36;
+  if (cablage) cablage.style.zoom = dispo > 0 && parseFloat(cablage.style.width) > dispo ? String(Math.max(0.66, dispo / parseFloat(cablage.style.width))) : "";
   poser("fiche", fiche(vue));
 }
 
