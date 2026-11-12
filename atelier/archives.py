@@ -33,7 +33,7 @@ def cout_fr(montant: float) -> str:
 # Ce que le journal dit du temps : chaque groupe rassemble des clés de durées du moteur
 # (`moteur.ATTENTE` et les clés de `moteur.PHASES`). Une clé inconnue compte dans « autre ».
 GROUPES = (
-    ("attendre", "Temps passé à attendre", ("attente",)),
+    ("attendre", "Temps passé à attendre", ("attente", "place", "jeton", "pause")),
     ("ecrire", "Temps passé à écrire (préparation de la copie comprise)",
      ("preparation", "ouvrier", "reprise")),
     ("controler", "Temps passé à contrôler", ("perimetre", "controles")),

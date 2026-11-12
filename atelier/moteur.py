@@ -5,6 +5,12 @@ l'ouvrier refusé dans sa session, monte d'un cran après un échec et s'arrête
 contrat. Il bloque une tâche que relancer ne ferait pas avancer (un agent empêché, un même refus
 qui se répète) et la rend à la personne avec une demande claire. Aucun modèle ne décide de ces
 étapes : elles se déroulent de la même façon à chaque fois.
+
+Il garde au travail jusqu'à `paralleles` ouvriers à la fois (le profil, 6 sans réglage), plus
+les vérificateurs, qui ne tiennent pas de place d'écriture (`atelier/places.py`). Un agent refusé
+pour une limite de l'abonnement, ou parce que Claude est surchargé, n'est pas un échec : les
+lancements visés sont suspendus, et la tâche repart seule à la fin de la suspension, au même
+niveau, sans rien compter.
 """
 
 from __future__ import annotations
@@ -12,14 +18,21 @@ from __future__ import annotations
 import re
 import threading
 import time
-from collections.abc import Callable
-from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+import weakref
+from collections.abc import Callable, Collection
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from itertools import dropwhile
 
 from atelier import dosage, refus
-from atelier.agents import FORME_COURTE, REPRISE_IMPOSSIBLE, commande_permise, forme_courte
+from atelier.agents import (
+    FORME_COURTE,
+    LIMITE_ATTEINTE,
+    REPRISE_IMPOSSIBLE,
+    SURCHARGE,
+    commande_permise,
+    forme_courte,
+)
 from atelier.consignes import (
     PREUVE_MAX_CARACTERES,
     PREUVES_MAX,
@@ -34,6 +47,7 @@ from atelier.consignes import (
 from atelier.controles import hors_perimetre, se_chevauchent
 from atelier.guichet import ARRETE, CHAINE
 from atelier.modele import Chantier, Tache
+from atelier.places import Places, heure_dite, phrase_de_suspension
 
 ACTIFS = ("en_cours", "en_verification")
 # L'issue d'une tentative coupée par une panne de l'Atelier lui-même (git, disque, redémarrage) :
@@ -64,7 +78,8 @@ VERDICT_GARDE = 8000  # les derniers caractères du texte du vérificateur, gard
 SORTIE_REPRISE = 4000  # les derniers caractères de la sortie des contrôles, pour la reprise
 # D'où vient un refus, écrit dans l'entrée d'historique (`origine`) ; "" pour une tentative
 # acceptée, arrêtée ou coupée par une panne. « agent » : l'ouvrier, ou le vérificateur, s'est
-# arrêté sur une erreur (délai, limite de l'abonnement, surcharge, panne de Claude Code).
+# arrêté sur une erreur (délai, panne de Claude Code). Une limite de l'abonnement ou une
+# surcharge n'est pas un refus : rien n'est tracé (voir `_suspendre`).
 ORIGINES = ("agent", "perimetre", "controles", "verdict", "integration")
 ORIGINES_FR = {
     "agent": "erreur d'agent",
@@ -95,6 +110,9 @@ FINS_D_OUTILS_REFUSES = {
     (False, False): "Si ces outils doivent servir aux agents, tu peux les leur permettre.",
 }
 NON_REFUS = ("valide", ARRETEE, PANNE)  # les issues d'historique qui ne sont pas des refus
+# La boucle d'`executer` et les tâches qui attendent une place, un jeton ou la fin d'une
+# suspension dorment au plus ce temps ; un changement les réveille aussitôt (`_signaler`).
+PAS_VEILLE_S = 5.0
 
 
 @dataclass(frozen=True)
@@ -249,6 +267,11 @@ def _raison_de_blocage(jugement: Jugement, cites: list[dict]) -> str:
     )
 
 
+def _en_clair(erreur: Exception) -> str:
+    """Une erreur de l'Atelier sur une ligne : son type et son message, 500 caractères au plus."""
+    return " ".join(f"{type(erreur).__name__} : {erreur}".split())[:500]
+
+
 class ContratNonValide(Exception):
     """Levée quand on tente de lancer un chantier dont le contrat n'est pas validé."""
 
@@ -293,6 +316,9 @@ PHASES = {
     "controles": "Contrôles automatiques : ",
     "verificateur": "Le vérificateur relit ({})",
     "enregistrement": "Enregistrement et fusion",
+    "place": "Attend une place d'écriture",
+    "jeton": "Attend qu'un agent se libère",
+    "pause": "En pause : les lancements reprennent {}",
 }
 # La clé de l'attente avant le départ, rangée avec les durées des phases (voir `_tracer`).
 ATTENTE = "attente"
@@ -321,10 +347,14 @@ class Moteur:
         profil: dict | None = None,
         sur_changement: Callable[[], None] | None = None,
         horloge: Callable[[], float] | None = None,
+        heure: Callable[[], float] | None = None,
     ):
         self.chantier = chantier
         # Une horloge monotone, en secondes : remplaçable dans les tests, jamais l'heure du mur.
         self.horloge = horloge or time.monotonic
+        # L'heure du mur, en secondes Unix : celle des limites de l'abonnement, que les places
+        # comparent aux heures de remise à zéro du SDK. Remplaçable dans les tests.
+        self.heure = heure or time.time
         self.agent = agent
         self.controles = controles
         self.profil = profil or {}
@@ -348,6 +378,19 @@ class Moteur:
         self._relancee_a: dict[str, float] = {}
         self._lance_a = self.horloge()
         self._principale_rouge = False  # les réparations n'ont pas suffi : chantier pas fini
+        # Le débit, sous le verrou comme le reste : les places d'écriture, les jetons d'agent et
+        # les suspensions pour limite (relues du profil à chaque tour), les tâches qui ont leur
+        # fil, et `en_route` tant qu'`executer` mène le chantier (une décision part aussitôt).
+        self.places = Places()
+        self._en_vol: set[str] = set()
+        self._veulent_ecrire: dict[str, str] = {}  # tâches en vol sans place -> modèle
+        self.en_route = False
+        self._lancements = 0  # le numéro du dernier `executer` qui a pris la route
+        self._fils_entres: weakref.WeakSet = weakref.WeakSet()  # entrés dans `executer`
+        # Le réveil de ceux qui attendent (la boucle d'`executer`, les tâches en file) : un numéro
+        # qui monte à chaque signal, pour qu'aucun ne se perde (`_signaler`, `_dormir`).
+        self._reveil = threading.Condition()
+        self._generation = 0
         for tache in chantier.taches:
             if not tache.modele:
                 tache.modele, tache.effort = dosage.depart(tache.type, self.profil.get("dosage"))
@@ -379,15 +422,32 @@ class Moteur:
             durees = self._durees.setdefault(identifiant, {})
             durees[mesuree[0]] = durees.get(mesuree[0], 0.0) + maintenant - mesuree[1]
 
-    def _partir(self, tache: Tache) -> None:
-        """Sous le verrou, au départ d'une tâche : note son attente depuis qu'elle est prête.
+    def _partir(self, tache: Tache, heure: float) -> bool:
+        """Sous le verrou : fait partir une tâche prête qui a sa place et son jeton
+        (`Places.partir`), dans son propre fil ; sinon ne change rien et rend False.
 
-        Prête : au lancement du moteur, à la vérification de sa dernière dépendance, ou à la
-        relance décidée par la personne responsable, selon ce qui vient en dernier.
+        Note aussi son attente depuis qu'elle est prête : au lancement du moteur, à la
+        vérification de sa dernière dépendance, ou à la relance décidée par la personne
+        responsable, selon ce qui vient en dernier. Si son fil ne démarre pas, elle rend sa
+        place et revient à la personne avec l'erreur, comme après une panne de l'Atelier.
         """
+        if not self.places.partir(tache.id, tache.modele, heure):
+            return False
+        tache.etat = "en_cours"
         moments = [self._lance_a, self._relancee_a.pop(tache.id, self._lance_a)]
         moments += [self._verifiee_a.get(d, self._lance_a) for d in tache.depend_de]
         self._attentes[tache.id] = max(0.0, self.horloge() - max(moments))
+        self._en_vol.add(tache.id)
+        fil = threading.Thread(target=self._traiter, args=(tache,), name=f"atelier-{tache.id}")
+        try:
+            fil.start()
+        except Exception as erreur:  # plus de fil possible, par exemple
+            self._en_vol.discard(tache.id)
+            self.places.finir(tache.id, heure)
+            detail = _en_clair(erreur)
+            raison = f"une erreur de l'Atelier l'a empêchée de partir. {detail}"
+            self._demander(tache, raison, detail)
+        return True
 
     def phase(self, identifiant: str) -> dict | None:
         """La phase en cours d'une tâche active et depuis combien de secondes, ou None."""
@@ -515,7 +575,7 @@ class Moteur:
         l'erreur écrite en clair, et les autres tâches continuent. Une tâche déjà vérifiée ou
         déjà rendue garde son état : l'erreur (souvent la sauvegarde) est seulement écrite au fil.
         """
-        detail = " ".join(f"{type(erreur).__name__} : {erreur}".split())[:500]
+        detail = _en_clair(erreur)
         raison = f"une erreur de l'Atelier l'a interrompue, pas l'agent. {detail}"
         with self.verrou:
             if tache.etat in ACTIFS:
@@ -544,6 +604,7 @@ class Moteur:
             if identifiant in self._enregistrement:
                 return False
             self._arretees.add(identifiant)
+            self._signaler()  # une tâche en file (place, jeton, suspension) cesse d'attendre
         self.agent.arreter(identifiant)
         return True
 
@@ -562,12 +623,14 @@ class Moteur:
 
     # --- ordonnancement ------------------------------------------------------------
 
-    def _prochaine(self) -> Tache | None:
-        """Rend une tâche prête : dépendances vérifiées, périmètre libre."""
+    def _prochaine(self, sauf: Collection[str] = ()) -> Tache | None:
+        """Rend une tâche prête : dépendances vérifiées, périmètre libre ; aucune de `sauf`."""
         taches = self.chantier.taches
         verifiees = {t.id for t in taches if t.etat == "verifie"}
         actives = [t for t in taches if t.etat in ACTIFS]
         for tache in taches:
+            if tache.id in sauf:
+                continue
             if tache.etat != "a_lancer" or not set(tache.depend_de) <= verifiees:
                 continue
             if any(se_chevauchent(tache.perimetre, a.perimetre) for a in actives):
@@ -576,27 +639,254 @@ class Moteur:
         return None
 
     def executer(self) -> None:
-        """Lance tout ce qui peut l'être, en parallèle, jusqu'à ce que plus rien ne bouge."""
-        if not self.chantier.contrat.valide:
-            raise ContratNonValide("Le contrat de chantier n'est pas validé.")
-        paralleles = int(self.profil.get("paralleles", 3))
-        self._lance_a = self.horloge()
-        with ThreadPoolExecutor(max_workers=paralleles) as bassin:
-            en_vol: set = set()
-            while True:
-                with self.verrou:
-                    while len(en_vol) < paralleles and (tache := self._prochaine()):
-                        tache.etat = "en_cours"
-                        self._partir(tache)
-                        en_vol.add(bassin.submit(self._traiter, tache))
-                if not en_vol and not self._reparer_si_besoin():
-                    break
-                if not en_vol:
-                    continue  # une réparation vient d'être ajoutée : elle part au tour suivant
-                finis, en_vol = wait(en_vol, return_when=FIRST_COMPLETED)
-                for fini in finis:
-                    fini.result()
-        self._conclure()
+        """Lance tout ce qui peut l'être, en parallèle, jusqu'à ce que plus rien ne bouge.
+
+        Chaque tâche part dans son propre fil dès qu'elle a sa place (`_lancer_pretes`) : au
+        tour de la boucle, et aussitôt qu'une place ou un jeton se libère ou qu'une décision
+        arrive. `en_route` dit que la boucle mène le chantier. Un `executer` appelé pendant
+        qu'elle tourne n'en mène pas une seconde : il attend qu'elle ait fini.
+        """
+        with self.verrou:
+            self._fils_entres.add(threading.current_thread())
+            if not self.chantier.contrat.valide:
+                raise ContratNonValide("Le contrat de chantier n'est pas validé.")
+            suivre = self.en_route
+            if not suivre:
+                self._lancements += 1
+                lancement, self._lance_a, self.en_route = self._lancements, self.horloge(), True
+        if suivre:
+            return self._attendre_la_fin()
+        try:
+            self._mener()
+        finally:  # une panne du moteur ne laisse pas croire qu'il tourne encore, mais un
+            with self.verrou:  # lancement plus récent garde la route
+                if self._lancements == lancement:
+                    self.en_route = False
+
+    def fil_attendu(self, fil: threading.Thread | None) -> bool:
+        """Dit si `fil`, parti pour exécuter `executer`, n'y est pas encore entré : il prendra la
+        route (ou suivra celle qui tourne). Un fil pas encore parti ne compte pas."""
+        return fil is not None and fil.ident is not None and fil not in self._fils_entres
+
+    def _attendre_la_fin(self) -> None:
+        """Pour un `executer` de trop : attend que la boucle qui tourne ait fini."""
+        while True:
+            with self.verrou:
+                if not self.en_route:
+                    return
+                vue = self._generation
+            self._dormir(vue, PAS_VEILLE_S)
+
+    def _mener(self) -> None:
+        """La boucle de réveil d'`executer`.
+
+        Elle dort jusqu'à un signal (une tâche finie, une place ou un jeton rendu, une
+        décision, un arrêt), jusqu'à la fin d'une alerte ou d'une suspension, et au plus
+        `PAS_VEILLE_S`. Quand rien n'est en vol ni n'attend, elle contrôle la branche
+        principale, puis conclut ; elle ne sort que sous le verrou, si rien n'est reparti
+        depuis : une décision arrivée pendant la conclusion relance la boucle.
+        """
+        conclu = False
+        while True:
+            with self.verrou:
+                occupe = self._lancer_pretes() or bool(self._en_vol)
+                if conclu and not occupe:
+                    self.en_route = False  # sous le verrou : la décision qui suit relancera
+                    self._signaler()
+                    return
+                vue, delai = self._generation, self._veille()
+            if occupe:
+                conclu = False
+                self._dormir(vue, delai)
+            elif not self._reparer_si_besoin():  # une réparation ajoutée part au tour suivant
+                self._conclure()
+                conclu = True
+
+    def _lancer_pretes(self) -> bool:
+        """Sous le verrou : relit les places du profil, sert les vérificateurs en file, fait
+        partir chaque tâche prête qui a sa place, et range l'état des places dans le chantier.
+
+        Une tâche déjà en vol qui attend une place pour repartir écrire (`_prendre_place`) passe
+        avant toute tâche neuve : tant que l'une d'elles pourrait partir dès qu'une place se
+        libère (son modèle n'est pas suspendu), aucune tâche neuve ne part. Rend vrai si une
+        tâche attend encore : une place, un jeton ou la fin d'une suspension.
+        """
+        self.places.regler(self.profil.get("paralleles"), self.profil.get("agents_max"))
+        heure = self.heure()
+        if self.places.servir(heure):
+            self._signaler()
+        en_vol_d_abord = any(
+            self.places.suspension(modele, heure) is None
+            for modele in self._veulent_ecrire.values()
+        )
+        attend = en_vol_d_abord or self._faire_partir_les_neuves(heure)
+        self.chantier.debit = self.places.etat(heure)
+        return attend
+
+    def _faire_partir_les_neuves(self, heure: float) -> bool:
+        """Sous le verrou : fait partir les tâches prêtes, dans l'ordre, tant qu'elles ont leur
+        place ; rend vrai si l'une d'elles attend encore.
+
+        Une tâche dont seul le modèle est suspendu laisse partir celles d'un autre modèle. Une
+        tâche dont le fil finit encore part au signal de sa fin.
+        """
+        attend, sautees = False, set(self._en_vol)
+        while (tache := self._prochaine(sautees)) is not None:
+            if self._partir(tache, heure):
+                continue
+            attend = True
+            if self.places.suspension(tache.modele, heure) is None:
+                break  # ni place ni jeton : aucune autre tâche ne partirait
+            sautees.add(tache.id)
+        return attend
+
+    def _reveiller(self) -> None:
+        """Sous le verrou, après un changement des places ou une décision : fait partir ce qui
+        le peut si la boucle d'`executer` tourne, puis réveille ceux qui attendent."""
+        if self.en_route:
+            self._lancer_pretes()
+        self._signaler()
+
+    def _signaler(self) -> None:
+        """Sous le verrou : réveille la boucle d'`executer` et les tâches qui attendent."""
+        with self._reveil:
+            self._generation += 1
+            self._reveil.notify_all()
+
+    def _dormir(self, vue: int, delai: float) -> None:
+        """Hors du verrou : dort au plus `delai` secondes, sauf si un signal a suivi `vue`.
+
+        `vue` est le numéro lu sous le verrou avec ce qui a décidé d'attendre : un signal donné
+        entre-temps n'est jamais perdu.
+        """
+        with self._reveil:
+            if self._generation == vue:
+                self._reveil.wait(delai)
+
+    def _veille(self) -> float:
+        """Sous le verrou : le temps de sommeil, jusqu'à la prochaine fin d'alerte ou de
+        suspension, au plus `PAS_VEILLE_S`."""
+        heure = self.heure()
+        echeance = self.places.prochaine_echeance(heure)
+        return PAS_VEILLE_S if echeance is None else min(PAS_VEILLE_S, echeance - heure)
+
+    def _attendre(
+        self,
+        tache: Tache,
+        obtenir: Callable[[float], bool],
+        phrase_d_attente: Callable[[float], str],
+    ) -> None:
+        """Essaie `obtenir(heure)` sous le verrou jusqu'à ce qu'il réussisse, ou que l'arrêt de
+        la tâche soit demandé.
+
+        `obtenir` peut agir : prendre une place et un jeton s'ils sont libres. Entre deux essais,
+        la phase de la tâche dit ce qu'elle attend (`phrase_d_attente(heure)`) et se mesure ;
+        elle se réveille à chaque signal, à la fin d'une suspension, et au plus toutes les
+        `PAS_VEILLE_S` secondes.
+        """
+        while True:
+            with self.verrou:
+                heure = self.heure()
+                if tache.id in self._arretees or obtenir(heure):
+                    return
+                phrase = phrase_d_attente(heure)
+                if self.phases.get(tache.id, ("",))[0] != phrase:
+                    self._phase(tache, phrase)
+                vue, delai = self._generation, self._veille()
+            self._dormir(vue, delai)
+
+    def _phrase_d_attente(self, modele: str, heure: float, manque: str) -> str:
+        """Sous le verrou : ce qu'attend une tâche, pour sa phase. La fin d'une suspension de
+        `modele` s'il est suspendu, sinon ce qui lui `manque` (« place » ou « jeton »)."""
+        reprise = self.places.suspension(modele, heure)
+        if reprise is None:
+            return PHASES[manque]
+        return PHASES["pause"].format(heure_dite(reprise, heure))
+
+    def _prendre_place(self, tache: Tache) -> None:
+        """La tâche repart écrire : attend la place et le jeton de son ouvrier, ou l'arrêt.
+
+        Pour chaque ouvrier qui n'a pas reçu sa place au départ de la tâche : départ neuf après
+        un refus, reprise à chaud, relance après une limite. Elle passe avant les tâches neuves
+        (`_lancer_pretes`). Une tâche qui tient un jeton sans place et ne peut pas partir le rend
+        (`Places.partir`) : il va aussitôt à qui l'attend.
+        """
+
+        def obtenir(heure: float) -> bool:
+            tenait = self.places.a_son_jeton(tache.id)
+            partie = self.places.partir(tache.id, tache.modele, heure)
+            if partie:
+                del self._veulent_ecrire[tache.id]
+            if partie or tenait != self.places.a_son_jeton(tache.id):
+                self._reveiller()  # l'état des places est rangé, un jeton rendu va à qui l'attend
+            return partie
+
+        def phrase_d_attente(heure: float) -> str:
+            plein = self.places.en_ecriture() >= self.places.places_effectives(heure)
+            return self._phrase_d_attente(tache.modele, heure, "place" if plein else "jeton")
+
+        with self.verrou:
+            tache.etat = "en_cours"
+            self._veulent_ecrire[tache.id] = tache.modele
+        try:
+            self._attendre(tache, obtenir, phrase_d_attente)
+        finally:  # arrêtée avant d'avoir sa place : les tâches neuves ne l'attendent plus
+            with self.verrou:
+                if self._veulent_ecrire.pop(tache.id, None) is not None:
+                    self._reveiller()
+
+    def _attendre_jeton(self, tache: Tache) -> None:
+        """La tâche passe en vérification et rend sa place, qui va aussitôt à une tâche prête ;
+        attend le jeton de son vérificateur (`Places.en_verification`), ou l'arrêt."""
+        modele, _ = dosage.verificateur(tache.modele, tache.effort)
+        with self.verrou:
+            tache.etat = "en_verification"
+            self.places.en_verification(tache.id, modele, self.heure())
+            self._reveiller()
+        self._attendre(
+            tache,
+            lambda _: self.places.a_son_jeton(tache.id),
+            lambda heure: self._phrase_d_attente(modele, heure, "jeton"),
+        )
+
+    def _malgre_les_limites(self, tache: Tache, attendre, lancer):
+        """Lance un agent dès que `attendre(tache)` rend la main ; refusé pour limite ou
+        surcharge, l'attend à nouveau (la fin de la suspension) et le relance, sans rien
+        compter. Rend le résultat du dernier lancé, ou None si l'arrêt l'a retenu (`lancer`
+        rend alors None)."""
+        while True:
+            attendre(tache)
+            resultat = lancer()
+            if resultat is None or not self._suspendre(tache, resultat):
+                return resultat
+
+    def _suspendre(self, tache: Tache, resultat) -> bool:
+        """Dit si l'agent a été refusé pour limite ou surcharge ; si oui, suspend les lancements
+        visés (`Places.refus`) et le retire du compte des agents lancés.
+
+        Rien d'autre n'est compté : ni tentative, ni refus, ni montée, ni blocage. L'agent
+        repartira à la fin de la suspension, au même niveau. Une surcharge de Claude arrête tous
+        les lancements deux minutes (`Places.surcharge`). Le fil le dit une fois par suspension.
+        """
+        if resultat.erreur not in (LIMITE_ATTEINTE, SURCHARGE):
+            return False
+        heure = self.heure()
+        with self.verrou:
+            self.chantier.agents_lances -= 1
+            if resultat.erreur == SURCHARGE:
+                suspension = self.places.surcharge(tache.id, heure)
+            else:
+                limite, fin = resultat.type_limite, resultat.fin_limite
+                suspension = self.places.refus(tache.id, limite, fin, heure)
+            self._reveiller()
+        if suspension["nouvelle"]:
+            phrase = phrase_de_suspension(suspension["portee"], suspension["reprise"], heure)
+            self._noter(
+                f"{phrase} Rien n'est compté contre cette tâche : elle repartira seule, au même "
+                "niveau.",
+                tache,
+            )
+        return True
 
     def _conclure(self) -> None:
         taches = self.chantier.taches
@@ -623,12 +913,18 @@ class Moteur:
                 self.phases.pop(tache.id, None)
                 for mesures in (self._mesure, self._durees, self._attentes):
                     mesures.pop(tache.id, None)
+                self._en_vol.discard(tache.id)
+                self.places.finir(tache.id, self.heure())
+                self._reveiller()  # sa place et son jeton vont aussitôt à qui les attend
 
     def _boucle(self, tache: Tache) -> None:
         """Mène la tâche de départ neuf en départ neuf, jusqu'à ce qu'elle soit vérifiée ou rendue.
 
         Chaque départ a sa reprise à chaud : la copie de travail n'est jetée (`annuler`) que pour
-        repartir de zéro ou rendre la tâche.
+        repartir de zéro ou rendre la tâche. Le premier départ a reçu sa place en partant
+        (`_lancer_pretes`), les suivants l'attendent (`_prendre_place`). Un ouvrier refusé pour
+        limite ou surcharge ne compte pas : sa copie est jetée et le même départ recommence,
+        d'une copie propre, à la fin de la suspension.
         """
         remarques = ""
         while True:
@@ -639,14 +935,20 @@ class Moteur:
             if resultat is None:  # arrêt demandé pendant la préparation : l'ouvrier n'est pas parti
                 self.controles.annuler(tache, dossier)
                 return self._arret_avant_depart(tache)
-            jugement = self._passe(tache, dossier, resultat)
-            jugement = self._reprises(tache, dossier, resultat.session, jugement)
-            if jugement.motif is None:
-                return self._verifiee(tache, jugement)
-            self.controles.annuler(tache, dossier)
-            remarques = jugement.pour_la_suite()
-            if not self._suite(tache, jugement):
-                return None
+            if self._suspendre(tache, resultat):  # la tentative ne compte pas non plus
+                with self.verrou:
+                    tache.tentatives -= 1
+                self.controles.annuler(tache, dossier)
+            else:
+                jugement = self._passe(tache, dossier, resultat)
+                jugement = self._reprises(tache, dossier, resultat.session, jugement)
+                if jugement.motif is None:
+                    return self._verifiee(tache, jugement)
+                self.controles.annuler(tache, dossier)
+                remarques = jugement.pour_la_suite()
+                if not self._suite(tache, jugement):
+                    return None
+            self._prendre_place(tache)
 
     def _verifiee(self, tache: Tache, jugement: Jugement) -> None:
         """La tâche est vérifiée ; un empêchement signalé en chemin, ou un outil refusé à
@@ -754,7 +1056,9 @@ class Moteur:
             "session, pour qu'il corrige.",
             tache,
         )
-        resultat = self._lancer_reprise(tache, dossier, session, refus)
+        resultat = self._malgre_les_limites(
+            tache, self._prendre_place, lambda: self._lancer_reprise(tache, dossier, session, refus)
+        )
         if resultat is None:  # arrêt demandé entre le refus et la reprise : elle ne part pas
             with self.verrou:
                 self._tracer(tache, ARRETEE, DETAIL_ARRET, reprise=True)
@@ -903,9 +1207,14 @@ class Moteur:
         return self._lire_avis(tache, avis)
 
     def _avis(self, tache: Tache, dossier, precedent: Jugement | None):
-        """Compte et lance un vérificateur ; rend son avis, ou None (arrêt avant son départ)."""
-        self._prendre_agent()
-        return self._lancer_verificateur(tache, dossier, precedent)
+        """Compte et lance un vérificateur dès qu'il a son jeton ; rend son avis, ou None (arrêt
+        avant son départ). Refusé pour limite ou surcharge, il repart après la suspension."""
+
+        def lancer():
+            self._prendre_agent()
+            return self._lancer_verificateur(tache, dossier, precedent)
+
+        return self._malgre_les_limites(tache, self._attendre_jeton, lancer)
 
     @staticmethod
     def _empeches_du_verificateur(avis) -> tuple[str, ...]:
@@ -948,8 +1257,6 @@ class Moteur:
         reprise d'un refus du vérificateur, c'est un vérificateur neuf, au même dosage, avec la
         consigne restreinte : le verdict précédent en entier, et seulement les points recalés.
         """
-        with self.verrou:
-            tache.etat = "en_verification"
         modele, effort = dosage.verificateur(tache.modele, tache.effort)
         restreinte = precedent is not None and precedent.origine == "verdict"
         objet = " sur la correction" if restreinte else ""
@@ -1071,8 +1378,8 @@ class Moteur:
         return True
 
     def _apres_erreur_d_agent(self, tache: Tache, jugement: Jugement) -> bool:
-        """Après une erreur d'agent (délai, limite, surcharge, panne de Claude Code) : jamais de
-        montée, qui paierait un modèle plus cher pour une panne. Seconde chance au même niveau ;
+        """Après une erreur d'agent (délai, panne de Claude Code) : jamais de montée, qui
+        paierait un modèle plus cher pour une panne. Seconde chance au même niveau ;
         la tâche revient si l'erreur se répète ou si ses tentatives sont épuisées."""
         with self.verrou:
             fenetre = self._fenetre(tache)
@@ -1269,6 +1576,8 @@ class Moteur:
             else:
                 tache.etat = "abandonnee"
         self._noter(f"Décision reçue : {choix.lower()}.", tache)
+        with self.verrou:  # si le moteur tourne, la tâche relancée part sans attendre son tour
+            self._reveiller()
 
     def relancer_au_meme_niveau(self, demande_id: str) -> bool:
         """Répond à une demande de blocage par la relance au même niveau, comme son bouton.

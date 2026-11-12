@@ -998,7 +998,9 @@ def test_une_tache_qui_attend_une_place_compte_le_temps_de_celle_qui_l_occupe():
     c = chantier([tache("A"), tache("B")])
     m, _ = moteur_chronometre(c, paralleles=1)
     m.executer()
-    assert c.tache("B").historique[0]["durees"]["attente"] == DUREE_ACCEPTEE
+    # A rend sa place en passant en vérification : B part pendant que le vérificateur relit.
+    apres = DUREES_ACCEPTEE["verificateur"] + DUREES_ACCEPTEE["enregistrement"]
+    assert c.tache("B").historique[0]["durees"]["attente"] == DUREE_ACCEPTEE - apres
 
 
 def test_une_relance_decidee_par_la_personne_compte_son_attente_depuis_la_decision():
@@ -1083,10 +1085,13 @@ def test_la_mesure_ne_change_rien_a_ce_que_le_moteur_fait():
         if not chronometre:
             m.profil = {"paralleles": 1}
         m.executer()
-        appels = [(x["role"], x.get("tache"), x["modele"]) for x in m.agent.appels]
+        # Par tâche : le vérificateur de B et l'ouvrier de C travaillent en même temps.
+        appels = sorted(((x.get("tache"), x["role"], x["modele"]) for x in m.agent.appels),
+                        key=lambda a: a[0])  # fmt: skip
+        fil = sorted(((e["tache"], e["texte"]) for e in c.evenements), key=lambda e: e[0])
         sans = [[{k: v for k, v in e.items() if k != "durees"} for e in t.historique]
                 for t in c.taches]  # fmt: skip
-        return appels, [e["texte"] for e in c.evenements], [t.etat for t in c.taches], sans
+        return appels, fil, [t.etat for t in c.taches], sans
 
     assert deroule(True) == deroule(False)
 
@@ -1867,28 +1872,6 @@ def test_deux_erreurs_d_agent_identiques_bloquent_sans_monter():
     assert any("Seconde chance au même niveau" in t for t in textes_du_fil(c))
     (demande,) = blocages(c)
     assert "les agents se sont arrêtés deux fois de suite sur la même erreur" in demande["question"]
-
-
-@pytest.mark.parametrize(("limites", "nature"), [(["surcharge", "refus"], None),
-                                                 (["refus", "refus"], "blocage")])  # fmt: skip
-def test_une_limite_ou_une_surcharge_sont_des_erreurs_d_agent_sans_montee(limites, nature):
-    from atelier.agents import LIMITE_ATTEINTE, SURCHARGE
-
-    c = chantier([tache("A")])
-    agent = AgentSimule(perimetres={"A": ["a.py"]}, limites={"A": limites})
-    Moteur(c, agent, ControlesSimules()).executer()
-    a = c.tache("A")
-    assert a.etat == "revenu" and a.tentatives == 2 and c.montees == 0
-    assert departs(agent) == [("sonnet", "low")] * 2
-    assert [e["origine"] for e in a.historique] == ["agent"] * 2
-    erreurs = {"surcharge": SURCHARGE, "refus": LIMITE_ATTEINTE}
-    assert [erreurs[x] in e["detail"] for x, e in zip(limites, a.historique, strict=True)] == [
-        True, True,
-    ]  # fmt: skip
-    (demande,) = c.demandes
-    assert demande.get("nature") == nature
-    if nature is None:
-        assert "deux erreurs d'agent de suite" in demande["question"]
 
 
 def test_une_erreur_d_agent_apres_un_refus_repart_au_meme_niveau():

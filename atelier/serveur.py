@@ -746,7 +746,10 @@ class Atelier:
             self.carte.signaler()  # une tâche vient peut-être d'entrer dans le code
 
     def en_marche(self) -> bool:
-        return bool(self.fil and self.fil.is_alive())
+        """Le moteur mène le chantier : sa boucle tourne, ou le fil lancé pour elle n'y est pas
+        encore entré. Un fil qui finit après la sortie de la boucle ne compte plus : une décision
+        reçue à ce moment relance le moteur (`lancer`)."""
+        return self.moteur.en_route or self.moteur.fil_attendu(self.fil)
 
     def vue(self) -> dict:
         autorisations = self.guichet.ouvertes() if self.guichet else []

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 from atelier import places as module
-from atelier.places import REFUS_LIMITE_MAX, Places
+from atelier.places import Places
 
 T0 = 1_800_000_000.0  # une fausse heure Unix ; rien ici ne lit l'heure du mur
 MIN = 60.0
@@ -467,29 +467,26 @@ def test_un_verificateur_d_un_modele_suspendu_ne_prend_pas_de_jeton():
     assert places.servir(T0 + 3600 + 60) == ["A"]
 
 
-def test_les_refus_pour_limite_de_suite_rendent_la_tache_au_cinquieme():
+def test_une_surcharge_arrete_tout_lancement_deux_minutes_et_le_dit():
     places = Places()
-    heure, issues = T0, []
-    for _ in range(REFUS_LIMITE_MAX):
-        lancer(places, "A", heure=heure)
-        issue = places.refus("A", "five_hour", heure + MIN, heure)
-        issues.append((issue["de_suite"], issue["rendre"]))
-        heure = issue["reprise"]
-    assert issues == [(1, False), (2, False), (3, False), (4, False), (5, True)]
-    lancer(places, "A", heure=heure)
-    assert places.refus("A", "five_hour", heure + MIN, heure)["de_suite"] == 1  # compte reparti
+    lancer(places, "AB")
+    issue = places.surcharge("A", T0)
+    assert (issue["portee"], issue["reprise"], issue["nouvelle"]) == ("surcharge", T0 + 120, True)
+    assert places.en_ecriture() == 1  # l'ouvrier refusé rend sa place, B continue
+    for modele in ("sonnet", "opus", "haiku", "fable"):
+        assert not places.peut_partir(modele, T0 + 119)
+    assert places.peut_partir("sonnet", T0 + 120)
+    assert places.etat(T0)["suspensions"] == {"surcharge": T0 + 120}
+    assert "Claude est surchargé pour un moment" in places.etat(T0)["phrase"]
+    assert "limite de l'abonnement est atteinte" not in places.etat(T0)["phrase"]
 
 
-def test_un_agent_qui_finit_sans_refus_remet_le_compte_de_suite_a_zero():
+def test_une_surcharge_pendant_la_pause_la_prolonge_sans_la_doubler():
     places = Places()
-    heure = T0
-    for _ in range(4):
-        lancer(places, "A", heure=heure)
-        heure = places.refus("A", "five_hour", heure + MIN, heure)["reprise"]
-    places.partir("A", "sonnet", heure)
-    places.en_verification("A", "opus", heure)  # l'ouvrier est allé au bout
-    places.refus("A", "five_hour", heure + MIN, heure)
-    assert places.refus("A", "five_hour", heure + MIN, heure)["de_suite"] == 2
+    places.surcharge("A", T0)
+    issue = places.surcharge("B", T0 + 30)
+    assert issue["reprise"] == T0 + 150 and issue["nouvelle"]
+    assert places.surcharge("C", T0 + 200)["reprise"] == T0 + 320
 
 
 @pytest.mark.parametrize(
@@ -632,19 +629,17 @@ MODELES_VERIFICATEURS = ["opus", "opus", "fable", "sonnet"]
 QUI_AVANCENT = {"ouvrier", "controles", "verificateur"}  # phases qui finissent d'elles-mêmes
 
 
-def refuser(places, hasard, nom, heure) -> bool:
-    """Un refus pour limite tiré au hasard ; rend vrai si la tâche revient à la personne."""
+def refuser(places, hasard, nom, heure) -> None:
+    """Un refus pour limite tiré au hasard : jamais un échec, la tâche attend la reprise."""
     fin = hasard.choice([None, heure + MIN, heure + 10 * MIN, heure + 3600])
-    if places.refus(nom, hasard.choice(TYPES_DE_LIMITE), fin, heure)["rendre"]:
-        places.finir(nom, heure)
-        return True
-    return False
+    places.refus(nom, hasard.choice(TYPES_DE_LIMITE), fin, heure)
 
 
 def apres_ouvrier(places, hasard, nom, heure) -> str:
     tirage = hasard.random()
     if tirage < 0.15:
-        return "finie" if refuser(places, hasard, nom, heure) else "prete"
+        refuser(places, hasard, nom, heure)
+        return "prete"
     if tirage < 0.75:
         places.rendre_jeton(nom, heure)  # le moteur peut rendre le jeton pendant les contrôles
     return "controles"
@@ -668,7 +663,8 @@ def apres_verificateur(places, hasard, nom, heure) -> str:
         return "finie"
     if tirage < 0.85:
         return "reprise"  # rejet : l'ouvrier repart, la tâche tient encore son jeton
-    return "finie" if refuser(places, hasard, nom, heure) else "attend_jeton"
+    refuser(places, hasard, nom, heure)
+    return "attend_jeton"
 
 
 FINS_D_AGENT = {

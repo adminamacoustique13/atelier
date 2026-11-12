@@ -116,6 +116,10 @@ class Chantier:
     session: str = ""
     # Les règles retenues par « Toujours pendant ce chantier » : elles partent avec lui.
     autorisations_chantier: list[str] = field(default_factory=list)
+    # Le débit : places d'écriture, agents en marche, suspensions pour limite (`Places.etat`),
+    # rangé par le moteur pour l'affichage. Jamais relu par lui : après un redémarrage, le
+    # premier refus pour limite rétablit la suspension.
+    debit: dict = field(default_factory=dict)
     ouvert_le: str = field(default_factory=lambda: datetime.now().isoformat(timespec="minutes"))
 
     def tache(self, identifiant: str) -> Tache:

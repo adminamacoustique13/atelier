@@ -21,6 +21,9 @@ Le régulateur lit les limites de l'abonnement Claude, telles que le SDK les nom
   ne suspend que lui : `seven_day_sonnet` Sonnet, `seven_day_opus` Opus et, par prudence, Fable
   (`FAMILLES_SUSPENDUES`). L'ouvrier refusé rend sa place et son jeton : il repartira comme une
   tâche neuve quand la suspension se lèvera ; le vérificateur refusé reprend la tête de la file.
+  Un refus pour limite n'est jamais un échec de la tâche : rien n'est compté contre elle ;
+- Claude surchargé (pas une limite de l'abonnement) : plus aucun lancement pendant deux minutes
+  (`surcharge`).
 Une heure de remise à zéro mal formée ou déjà passée compte comme inconnue.
 
 Aucun interblocage, si l'appelant tient le contrat : à la fin de chaque agent, il appelle
@@ -49,8 +52,9 @@ ALERTE_SANS_HEURE_S = 30 * 60  # durée d'une alerte dont l'heure de remise à z
 MARGE_REPRISE_S = 60  # attente après l'heure de remise à zéro annoncée
 ATTENTE_SANS_HEURE_S = 15 * 60  # premier refus sans heure ; doublé à chaque refus suivant
 ATTENTE_SANS_HEURE_MAX_S = 60 * 60
-REFUS_LIMITE_MAX = 5  # refus pour limite de suite après lesquels la tâche revient
+PAUSE_SURCHARGE_S = 2 * 60  # plus aucun lancement quand Claude est surchargé
 TOUS = ""  # la portée d'une suspension qui vaut pour tous les modèles
+SURCHARGE = "surcharge"  # la portée de la pause pour surcharge, qui vaut aussi pour tous
 LIMITE_INCONNUE = "inconnue"
 LIMITES_PAR_MODELE = {"seven_day_opus": "opus", "seven_day_sonnet": "sonnet"}
 # Les familles que suspend une limite propre à un modèle. Celle d'Opus suspend aussi Fable, par
@@ -93,9 +97,10 @@ def famille(modele) -> str:
 
 
 def portees(modele) -> set[str]:
-    """Les portées de suspension qui touchent `modele` : TOUS, et la limite propre à sa famille."""
+    """Les portées de suspension qui touchent `modele` : TOUS, la surcharge, et la limite propre
+    à sa famille."""
     nom = famille(modele)
-    return {TOUS} | {p for p, familles in FAMILLES_SUSPENDUES.items() if nom in familles}
+    return {TOUS, SURCHARGE} | {p for p, familles in FAMILLES_SUSPENDUES.items() if nom in familles}
 
 
 def portee_de_limite(type_limite) -> str:
@@ -114,7 +119,7 @@ def _fin_a_venir(fin, heure: float) -> float | None:
     return float(fin)
 
 
-def _heure_dite(quand: float, heure: float) -> str:
+def heure_dite(quand: float, heure: float) -> str:
     """« à 14:05 » le même jour, « le 19/11 à 14:05 » un autre jour (heure locale)."""
     cible, maintenant = time.localtime(quand), time.localtime(heure)
     if cible[:3] == maintenant[:3]:
@@ -155,7 +160,6 @@ class Places:
         self._suspensions: dict[str, float] = {}  # portée -> heure de reprise
         self._paliers: dict[str, int] = {}  # portée -> refus sans heure depuis le dernier succès
         self._refus_au_rang: dict[str, int] = {}  # portée -> rang du dernier lancement au refus
-        self._de_suite: dict[str, int] = {}  # tâche -> refus pour limite de suite
         self._rang = 0  # le nombre de jetons donnés depuis le début
         self.regler(paralleles, agents_max)
 
@@ -244,7 +248,7 @@ class Places:
             return False
         etat = self._taches.setdefault(tache, _Tache())
         if etat.jeton:
-            self._reussite(tache, etat)  # son agent précédent a fini sans refus pour limite
+            self._reussite(etat)  # son agent précédent a fini sans refus pour limite
         self._retirer_de_l_attente(tache)
         etat.modele, etat.ecrit = modele, True
         self._donner_jeton(etat)
@@ -261,7 +265,7 @@ class Places:
         etat = self._taches.setdefault(tache, _Tache())
         etat.ecrit = False
         if etat.jeton:
-            self._reussite(tache, etat)  # l'ouvrier a fini sans refus pour limite
+            self._reussite(etat)  # l'ouvrier a fini sans refus pour limite
         etat.modele = modele
         if etat.jeton and self.suspension(modele, heure) is None:
             self._donner_jeton(etat)  # le jeton de l'ouvrier passe à son vérificateur
@@ -294,7 +298,7 @@ class Places:
         """L'agent de `tache` s'est arrêté ; elle garde sa place. Rend les tâches servies."""
         etat = self._taches.get(tache)
         if etat is not None and etat.jeton:
-            self._reussite(tache, etat)
+            self._reussite(etat)
             etat.jeton = False
         return self.servir(heure)
 
@@ -303,7 +307,7 @@ class Places:
         etat = self._taches.pop(tache, None)
         self._retirer_de_l_attente(tache)
         if etat is not None and etat.jeton:
-            self._reussite(tache, etat)
+            self._reussite(etat)
         return self.servir(heure)
 
     def _lacher_le_jeton(self, tache: str, heure: float) -> None:
@@ -323,13 +327,9 @@ class Places:
         if tache in self._attente:
             self._attente.remove(tache)
 
-    def _reussite(self, tache: str, etat: _Tache) -> None:
-        """Un agent de `tache` a fini sans refus pour limite.
-
-        Ses refus de suite repartent de zéro. L'attente sans heure repart de 15 minutes pour
-        chaque portée dont la suspension était déjà levée quand cet agent a reçu son jeton.
-        """
-        self._de_suite.pop(tache, None)
+    def _reussite(self, etat: _Tache) -> None:
+        """Un agent a fini sans refus pour limite : l'attente sans heure repart de 15 minutes pour
+        chaque portée dont la suspension était déjà levée quand il a reçu son jeton."""
         for portee in portees(etat.modele):
             if etat.rang > self._refus_au_rang.get(portee, 0):
                 self._paliers.pop(portee, None)
@@ -359,35 +359,38 @@ class Places:
     def refus(self, tache: str, type_limite, fin, heure: float) -> dict:
         """L'agent de `tache` a été refusé pour limite : suspend les lancements visés.
 
-        Rien d'autre n'est compté. Un ouvrier refusé rend sa place et son jeton : à la reprise,
-        `partir` le relancera comme une tâche neuve, sans quoi des ouvriers refusés tiendraient
-        les places pendant toute une limite propre à leur modèle. Un vérificateur refusé rend
-        son jeton et reprend la tête de la file : `servir` lui en rendra un à la reprise. Rend :
+        Rien n'est compté contre la tâche. Un ouvrier refusé rend sa place et son jeton : à la
+        reprise, `partir` le relancera comme une tâche neuve, sans quoi des ouvriers refusés
+        tiendraient les places pendant toute une limite propre à leur modèle. Un vérificateur
+        refusé rend son jeton et reprend la tête de la file : `servir` lui en rendra un à la
+        reprise. Rend :
         - `portee` : TOUS (« ») ou la famille visée (« opus », « sonnet ») ;
         - `reprise` : l'heure Unix où les lancements visés reprennent ;
         - `nouvelle` : vrai si la suspension commence ou change d'heure (à dire au fil) ;
-        - `de_suite` : les refus pour limite de suite de cette tâche, celui-ci compris ;
-        - `rendre` : vrai au cinquième, la tâche revient à la personne (le compte repart) ;
         - `servis` : les vérificateurs qui reçoivent un jeton (modèle non suspendu).
         """
         portee = portee_de_limite(type_limite)
+        return self._suspendre(tache, portee, self._reprise_apres_refus(portee, fin, heure), heure)
+
+    def surcharge(self, tache: str, heure: float) -> dict:
+        """L'agent de `tache` a été refusé parce que Claude est surchargé, sans limite de
+        l'abonnement atteinte : plus aucun lancement pendant `PAUSE_SURCHARGE_S`, que prolonge
+        une surcharge suivante. Le reste comme `refus`, qui dit ce qu'elle rend (portée
+        SURCHARGE)."""
+        avant = self._suspensions.get(SURCHARGE)
+        reprise = heure + PAUSE_SURCHARGE_S
+        return self._suspendre(tache, SURCHARGE, max(reprise, avant or reprise), heure)
+
+    def _suspendre(self, tache: str, portee: str, reprise: float, heure: float) -> dict:
+        """Suspend `portee` jusqu'à `reprise` et retire l'agent refusé de `tache` (`refus`)."""
         avant = self._suspensions.get(portee)
-        reprise = self._reprise_apres_refus(portee, fin, heure)
         self._suspensions[portee] = reprise
         self._refus_au_rang[portee] = self._rang
         self._arreter_pour_limite(tache)
-        de_suite = self._de_suite.get(tache, 0) + 1
-        rendre = de_suite >= REFUS_LIMITE_MAX
-        if rendre:
-            self._de_suite.pop(tache, None)
-        else:
-            self._de_suite[tache] = de_suite
         return {
             "portee": portee,
             "reprise": reprise,
             "nouvelle": avant is None or heure >= avant or reprise != avant,
-            "de_suite": de_suite,
-            "rendre": rendre,
             "servis": self.servir(heure),
         }
 
@@ -427,8 +430,9 @@ class Places:
     def etat(self, heure: float) -> dict:
         """Les places et le régulateur pour l'affichage, avec une phrase en français.
 
-        `reprise` est l'heure Unix de reprise d'une suspension de tous les modèles (None sans
-        elle) ; `suspensions` donne celles propres à un modèle (famille -> heure Unix).
+        `reprise` est l'heure Unix de reprise d'une suspension de tous les modèles pour limite
+        (None sans elle) ; `suspensions` donne les autres (portée -> heure Unix) : celles propres
+        à un modèle (sa famille) et la pause pour surcharge (SURCHARGE).
         """
         suspensions = {p: r for p, r in self._suspensions.items() if heure < r}
         alertes = [jusqu for _, jusqu in self._alertes.values() if heure < jusqu]
@@ -459,20 +463,34 @@ def _phrase(etat: dict, heure: float) -> str:
         phrases.append(
             f"Une limite de l'abonnement est proche : {_compte(etat['places_effectives'], 'place')}"
             f" au lieu de {etat['places']}, l'alerte prend fin "
-            f"{_heure_dite(etat['alerte_jusqu_a'], heure)}."
+            f"{heure_dite(etat['alerte_jusqu_a'], heure)}."
         )
     if etat["reprise"] is not None:
-        phrases.append(
-            "Une limite de l'abonnement est atteinte : plus aucun lancement, ils reprennent "
-            f"{_heure_dite(etat['reprise'], heure)}."
-        )
+        phrases.append(phrase_de_suspension(TOUS, etat["reprise"], heure))
     for portee, reprise in sorted(etat["suspensions"].items()):
-        touchees = " ni ".join(_de(f) for f in FAMILLES_SUSPENDUES.get(portee, (portee,)))
-        phrases.append(
-            f"La limite propre à {FAMILLES_FR.get(portee, portee)} est atteinte : plus aucun "
-            f"lancement {touchees}, ils reprennent {_heure_dite(reprise, heure)}."
-        )
+        phrases.append(phrase_de_suspension(portee, reprise, heure))
     return " ".join(phrases)
+
+
+def phrase_de_suspension(portee: str, reprise: float, heure: float) -> str:
+    """La phrase d'une suspension en cours : une limite de tous les modèles (TOUS), la pause
+    pour surcharge (SURCHARGE), ou une limite propre à un modèle."""
+    quand = heure_dite(reprise, heure)
+    if portee == TOUS:
+        return (
+            "Une limite de l'abonnement est atteinte : plus aucun lancement, ils reprennent "
+            f"{quand}."
+        )
+    if portee == SURCHARGE:
+        return (
+            "Claude est surchargé pour un moment (ce n'est pas une limite de l'abonnement) : plus "
+            f"aucun lancement, ils reprennent {quand}."
+        )
+    touchees = " ni ".join(_de(f) for f in FAMILLES_SUSPENDUES.get(portee, (portee,)))
+    return (
+        f"La limite propre à {FAMILLES_FR.get(portee, portee)} est atteinte : plus aucun "
+        f"lancement {touchees}, ils reprennent {quand}."
+    )
 
 
 def _de(famille_: str) -> str:
