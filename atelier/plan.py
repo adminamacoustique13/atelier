@@ -1,11 +1,14 @@
 """La forme d'un plan : combien de tâches travaillent en même temps, et ce qui les retient.
 
-Le moteur lance ensemble toutes les tâches prêtes : dépendances vérifiées, périmètre libre.
-Ce module rejoue ces deux règles sur un plan, sans rien lancer, pour dire en combien de vagues
-il tient. Il ne lit ni n'écrit rien : il prend des tâches et rend des listes et du texte.
+Le moteur lance ensemble toutes les tâches prêtes : dépendances vérifiées, périmètre libre
+(hors fichiers partagés). Ce module rejoue ces deux règles sur un plan, sans rien lancer, pour
+dire en combien de vagues il tient. Il ne lit ni n'écrit rien : il prend des tâches et rend des
+listes et du texte.
 """
 
 from __future__ import annotations
+
+from collections.abc import Iterable
 
 from atelier.controles import se_chevauchent
 
@@ -28,32 +31,37 @@ def _et(mots: list[str]) -> str:
     return ", ".join(mots[:-1]) + " et " + mots[-1]
 
 
-def _premier_recoupement(a: list[str], b: list[str]) -> tuple[str, str]:
-    """Le premier couple de motifs (de `a`, de `b`) qui peuvent toucher le même fichier."""
+def _premier_recoupement(a: list[str], b: list[str], partages: list[str]) -> tuple[str, str]:
+    """Le premier couple de motifs (de `a`, de `b`) qui peuvent toucher un même fichier non
+    partagé."""
     for x in a:
         for y in b:
-            if x == y or se_chevauchent([x], [y]):
+            if se_chevauchent([x], [y], partages):
                 return x, y
     return "", ""
 
 
-def _vague_suivante(restantes, passees, idents, perimetres, chevauchements) -> list[int]:
+def _vague_suivante(
+    restantes, passees, idents, perimetres, chevauchements, partages: list[str]
+) -> list[int]:
     """Une vague : dans l'ordre du plan, chaque tâche prête qui ne chevauche aucune déjà prise.
 
     C'est la règle de `Moteur._prochaine` : la première prête dans le plan part, et une tâche
-    prête qui chevauche une tâche partie attend la vague suivante. Les tâches sont suivies par
-    leur rang dans le plan, non par leur identifiant : le moteur lance aussi deux tâches de
-    même identifiant. Rend les rangs de la vague.
+    prête qui chevauche une tâche partie, hors fichiers partagés, attend la vague suivante. Les
+    tâches sont suivies par leur rang dans le plan, non par leur identifiant : le moteur lance
+    aussi deux tâches de même identifiant. Rend les rangs de la vague.
     """
     vague: list[int] = []
     for rang, deps in restantes:
         if not set(deps) <= passees:
             continue
-        gene = next((a for a in vague if se_chevauchent(perimetres[rang], perimetres[a])), None)
+        gene = next(
+            (a for a in vague if se_chevauchent(perimetres[rang], perimetres[a], partages)), None
+        )
         if gene is None:
             vague.append(rang)
             continue
-        x, y = _premier_recoupement(perimetres[rang], perimetres[gene])
+        x, y = _premier_recoupement(perimetres[rang], perimetres[gene], partages)
         ligne = [idents[rang], idents[gene], x, y]
         if ligne not in chevauchements:
             chevauchements.append(ligne)
@@ -155,11 +163,12 @@ def _plus_longue_chaine(taches, dependances: dict[str, list[str]]) -> int:
     return max(longueurs.values(), default=0)
 
 
-def forme_du_plan(taches: list) -> dict:
+def forme_du_plan(taches: list, partages: Iterable[str] = ()) -> dict:
     """Calcule la forme d'un plan : ses vagues, sa largeur, ce qui le retient, en clair.
 
     `taches` : des objets `Tache` ou des dicts du plan (clés `id`, `depend_de`, `perimetre`),
-    dans l'ordre du plan. Rend un dict :
+    dans l'ordre du plan. `partages` : les motifs des fichiers partagés du profil
+    (`fichiers_partages`), qui ne retiennent aucune tâche. Rend un dict :
     - `taches` (int) : le nombre de tâches ;
     - `vagues` (list[list[str]]) : les identifiants de chaque vague, dans l'ordre du plan ;
     - `nb_vagues` (int), `plus_grande_vague` (int), `plus_longue_chaine` (int) ;
@@ -176,6 +185,7 @@ def forme_du_plan(taches: list) -> dict:
     champs = [_champs(t) for t in taches]
     idents = [ident for ident, _, _ in champs]
     perimetres = [perimetre for _, _, perimetre in champs]
+    partages = list(partages)  # relu à chaque paire de tâches
     dependances: dict[str, list[str]] = {}
     for ident, deps, _ in champs:
         dependances[ident] = list(dict.fromkeys(dependances.get(ident, []) + deps))
@@ -184,7 +194,7 @@ def forme_du_plan(taches: list) -> dict:
     chevauchements: list[list[str]] = []
     passees: set[str] = set()
     while restantes:
-        vague = _vague_suivante(restantes, passees, idents, perimetres, chevauchements)
+        vague = _vague_suivante(restantes, passees, idents, perimetres, chevauchements, partages)
         if not vague:
             break  # plus rien de prêt : dépendance inconnue ou boucle, dites plus bas
         vagues.append([idents[r] for r in vague])

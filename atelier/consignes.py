@@ -4,6 +4,13 @@ from __future__ import annotations
 
 import json
 
+from atelier.controles import (
+    MARQUEURS,
+    SUPPRIME_PAR_LA_TACHE,
+    SUPPRIME_SUR_LA_PRINCIPALE,
+    fichiers_partages,
+    motif_partage,
+)
 from atelier.modele import Contrat, Tache
 
 # Le tableau de bord affiche la dernière ligne de cette forme : la personne responsable voit
@@ -71,6 +78,32 @@ def _commandes(profil: dict) -> str:
     return "\n".join(f"- `{c}`" for c in profil.get("commandes", [])) or "- (aucune)"
 
 
+# Ce que l'ouvrier doit savoir d'un fichier partagé de son périmètre, selon sa fusion.
+REGLES_DE_FUSION = {
+    "union": "fusion « union » : ajoute seulement des lignes, sans modifier ni retirer aucune "
+    "ligne existante. À la fusion, une ligne modifiée des deux côtés garderait ses deux versions.",
+    "git": "fusion « git » : change le moins de lignes possible ; en cas de conflit, l'atelier te "
+    "rendra la main pour le résoudre.",
+}
+
+
+def _partages_du_perimetre(tache: Tache, profil: dict) -> str:
+    """Les fichiers partagés du périmètre, chacun avec la règle de sa fusion ; "" s'il n'y en a
+    pas."""
+    partages = fichiers_partages(profil)
+    lignes = []
+    for entree in tache.perimetre:
+        motif = motif_partage(entree, partages)
+        if motif:
+            lignes.append(f"- `{entree}` : {REGLES_DE_FUSION[partages[motif]]}")
+    if not lignes:
+        return ""
+    return (
+        "\n\nFichiers partagés : d'autres tâches peuvent les modifier en même temps que toi, et "
+        "l'atelier réunit vos changements à l'enregistrement.\n" + "\n".join(lignes)
+    )
+
+
 def consigne_ouvrier(tache: Tache, contrat: Contrat, profil: dict, remarques: str = "") -> str:
     """Rédige la consigne d'un ouvrier : tâche, pourquoi, critères, périmètre, interdits."""
     regles = "\n".join(f"- {r}" for r in profil.get("regles", [])) or "- (aucune règle propre)"
@@ -94,7 +127,7 @@ def consigne_ouvrier(tache: Tache, contrat: Contrat, profil: dict, remarques: st
 
 ## Ton périmètre
 Tu peux créer et modifier uniquement :
-{chr(10).join(f"- `{p}`" for p in tache.perimetre)}
+{chr(10).join(f"- `{p}`" for p in tache.perimetre)}{_partages_du_perimetre(tache, profil)}
 
 ## Contrats
 Tu fournis : {tache.fournit or "rien de particulier"}
@@ -167,7 +200,39 @@ REPRISES = {
         "sortie",
         "Trouve ce qui les fait échouer et corrige-le.",
     ),
+    "integration": (
+        "Ton livrable était accepté, mais d'autres tâches sont entrées entre-temps dans la "
+        "branche principale et ont modifié les mêmes fichiers que toi. Ta copie est maintenant "
+        "posée sur la branche principale actuelle, avec ton travail par-dessus ; git n'a pas pu "
+        "réunir les deux versions de ces fichiers",
+        "Dans chaque fichier à marqueurs de conflit, résous chaque conflit avec l'outil Edit : "
+        "entre « <<<<<<< » et « ======= », ta version ; entre « ======= » et « >>>>>>> », celle "
+        "de la branche principale. Garde les deux intentions : réunis-les en un seul texte qui "
+        "fait ce que chacune voulait, puis retire les trois lignes de marqueurs. Un fichier "
+        "supprimé d'un côté n'a pas de marqueurs : fais ce que la liste dit pour lui. Ne choisis "
+        "pas un côté en jetant l'autre, et n'emploie aucune commande git : l'Atelier enregistre "
+        "après vérification. Il refuse le livrable s'il reste des marqueurs.",
+    ),
 }
+
+# Ce que la liste des fichiers en conflit dit de chacun, selon sa nature (`poser_conflits`).
+CONFLITS_EN_CLAIR = {
+    MARQUEURS: "",
+    SUPPRIME_SUR_LA_PRINCIPALE: " : supprimé sur la branche principale, alors que tu l'avais "
+    "modifié. Garde la suppression : supprime ce fichier de ta copie et ne le fais pas revivre "
+    "ailleurs ; dis dans ton compte rendu ce que ta modification apportait.",
+    SUPPRIME_PAR_LA_TACHE: " : modifié sur la branche principale, alors que tu l'avais supprimé. "
+    "Ta copie a gardé la version de la branche principale : garde-la, ne le supprime pas de "
+    "nouveau.",
+}
+
+
+def conflits_en_clair(conflits: dict[str, str]) -> str:
+    """La liste des fichiers en conflit (chemin -> nature), un par ligne, avec ce qu'il faut
+    faire d'un fichier supprimé d'un côté."""
+    return "\n".join(
+        f"- `{chemin}`{CONFLITS_EN_CLAIR.get(nature, '')}" for chemin, nature in conflits.items()
+    )
 
 
 def consigne_reprise(
@@ -300,13 +365,33 @@ ne recalent pas, un élément par remarque : "remarques": ["..."]."""
 _STRICT = """Sois strict : n'écris "valide": true que pour ce que tu as constaté toi-même."""
 
 
+def _conflits_resolus(conflits: str) -> str:
+    """Pour le vérificateur qui suit la reprise d'un conflit de fusion : ce que l'agent a
+    résolu, et ce qu'il faut contrôler ; "" sans conflit."""
+    if not conflits.strip():
+        return ""
+    return f"""
+## Conflit de fusion résolu
+Ce livrable avait été accepté, puis il a buté sur un conflit avec la branche principale, où \
+d'autres tâches sont entrées entre-temps. L'agent a repris sa copie, posée sur la branche \
+principale actuelle, pour résoudre ces fichiers ; voici la liste telle qu'il l'a reçue :
+{conflits.strip()}
+Pour chacun, compare le livrable à la version de la branche principale (`git show \
+HEAD:<chemin>`) : ce que la branche principale y avait mis doit être gardé, l'intention de \
+l'agent aussi, aucun marqueur de conflit ne doit rester, et un fichier supprimé sur la branche \
+principale ne doit pas revivre. Recale si ce n'est pas le cas.
+"""
+
+
 def consigne_verificateur(
-    tache: Tache, contrat: Contrat, profil: dict, copie_jetable: bool = False
+    tache: Tache, contrat: Contrat, profil: dict, copie_jetable: bool = False, conflits: str = ""
 ) -> str:
     """Rédige la consigne du vérificateur : il juge le livrable et la consigne, sans corriger.
 
     Avec `copie_jetable`, il travaille dans une copie du livrable que l'atelier jettera, et
-    peut y faire ses essais ; sinon il relit en lecture seule.
+    peut y faire ses essais ; sinon il relit en lecture seule. `conflits` : après la reprise
+    d'un conflit de fusion, la liste des fichiers résolus (`conflits_en_clair`), qu'il contrôle
+    en plus.
     """
     cadre = COPIE_JETABLE if copie_jetable else LECTURE_SEULE
     essais = (
@@ -320,7 +405,7 @@ def consigne_verificateur(
 {_but_et_criteres(tache, contrat)}
 
 {_perimetre_verifie(tache)}
-
+{_conflits_resolus(conflits)}
 ## Ce que tu dois faire
 1. Vérifie chaque critère par toi-même, en exécutant réellement le code quand c'est possible.
 2. Vérifie le but, pas seulement les critères. Cherche activement à mettre le livrable en défaut.
@@ -489,10 +574,11 @@ ce type : classe selon ce que coûterait une erreur passée inaperçue.
 
 Un plan large va vite. L'atelier lance en même temps toutes les tâches prêtes. Une tâche est \
 prête quand ses dépendances sont vérifiées et entrées dans la branche principale, et que les \
-fichiers de son périmètre ne sont pris par aucune tâche en cours. Chaque dépendance et chaque \
-fichier partagé coûte donc une attente : la tâche retenue ne part qu'une fois l'autre écrite, \
-vérifiée et enregistrée, souvent une demi-heure plus tard. Des tâches enchaînées passent l'une \
-après l'autre ; des tâches indépendantes travaillent ensemble.
+fichiers de son périmètre ne sont pris par aucune tâche en cours (sauf les fichiers déclarés \
+partagés, dits plus bas). Chaque dépendance et chaque fichier commun coûte donc une attente : \
+la tâche retenue ne part qu'une fois l'autre écrite, vérifiée et enregistrée, souvent une \
+demi-heure plus tard. Des tâches enchaînées passent l'une après l'autre ; des tâches \
+indépendantes travaillent ensemble.
 - Ne déclare une dépendance que si la tâche a réellement besoin que le code de l'autre existe \
 pour être écrite et contrôlée. Pas par prudence, ni pour imposer un ordre de lecture : si deux \
 tâches doivent seulement s'accorder sur une interface, décris-la dans « fournit » et \
@@ -506,25 +592,31 @@ ses tests s'en servent) en dépend vraiment, même sans fichier commun. Lancée 
 dossiers entiers. Un motif avec `*` couvre tout ce qui est en dessous, sous-dossiers compris, \
 et retient toute autre tâche qui y touche. Donne aussi à chaque tâche son propre fichier de \
 tests : un fichier de tests commun suffit à faire attendre l'une pour l'autre.
+- Un fichier déclaré partagé peut figurer dans le périmètre de plusieurs tâches parallèles : \
+il ne retient personne, et l'atelier fusionne les changements de chacune à l'entrée dans la \
+branche principale. Les fichiers déclarés partagés sont dans `chantier/profil.json`, clé \
+« fichiers_partages » : lis-la avant de découper. Les trois règles qui suivent, et la tâche \
+de raccord, ne valent que pour un fichier commun non déclaré.
 - Deux tâches qui toucheraient le même fichier sans avoir besoin l'une de l'autre sont \
 redécoupées pour ne plus le partager, ou ce fichier va à la tâche de raccord. Une dépendance \
 n'est pas le moyen de régler un partage de fichier : elle ferait une file de \
 deux tâches qui pouvaient travailler ensemble.
-- Les fichiers que plusieurs tâches voudraient toucher (journal, documentation, fichier \
-d'assemblage ou de branchement, où l'on inscrit chaque nouveau morceau) sortent des tâches. \
-Confie-les à une tâche finale de raccord, qui dépend des autres et fait ces ajouts en une fois.
-- Quand une règle du projet demande que chaque tâche touche un même fichier (une ligne au \
-journal des décisions par tâche, par exemple), ce fichier n'entre dans le périmètre d'aucune \
-autre tâche que celle de raccord : sinon elles passeraient toutes l'une après l'autre. Chaque \
-ouvrier écrit à la place, dans sa fiche de relais (`chantier/relais/<id de la tâche>.md`), \
-ce qu'il y aurait mis : ce \
-dossier est toujours permis, et la fiche entre dans la branche principale avec le travail de la \
-tâche. La tâche de raccord dépend de ces tâches et recopie ces lignes dans le fichier ; \
-écris-le dans ses critères, en nommant le fichier et les fiches à relire.
+- Les fichiers non déclarés que plusieurs tâches voudraient toucher (journal, documentation, \
+fichier d'assemblage ou de branchement, où l'on inscrit chaque nouveau morceau) sortent des \
+tâches. Confie-les à une tâche finale de raccord, qui dépend des autres et fait ces ajouts en \
+une fois.
+- Quand une règle du projet demande que chaque tâche touche un même fichier non déclaré (une \
+ligne au journal des décisions par tâche, par exemple), ce fichier n'entre dans le périmètre \
+d'aucune autre tâche que celle de raccord : sinon elles passeraient toutes l'une après l'autre. \
+Chaque ouvrier écrit à la place, dans sa fiche de relais (`chantier/relais/<id de la tâche>.md`), \
+ce qu'il y aurait mis : ce dossier est toujours permis, et la fiche entre dans la branche \
+principale avec le travail de la tâche. La tâche de raccord dépend de ces tâches et recopie \
+ces lignes dans le fichier ; écris-le dans ses critères, en nommant le fichier et les fiches à \
+relire.
 - Une grosse tâche se coupe en morceaux indépendants, qui partent ensemble, plutôt qu'en \
 étapes enchaînées, chaque fois que c'est possible.
 - Vise le moins de vagues possible. Avant de rendre le plan, relis-le : pour chaque dépendance \
-et chaque fichier partagé, demande-toi s'il est nécessaire, et retire-le s'il ne l'est pas."""
+et chaque fichier commun, demande-toi s'il est nécessaire, et retire-le s'il ne l'est pas."""
 
 
 def consigne_planification(objectif: str, profil: dict) -> str:

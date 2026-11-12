@@ -36,6 +36,7 @@ from atelier.agents import (
 from atelier.consignes import (
     PREUVE_MAX_CARACTERES,
     PREUVES_MAX,
+    conflits_en_clair,
     consigne_ouvrier,
     consigne_planification,
     consigne_reprise,
@@ -44,7 +45,7 @@ from atelier.consignes import (
     dernier_json,
     lire_verdict,
 )
-from atelier.controles import hors_perimetre, se_chevauchent
+from atelier.controles import fichiers_partages, hors_perimetre, motif_partage, se_chevauchent
 from atelier.guichet import ARRETE, CHAINE
 from atelier.modele import Chantier, Tache
 from atelier.places import Places, heure_dite, phrase_de_suspension
@@ -120,8 +121,9 @@ class Jugement:
     """Ce que le moteur conclut d'une passe de l'ouvrier : accepté (`motif` None) ou refusé.
 
     `complet` est ce que reçoit l'ouvrier repris : le verdict entier, la liste des fichiers hors
-    périmètre, ou la fin de la sortie des contrôles. `verdict` est le texte du vérificateur de
-    cette passe (ses `VERDICT_GARDE` derniers caractères), s'il a fini son tour. `reprenable` dit
+    périmètre, la fin de la sortie des contrôles, ou la liste des fichiers en conflit de fusion
+    (`conflits_en_clair`). `verdict` est le texte du vérificateur de cette passe (ses
+    `VERDICT_GARDE` derniers caractères), s'il a fini son tour. `reprenable` dit
     si l'ouvrier peut reprendre la main ; `reprise`, si la passe jugée était une reprise.
     `empechements` : ce que l'ouvrier ou le vérificateur ont signalé comme les empêchant de
     travailler, et les outils refusés à l'ouvrier (`refus.empechements`) ; `refuses_seuls` :
@@ -624,16 +626,18 @@ class Moteur:
     # --- ordonnancement ------------------------------------------------------------
 
     def _prochaine(self, sauf: Collection[str] = ()) -> Tache | None:
-        """Rend une tâche prête : dépendances vérifiées, périmètre libre ; aucune de `sauf`."""
+        """Rend une tâche prête : dépendances vérifiées, périmètre libre hors fichiers partagés ;
+        aucune de `sauf`."""
         taches = self.chantier.taches
         verifiees = {t.id for t in taches if t.etat == "verifie"}
         actives = [t for t in taches if t.etat in ACTIFS]
+        partages = fichiers_partages(self.profil)
         for tache in taches:
             if tache.id in sauf:
                 continue
             if tache.etat != "a_lancer" or not set(tache.depend_de) <= verifiees:
                 continue
-            if any(se_chevauchent(tache.perimetre, a.perimetre) for a in actives):
+            if any(se_chevauchent(tache.perimetre, a.perimetre, partages) for a in actives):
                 continue
             return tache
         return None
@@ -978,7 +982,8 @@ class Moteur:
             return False
         if jugement.origine == "agent":
             return self._apres_erreur_d_agent(tache, jugement)
-        return self._apres_echec(tache, jugement.motif, jugement.detail, jugement.reprise)
+        repris = self._repris_hors_fusion(tache)
+        return self._apres_echec(tache, jugement.motif, jugement.detail, repris)
 
     def _passe(
         self, tache: Tache, dossier, resultat, precedent: Jugement | None = None
@@ -1021,7 +1026,11 @@ class Moteur:
         return replace(jugement, empechements=tous, refuses_seuls=tuple(seuls))
 
     def _enregistrer(self, tache: Tache, dossier, jugement: Jugement) -> Jugement:
-        """Fait entrer le livrable accepté dans la branche principale ; rend le jugement final."""
+        """Fait entrer le livrable accepté dans la branche principale ; rend le jugement final.
+
+        Un refus d'enregistrement venu d'un conflit de fusion se reprend à chaud, une fois par
+        départ (`_conflit_a_reprendre`) ; les autres ne se reprennent pas.
+        """
         with self.verrou:  # dernier mot : un arrêt demandé jusqu'ici l'emporte
             if self._arretee(tache):
                 return ARRET
@@ -1032,19 +1041,74 @@ class Moteur:
             return jugement
         with self.verrou:  # conflit, ou contrôles rouges une fois mêlé à la branche principale
             self._enregistrement.discard(tache.id)
-        return replace(jugement, motif="ne_sait_pas", detail=probleme, origine="integration")
+        refus = replace(jugement, motif="ne_sait_pas", detail=probleme, origine="integration")
+        return self._conflit_a_reprendre(tache, dossier, refus)
+
+    def _conflit_a_reprendre(self, tache: Tache, dossier, refus: Jugement) -> Jugement:
+        """Le refus d'enregistrement, rendu reprenable s'il vient d'un conflit de fusion sur des
+        fichiers déclarés partagés en « git ».
+
+        Les contrôles laissent alors ces fichiers, à marqueurs, dans la copie de l'ouvrier
+        (`poser_conflits`), qui les reçoit à sa reprise. Une seule reprise de fusion par départ,
+        et l'historique suffit à le savoir : un départ ne continue après un refus d'enregistrement
+        que si ce refus a été repris ainsi. Un refus d'enregistrement déjà tracé dans ce départ
+        veut donc dire que sa reprise de fusion a eu lieu.
+
+        Dans tous les autres cas, le refus reste tel quel (le chemin d'avant) :
+        sans `poser_conflits` (contrôles simulés), sans conflit, un fichier en conflit qui n'est
+        pas déclaré en « git », ou une seconde fois. La copie est alors jetée et le départ
+        suivant repart de la branche principale.
+        """
+        poser = getattr(self.controles, "poser_conflits", None)
+        motifs = [m for m, fusion in fichiers_partages(self.profil).items() if fusion == "git"]
+        with self.verrou:
+            deja = any(e.get("origine") == "integration" for e in self._passes_du_depart(tache))
+        if poser is None or not motifs or deja:
+            return refus
+        conflits = poser(tache, dossier)
+        if not conflits or not all(motif_partage(chemin, motifs) for chemin in conflits):
+            return refus
+        detail = (
+            "Conflit avec la branche principale, où d'autres tâches sont entrées entre-temps, "
+            f"dans : {', '.join(conflits)}."
+        )
+        return replace(refus, detail=detail, complet=conflits_en_clair(conflits), reprenable=True)
+
+    def _passes_du_depart(self, tache: Tache) -> list[dict]:
+        """Sous le verrou : les entrées d'historique du départ en cours, reprises comprises."""
+        return [e for e in tache.historique if e.get("tentative") == tache.tentatives]
+
+    def _repris_hors_fusion(self, tache: Tache) -> bool:
+        """Dit si ce départ a eu une reprise après un refus autre qu'un conflit de fusion : elle
+        seule tient lieu de seconde chance pour l'escalade (`_apres_echec`).
+
+        Seules comptent les passes tracées comme reprises (`reprise: true`), chacune jugée par
+        l'entrée qui la précède : une reprise qui suit un refus d'enregistrement est une reprise
+        de fusion. Une autre entrée du même numéro, comme un arrêt avant le départ (tracé sous
+        le numéro du départ suivant), n'est pas une reprise.
+        """
+        with self.verrou:
+            passes = self._passes_du_depart(tache)
+        return any(
+            apres.get("reprise") and avant.get("origine") != "integration"
+            for avant, apres in zip(passes, passes[1:], strict=False)
+        )
 
     # --- la reprise à chaud ---------------------------------------------------------
 
     def _reprises(self, tache: Tache, dossier, session: str, jugement: Jugement) -> Jugement:
-        """Redonne la main à l'ouvrier refusé, au plus `REPRISES_PAR_DEPART` fois pour ce départ.
+        """Redonne la main à l'ouvrier refusé, au plus `REPRISES_PAR_DEPART` fois pour ce départ,
+        sans compter la reprise d'un conflit de fusion, bornée à part (`_conflit_a_reprendre`).
 
         Rend le jugement de la dernière passe : celui de la reprise, ou le refus d'origine si
         aucune reprise n'a pu partir (refus qui ne se reprend pas, session perdue).
         """
-        for _ in range(REPRISES_PAR_DEPART):
-            if not jugement.reprenable:
-                break
+        reprises = 0
+        while jugement.reprenable:
+            if jugement.origine != "integration":
+                if reprises == REPRISES_PAR_DEPART:
+                    break
+                reprises += 1
             jugement = self._reprise(tache, dossier, session, jugement)
         return jugement
 
@@ -1270,7 +1334,7 @@ class Moteur:
         en_plus = {"copie_jetable": True} if copie else {}
         try:
             avis = self.agent.executer(
-                self._consigne_de_verification(tache, precedent if restreinte else None, copie),
+                self._consigne_de_verification(tache, precedent, copie),
                 modele,
                 effort,
                 copie or dossier,
@@ -1285,11 +1349,14 @@ class Moteur:
         return avis
 
     def _consigne_de_verification(self, tache: Tache, precedent: Jugement | None, copie) -> str:
-        """La consigne complète, ou la consigne restreinte qui suit la reprise d'un verdict."""
+        """La consigne restreinte qui suit la reprise d'un verdict, sinon la consigne complète ;
+        après la reprise d'un conflit de fusion, celle-ci nomme les fichiers résolus."""
         contrat, jetable = self.chantier.contrat, bool(copie)
-        if precedent is None:
-            return consigne_verificateur(tache, contrat, self.profil, jetable)
-        return consigne_reverification(tache, contrat, self.profil, precedent.verdict, jetable)
+        origine = precedent.origine if precedent is not None else ""
+        if origine == "verdict":
+            return consigne_reverification(tache, contrat, self.profil, precedent.verdict, jetable)
+        conflits = precedent.complet if origine == "integration" else ""
+        return consigne_verificateur(tache, contrat, self.profil, jetable, conflits)
 
     def _copie_de_verification(self, tache: Tache, dossier):
         """La copie jetable où le vérificateur fait ses essais, ou None : il relit alors la

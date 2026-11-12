@@ -14,7 +14,7 @@ from pathlib import Path
 from atelier import archives
 from atelier import carte as carte_du_code
 from atelier.agents import AgentClaude
-from atelier.controles import ControlesGit, expliquer_refus_git
+from atelier.controles import ControlesGit, expliquer_refus_git, fichiers_partages
 from atelier.git import IDENTITE_DE_REPLI, lancer_git
 from atelier.modele import Chantier, Contrat, ProjetImpossible
 from atelier.serveur import Atelier
@@ -103,7 +103,10 @@ def ouvrir_depot(depot: Path) -> Atelier:
     profil = lire_profil(depot)
     chantier = lire_etat(depot, profil.get("nom", depot.name))
     controles = ControlesGit(
-        depot, profil.get("commandes", []), delai_s=profil.get("delai_controles_s")
+        depot,
+        profil.get("commandes", []),
+        delai_s=profil.get("delai_controles_s"),
+        partages=fichiers_partages(profil),
     )
     return Atelier(depot, chantier, AgentClaude(profil), controles, profil)
 
