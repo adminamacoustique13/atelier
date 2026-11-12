@@ -23,14 +23,14 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M9.1. La carte du code écrite par la fonction commune | vérifié | Sonnet | mécanique, diff relu | 1 | 820 tests (1 nouveau, rouge avant) |
 | M11a. Le guichet simulé sort du produit et rejoint les tests | vérifié | Sonnet | mécanique, diff relu | 1 | déplacement à l'identique ; seules les lignes d'import des tests changent |
 | M11b. Les clés envoyées à la page que personne ne lit | en cours | Opus | bornée, Opus | 1 | |
-| V0. Vitesse : mesurer le temps de chaque phase d'une tâche | en cours | Opus | bornée, Fable | 1 | |
-| V1. Vitesse : un plan large, et sa largeur calculée | en cours | Opus | complète, Fable | 1 | |
-| V2. Vitesse : les niveaux de vérification et le dosage de départ | en cours | Opus | bornée, Fable | 1 | |
+| V0. Vitesse : mesurer le temps de chaque phase d'une tâche | vérifié | Opus | bornée, Opus : accepté | 1 | 861 tests ; ancien et nouveau moteur identiques sur 11 plans ; mesures justes à 0,1 % |
+| V1. Vitesse : un plan large, et sa largeur calculée | vérifié | Opus | complète, Fable : accepté | 1 | 873 tests ; vagues calculées identiques à celles du vrai moteur sur 36 plans |
+| V2. Vitesse : les niveaux de vérification et le dosage de départ | vérifié | Opus | bornée, Opus : recalé puis corrigé | 2 | 844 tests ; le test du plafond de la relance seule éprouve de nouveau sa garde |
 | V5. Vitesse : le pont lit les limites de l'abonnement et sait reprendre une session | en cours | Opus | complète, Fable | 1 | |
 | V3. Vitesse, moteur : vérification proportionnée, reprise à chaud, places et régulateur | à lancer, après V0, V2, V5 | Opus | complète, Fable | | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | vérifié | Opus | bornée, Opus, par casses : accepté | 1 | 786 tests (14 nouveaux) ; les 12 casses de la consigne et 6 des 7 casses du vérificateur font échouer un test nouveau |
 | M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
-| M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | à lancer, après M6b | Opus | bornée, Fable | | |
+| M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | vérifié | Opus | bornée, Fable : recalé puis seconde passe mécanique | 2 | essai nouveau PANNES-reseau 34 sur 34 (9 ECHEC sur la première passe) ; les sept autres essais à leurs comptes, CODE-carte excepté (instable, diagnostiqué) |
 | M11. Le code qui ne vit que pour les tests : sorti du produit ou retiré | à lancer, après M5 et M9 | Opus | bornée, Fable | | |
 | M12. `serveur.py` découpé en modules | à lancer, après M9 et M11 | Opus | complète, Fable | | |
 | M13. La page découpée en fichiers | à lancer, après M8 | Opus | complète, Fable | | |
@@ -86,6 +86,14 @@ L'ouvrier s'est arrêté avant d'écrire : un test né de M4 simulait un profil 
 
 ### Objectif vitesse (amendement du 2026-11-12)
 Le diagnostic complet est dans le fichier de travail de la session (`diagnostic-vitesse.md`) ; ses trois causes : le plan sort en file indienne ; la vérification complète part pour toute tâche ; un refus jette tout le travail. Décisions de l'orchestrateur, que la personne responsable peut revoir : la propriété « agent `mode_ouvriers` » lue par les seuls tests est gardée (c'est la lecture naturelle du mode choisi) ; les deux découpages (M12, M13) passent après la vitesse, leurs plans étant prêts.
+
+### Vitesse, vague 2 (fiches détaillées dans le fichier de travail `fiches-V3-moteur.md`)
+Ordre : V3a (reprise à chaud), V3b (refus répété et erreur d'environnement), V3d (montées par tâche, plafond), V3c (agent qui n'avance plus), V3e (vérification proportionnée), V3f (débit et régulateur). `moteur.py` n'a qu'un ouvrier à la fois ; en parallèle : le lot des consignes, `refus.py`, `places.py`, les retouches de `plan.py`, la correction de l'onglet Code. Décisions attendues de la personne responsable avant V3e et V3c : Fable pour toute vérification complète ou un modèle au-dessus ; les propositions R1 et R2 sur les cartes, qui reviennent sur deux décisions du journal.
+
+### Restes relevés par les vérificateurs de V0, V1 et M8
+- V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.
+- V1 : la consigne ne dit pas quoi faire d'un fichier que chaque tâche doit toucher (le journal d'un projet) ; la phrase de `plan.py` devient illisible quand beaucoup de tâches partagent un fichier ; aucun test ne garde les consignes ; accords (« toutes deux », « A et A ») ; récursion sur une chaîne de 1 000 tâches.
+- M8 : si le serveur refuse l'ouverture d'un projet (hors panne), le menu reste sur le projet refusé.
 
 ## Contrôles communs
 

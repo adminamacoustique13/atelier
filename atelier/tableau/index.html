@@ -393,6 +393,8 @@ td.droite, th.droite { text-align: right; }
 button.discret { height: 26px; padding: 0 10px; font-size: 11.5px; color: var(--discret); }
 .maj-phrase { flex: none; margin: -6px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
 .maj-phrase .page { display: block; color: var(--faible); }
+/* La phrase de panne, sous l'en-tête comme celle de la mise à jour : un seul endroit, visible quel que soit l'onglet. */
+.panne { flex: none; margin: -6px 6px 0; color: var(--attend); font-size: 12px; overflow-wrap: anywhere; }
 #maj[disabled] { opacity: 0.6; cursor: default; }
 .nouveau-chantier, #form-nouveau-chantier { display: flex; flex-direction: column; gap: 8px; }
 .nouveau-chantier > .boutons { align-items: center; gap: 10px; }
@@ -729,6 +731,7 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
     <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="mode"></span></div>
   </header>
   <p class="maj-phrase" id="maj-phrase" role="status" hidden></p>
+  <p class="panne" id="panne" role="alert" hidden></p>
 
   <section class="vue" id="vue-accueil" aria-label="Accueil">
     <div class="accueil-defile">
@@ -788,7 +791,7 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
 
   <section class="vue defilante" id="vue-chantier" aria-label="Chantier">
     <div class="pages">
-      <article class="carte m4"><h2><span class="num">01</span>Orchestrateur<i class="note">Fable · élevé</i></h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="compteurs" id="compteurs"></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
+      <article class="carte m4"><h2><span class="num">01</span>Orchestrateur<i class="note" id="note-orchestrateur"></i></h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="compteurs" id="compteurs"></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
       <article class="carte m5" id="carte-attente"><h2><span class="num">02</span>Ce qui t'attend<i class="note" id="attente-note"></i></h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
       <article class="carte m3"><h2><span class="num">03</span>Enveloppe<i class="note">contrat</i></h2><div id="jauges" style="display: flex; flex-direction: column; gap: 14px; flex: 1"></div></article>
       <article class="carte" id="carte-mode" hidden><h2>Mode des ouvriers</h2><div class="modes-cadre"><div id="mode-ouvriers"></div><div id="mode-ouvriers-etat" aria-live="polite"></div></div></article>
@@ -896,6 +899,18 @@ const nombre = (n) => Number(n || 0).toLocaleString("fr-FR");
 /* Un coût sans son unité, toujours avec deux décimales : « 1 234,50 ». */
 const montant = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const euros = (n) => montant(n) + " $";
+/* Un nombre de tokens en clair, rendu en deux morceaux, le nombre et son unité, que chaque endroit assemble à sa façon :
+   sous 1 000 le nombre entier ; jusqu'à 999 499 des milliers entiers (« k ») ; à partir de 999 500 des millions à une
+   décimale au plus (« M »), si bien qu'on ne lit jamais « 1000k ». Une valeur absente compte pour 0. */
+function tokensEnClair(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  if (v < 1e3) return { nombre: nombre(v), unite: "" };
+  if (v < 999500) return { nombre: String(Math.round(v / 1e3)), unite: "k" };
+  return { nombre: (v / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }), unite: "M" };
+}
+/* Le dosage de l'orchestrateur, écrit ici seulement : la carte Orchestrateur, l'étiquette de la Salle et le poste de
+   l'orchestrateur sur le sol de la Salle le lisent. */
+const DOSAGE_ORCHESTRATEUR = "Fable · élevé";
 const DELAI_CONFIRMATION = 400; // ms : un clic de confirmation plus rapproché est pris pour un double-clic
 const dernierHtml = new Map();
 /* Ne touche au DOM que si le contenu change : une saisie en cours, le défilement et le focus restent en place. */
@@ -1204,7 +1219,7 @@ function aspectArret(cle) {
     titre: arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.",
   };
 }
-/* Le bouton « Arrêter » : un premier clic l'arme quelques secondes (« Confirmer l'arrêt »), le second agit. */
+/* Habille un bouton d'arrêt déjà dans la page (celui de l'orchestrateur, sous la saisie) selon aspectArret(). */
 function habillerArret(bouton, cle) {
   const aspect = aspectArret(cle);
   bouton.textContent = aspect.libelle;
@@ -1220,9 +1235,9 @@ function boutonArret(cle, tache) {
 
 /* ---------- Chantier ---------- */
 function attenteHtml(vue) {
-  if (contratEnAttente(vue)) return `${contratHtml(vue)}<div class="boutons">${boutonValider}</div>`;
-  const liste = ouvertes(vue), autos = autorisationsDe(vue);
   const avis = avisTexte ? `<p class="petit" role="status">${propre(avisTexte)}</p>` : "";
+  if (contratEnAttente(vue)) return `${avis}${contratHtml(vue)}<div class="boutons">${boutonValider}</div>`;
+  const liste = ouvertes(vue), autos = autorisationsDe(vue);
   if (!liste.length && !autos.length) return `${avis}<p class="calme">Rien pour l'instant. Je te préviens si je sors du contrat.</p>`;
   return avis + autos.map((a) => `<div class="demande">${autorisationHtml(a)}</div>`).join("")
     + liste.map((d) => `<div class="demande">${demandeHtml(d)}</div>`).join("");
@@ -1362,7 +1377,7 @@ async function choisirMode(mode) {
   modeEnvoi = mode; modePhrase = null;
   rafraichir();
   let donnees = null;
-  try { donnees = await envoyer("/api/mode", { mode }); } catch (erreur) { donnees = null; }
+  try { donnees = await envoyer("/api/mode", { mode }); } catch (erreur) { donnees = null; direPanne(); }
   modeEnvoi = "";
   const retour = donnees && donnees.changement_mode;
   if (retour && typeof retour.phrase === "string") modePhrase = { texte: retour.phrase, fait: retour.fait === true };
@@ -1382,16 +1397,18 @@ function afficherChantier(vue) {
   document.getElementById("attente-note").textContent = noteAttente(vue);
   document.getElementById("lignes-note").textContent = vue.taches.length ? `${vue.taches.length} au contrat` : "";
   poser("agents", agentsHtml(vue));
+  document.getElementById("note-orchestrateur").textContent = DOSAGE_ORCHESTRATEUR;
   document.getElementById("point").textContent = vue.point_d_etape;
   document.getElementById("objectif").textContent = c.objectif;
   poser("attente", attenteHtml(vue));
   afficherMode(vue);
   afficherArchives(vue);
   poser("tuiles", dosageHtml(vue));
+  const tokens = tokensEnClair(vue.tokens);
   poser("jauges", compte("Agents lancés", vue.agents_lances)
     + jauge("Montées en gamme", vue.montees, c.max_montees)
     + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${montant(vue.cout_usd)}$</b></div>
-       <div><span>Tokens</span><b>${vue.tokens >= 1e6 ? (vue.tokens / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + "M" : vue.tokens >= 1e3 ? Math.round(vue.tokens / 1e3) + "k" : nombre(vue.tokens)}</b></div></div>`);
+       <div><span>Tokens</span><b>${tokens.nombre}${tokens.unite}</b></div></div>`);
   poser("lignes", vue.taches.map((t) => `<tr>
     <td><span class="puce">${propre(t.id)}</span></td>
     <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}</td>
@@ -1621,7 +1638,7 @@ function stationsDe(vue) {
     const l = lieu(k);
     if (a.etape < 0) {
       stations.push({ cle: "@orchestrateur", x: l.x, y: l.y, etat: vue.occupe || actifs ? "en_cours" : "repos", h: 1.1, cote: "g",
-        titre: "Orchestrateur", detail: "Fable · élevé", mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
+        titre: "Orchestrateur", detail: DOSAGE_ORCHESTRATEUR, mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
       return;
     }
     if (!a.tache) {
@@ -1728,14 +1745,14 @@ function solHtml(vue, largeur, hauteur) {
 function afficherSalle(vue) {
   if (location.hash !== "#salle" || !vue || vue.aucun_projet) return;
   const c = vue.contrat, verifiees = nombreVerifiees(vue), attendue = ilFautRepondre(vue);
-  poser("salle-orch", `<div class="rail-tete">${anneauPoints(verifiees, vue.taches.length, attendue, 64)}<div><span class="etiquette">Orchestrateur · Fable élevé</span><p>${propre(vue.point_d_etape)}</p></div></div>
+  poser("salle-orch", `<div class="rail-tete">${anneauPoints(verifiees, vue.taches.length, attendue, 64)}<div><span class="etiquette">Orchestrateur · ${DOSAGE_ORCHESTRATEUR}</span><p>${propre(vue.point_d_etape)}</p></div></div>
     ${c.objectif ? `<p class="calme">${propre(c.objectif)}</p>` : ""}
     <div class="boutons"><button type="button" data-action="vers-conversation">Écrire à l'orchestrateur</button><button type="button" data-action="voir-plan">Plan</button></div>`);
-  const millions = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}<small> M</small>` : n >= 1e3 ? `${Math.round(n / 1e3)}<small> k</small>` : nombre(n));
+  const tokens = tokensEnClair(vue.tokens);
   poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}</b></div>
     <div><span>Montées</span><b>${vue.montees}<small> / ${c.max_montees}</small></b></div>
     <div><span>Coût équiv.</span><b>${montant(vue.cout_usd)}<small> $</small></b></div>
-    <div><span>Tokens</span><b>${millions(vue.tokens || 0)}</b></div>` : "");
+    <div><span>Tokens</span><b>${tokens.nombre}${tokens.unite ? `<small> ${tokens.unite}</small>` : ""}</b></div>` : "");
   const attente = document.getElementById("salle-attente");
   attente.classList.toggle("attend", attendue);
   attente.hidden = !attendue && !avisTexte;
@@ -1843,17 +1860,23 @@ function avancer() {
 /* Fabrique un message passager : la fonction rendue, appelée avec un texte et une durée en ms (sinon dureeParDefaut),
    pose le texte, le montre, et l'efface au bout de cette durée (jamais si elle vaut 0, ni si le texte est vide).
    Chaque message a sa propre minuterie : un nouveau texte annule l'effacement prévu du sien, jamais celui d'un autre. */
-function messagePassager(poser, montrer, dureeParDefaut) {
+function messagePassager(ecrire, montrer, dureeParDefaut) {
   let effacement = null;
   return (texte, duree = dureeParDefaut) => {
-    poser(texte);
+    ecrire(texte);
     clearTimeout(effacement);
-    if (texte && duree) effacement = setTimeout(() => { poser(""); montrer(); }, duree);
+    if (texte && duree) effacement = setTimeout(() => { ecrire(""); montrer(); }, duree);
     montrer();
   };
 }
 /* Un avis passager, sous la zone de saisie et en tête de « Ce qui t'attend ». */
 const dire = messagePassager((texte) => { avisTexte = texte; }, () => rafraichir(), 9000);
+/* Ce que la page dit quand un envoi n'a pas pu partir parce que le serveur ne répond pas (le fetch a levé : l'Atelier
+   a été arrêté, ou la machine dort). La phrase s'écrit sous l'en-tête, visible quel que soit l'onglet, et s'efface
+   au bout de son délai ou dès que le serveur répond de nouveau à un envoi (posterJson). */
+const PANNE = "L'Atelier ne répond pas : vérifie qu'il tourne encore, puis réessaie.";
+const avisPanne = messagePassager((texte) => { const p = document.getElementById("panne"); p.textContent = texte; p.hidden = !texte; }, () => {}, 9000);
+const direPanne = () => avisPanne(PANNE);
 function rafraichir() {
   if (!derniere || derniere.aucun_projet) return;
   afficherConversation(derniere);
@@ -1862,14 +1885,16 @@ function rafraichir() {
   afficherPlan(derniere);
 }
 
-/* Le seul POST vers le serveur, dont le corps est l'objet donné, écrit en JSON. Rend la promesse de fetch telle quelle :
-   ce que l'on fait de la réponse, d'une erreur ou d'une panne de réseau revient aux trois fonctions qui s'en servent,
-   envoyer(), envoyerSansAfficher() et demander(). */
+/* Le seul POST vers le serveur, dont le corps est l'objet donné, écrit en JSON. Rend la promesse de fetch, après avoir
+   effacé la phrase de panne si le serveur a répondu : ce que l'on fait de la réponse, d'une erreur ou d'une panne de
+   réseau revient aux trois fonctions qui s'en servent, envoyer(), envoyerSansAfficher() et demander(). */
 function posterJson(adresse, corps) {
-  return fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+  return fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) })
+    .then((retour) => { if (!document.getElementById("panne").hidden) avisPanne(""); return retour; });
 }
-/* Envoie une action de la conversation et affiche la vue rendue (la rend aussi), null si la réponse est en erreur ; une panne
-   de réseau ou une réponse illisible lève, à l'appelant de la rattraper ; en démonstration rejouée, n'envoie rien et avance. */
+/* Envoie un geste qui change le chantier (un message, la validation du contrat, une décision, une autorisation, le mode
+   des ouvriers, un arrêt) et affiche la vue rendue (la rend aussi), null si la réponse est en erreur ; une panne de réseau
+   ou une réponse illisible lève, à l'appelant de la rattraper (direPanne()) ; en démonstration rejouée, n'envoie rien et avance. */
 async function envoyer(adresse, corps) {
   if (rejoue) {
     if (adresse === "/api/arreter") { dire("Démonstration rejouée : il n'y a pas d'agent derrière, rien n'est arrêté."); return null; }
@@ -1894,7 +1919,7 @@ async function repondre(id, choix, message) {
   carte.envoi = true; carte.remarque = "";
   rafraichir();
   let donnees = null;
-  try { donnees = await envoyer("/api/autorisation", { id, choix, message: message || "" }); } catch (erreur) { donnees = null; }
+  try { donnees = await envoyer("/api/autorisation", { id, choix, message: message || "" }); } catch (erreur) { donnees = null; direPanne(); }
   carte.envoi = false;
   const retour = donnees && donnees.autorisation;
   if (rejoue) { cartes.delete(id); return rafraichir(); }
@@ -1904,7 +1929,7 @@ async function repondre(id, choix, message) {
   rafraichir();
 }
 
-/* Arrêter un agent : le premier clic arme le bouton cinq secondes, le second envoie l'arrêt. */
+/* Le bouton « Arrêter » : un premier clic l'arme cinq secondes (« Confirmer l'arrêt »), le second envoie l'arrêt de l'agent. */
 async function arreter(cle, tache) {
   if (arretes.has(cle)) return;
   if (armee === cle && performance.now() - armeeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
@@ -1917,11 +1942,11 @@ async function arreter(cle, tache) {
   clearTimeout(minuteArmee); armee = "";
   arretes.add(cle);
   rafraichir();
-  let donnees = null;
-  try { donnees = await envoyer("/api/arreter", tache ? { tache } : {}); } catch (erreur) { donnees = null; }
+  let donnees = null, panne = false;
+  try { donnees = await envoyer("/api/arreter", tache ? { tache } : {}); } catch (erreur) { panne = true; }
   const retour = donnees && donnees.arret;
   if (!retour || !retour.fait) arretes.delete(cle);
-  if (retour) dire(retour.phrase); else if (!rejoue) dire("L'arrêt n'est pas parti. Réessaie dans un instant.");
+  if (retour) dire(retour.phrase); else if (panne) direPanne(); else if (!rejoue) dire("L'arrêt n'est pas parti. Réessaie dans un instant.");
 }
 
 
@@ -2404,8 +2429,8 @@ const etiquetteNoms = (noms) => {
   const montres = deux ? [noms[0], noms[1]] : [noms[0]];
   return montres.map(coupe).join(" · ") + (noms.length > montres.length ? ` +${noms.length - montres.length}` : "");
 };
-/* Le chemin SVG d'un fil de la carte du code : le même dessin que trace(), mais coordonnées écrites au dixième et coins
-   de 9 par défaut, si bien que les deux ne rendent pas la même chaîne et restent séparées. */
+/* Le chemin SVG d'un fil de la carte du code : le même dessin que trace(), mais les deux n'écrivent pas les coordonnées de
+   la même façon (celle-ci au dixième, trace() telles quelles) et ses coins sont de 9 par défaut : elles restent séparées. */
 function arrondi(points, rayon = 9) {
   let d = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`;
   for (let i = 1; i < points.length - 1; i++) {
@@ -2705,8 +2730,8 @@ setInterval(() => { if (location.hash === "#accueil" && !sessionOuverte && !docu
 
 function agir(cible) {
   const action = cible.dataset.action;
-  if (action === "valider") envoyer("/api/contrat/valider");
-  if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix });
+  if (action === "valider") envoyer("/api/contrat/valider").catch(direPanne);
+  if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix }).catch(direPanne);
   if (action === "autoriser") repondre(cible.dataset.id, cible.dataset.choix);
   if (action === "refuser") { etatCarte(cible.dataset.id).refus = true; rafraichir(); }
   if (action === "refus-retour") { etatCarte(cible.dataset.id).refus = false; rafraichir(); }
@@ -2780,7 +2805,8 @@ document.getElementById("saisie").addEventListener("submit", (e) => {
   if (!texte || (derniere && derniere.occupe)) return;
   zone.value = ""; ajuster();
   signatureFil = "";
-  envoyer("/api/message", { texte });
+  // Le message n'est pas parti : il revient dans la zone de saisie, si rien n'y a été tapé depuis.
+  envoyer("/api/message", { texte }).catch(() => { if (!zone.value) { zone.value = texte; ajuster(); } direPanne(); });
 });
 
 async function charger() {
@@ -2802,17 +2828,24 @@ async function charger() {
     } else document.getElementById("rail-point").textContent = "Le moteur ne répond pas. Relance l'atelier.";
   }
 }
-/* Projets : passer de l'un à l'autre, en créer un nouveau.
-   demander() envoie et rend { ok, donnees } avec le JSON lu même quand la réponse est en erreur, pour en montrer le champ
-   « erreur » ; une panne de réseau ou une réponse illisible lève. */
+/* ---------- Projets : passer de l'un à l'autre, en créer un nouveau ---------- */
+
+/* Envoie et rend { ok, donnees } avec le JSON lu même quand la réponse est en erreur, pour en montrer le champ « erreur ».
+   Une panne de réseau ne lève pas : elle est dite (direPanne()) et rendue comme une erreur dont le champ « erreur » est
+   cette même phrase, si bien que chaque appelant rend la main et la montre là où il montre ses erreurs. Une réponse
+   illisible lève. */
 async function demander(adresse, corps) {
-  const retour = await posterJson(adresse, corps);
+  let retour;
+  try { retour = await posterJson(adresse, corps); } catch (erreur) { direPanne(); return { ok: false, donnees: { erreur: PANNE } }; }
   return { ok: retour.ok, donnees: await retour.json() };
 }
 function changerDeProjet(vue) { signatureFil = ""; choisie = null; afficher(vue); if (location.hash === "#accueil") chargerAccueil(); }
 document.getElementById("projet").addEventListener("change", async (e) => {
   const { ok, donnees } = await demander("/api/projets/ouvrir", { id: e.target.value });
-  if (ok) changerDeProjet(donnees);
+  if (ok) return changerDeProjet(donnees);
+  // Panne : le menu revient sur le projet réellement ouvert.
+  const ouvert = donnees.erreur === PANNE && ((derniere && derniere.projets) || []).find((p) => p.courant);
+  if (ouvert) e.target.value = ouvert.id;
 });
 const dialogue = document.getElementById("creation"), champNom = document.getElementById("nom-nouveau"), alerte = document.getElementById("erreur-creation");
 document.getElementById("nouveau").addEventListener("click", () => {
