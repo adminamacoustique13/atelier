@@ -19,7 +19,7 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from atelier.archives import date_fr
+from atelier.archives import cout_fr, date_fr
 from atelier.consignes import dernier_json
 
 FICHIER = Path(".atelier") / "carte.json"
@@ -1032,7 +1032,7 @@ class SuiviCarte:
                 "analyse_le": date_fr(carte.get("analyse_le", "")),
                 "maj_le": date_fr(carte.get("maj_le", "")),
                 "changements": bilan_changements(carte["changements"]),
-                "cout": f"{carte.get('cout_usd', 0.0):.2f}".replace(".", ",") + " $",
+                "cout": cout_fr(carte.get('cout_usd', 0.0)),
                 "en_cours": _liste_en_cours(en_cours),
                 "provisoire": prov or {"fichiers": [], "liens": []},
                 "auto": not self.explicateur.reel,

@@ -142,3 +142,9 @@ def test_une_archive_illisible_ou_un_identifiant_piege_ne_lit_rien(tmp_path):
     for piege in ("../../etc", "2026-11-11-213721/../x", None, 12, ""):
         assert archives.lire(tmp_path, piege) is None
     assert archives.lister(tmp_path / "absent") == []
+
+
+def test_cout_fr():
+    assert archives.cout_fr(0) == "0,00 $"
+    assert archives.cout_fr(1234.5) == "1234,50 $"
+    assert archives.cout_fr(9.999) == "10,00 $"

@@ -13,6 +13,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from atelier.dosage import EFFORTS_FR
 from atelier.modele import ETATS_FR, Chantier, ecrire_cahier
 
 NOM_MAX = 80
@@ -21,8 +22,12 @@ MOIS = (
     "juillet", "août", "septembre", "octobre", "novembre", "décembre",
 )  # fmt: skip
 AUTEURS = {"toi": "Toi", "orchestrateur": "Orchestrateur", "moteur": "Atelier"}
-EFFORTS = {"low": "faible", "medium": "moyen", "high": "élevé", "xhigh": "très élevé", "max": "max"}
 IDENTIFIANT = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?$")
+
+
+def cout_fr(montant: float) -> str:
+    """Un coût en dollars, écrit à la française : deux décimales, virgule, puis « $ »."""
+    return f"{montant:.2f}".replace(".", ",") + " $"
 
 
 def date_fr(iso: str) -> str:
@@ -56,7 +61,7 @@ def nom_propose(chantier: Chantier) -> str:
 def _livree(tache) -> dict:
     derniere = tache.historique[-1] if tache.historique else {}
     modele = str(derniere.get("modele") or tache.modele).capitalize()
-    effort = EFFORTS.get(derniere.get("effort") or tache.effort, tache.effort)
+    effort = EFFORTS_FR.get(derniere.get("effort") or tache.effort, tache.effort)
     tentative = derniere.get("tentative") or tache.tentatives or 1
     detail = f"Vérifiée à la tentative {tentative}"
     if modele:
@@ -116,7 +121,7 @@ def journal(chantier: Chantier, ident: str, nom: str, archive_le: str, contexte:
     """
     livrees = [_livree(t) for t in chantier.taches if t.etat == "verifie"]
     inachevees = [_inachevee(chantier, t) for t in chantier.taches if t.etat != "verifie"]
-    cout = f"{chantier.cout_usd:.2f}".replace(".", ",") + " $"
+    cout = cout_fr(chantier.cout_usd)
     return {
         "id": ident,
         "nom": nettoyer_nom(nom) or nom_propose(chantier),
