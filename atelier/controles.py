@@ -79,10 +79,19 @@ def _relier(source: Path, cible: Path) -> None:
         cible.symlink_to(source)
 
 
+def _correspond(chemin: str, motif: str) -> bool:
+    """Dit si le chemin est égal au motif, ou y correspond au sens de `fnmatch`.
+
+    L'égalité d'abord : `fnmatch` lit `[slug]` comme une classe de caractères, et un chemin
+    à crochets ne se reconnaîtrait pas lui-même.
+    """
+    return chemin == motif or fnmatch(chemin, motif)
+
+
 def hors_perimetre(fichiers: list[str], perimetre: list[str]) -> list[str]:
     """Rend les fichiers modifiés qui sortent du périmètre de la tâche."""
     motifs = list(perimetre) + list(TOUJOURS_PERMIS)
-    return sorted(f for f in fichiers if not any(fnmatch(f, m) for m in motifs))
+    return sorted(f for f in fichiers if not any(_correspond(f, m) for m in motifs))
 
 
 def se_chevauchent(a: list[str], b: list[str], partages: Iterable[str] = ()) -> bool:
@@ -95,13 +104,13 @@ def se_chevauchent(a: list[str], b: list[str], partages: Iterable[str] = ()) -> 
     motifs = list(partages)
     a = [p for p in a if not motif_partage(p, motifs)]
     b = [p for p in b if not motif_partage(p, motifs)]
-    return any(fnmatch(x, y) or fnmatch(y, x) for x in a for y in b)
+    return any(_correspond(x, y) or _correspond(y, x) for x in a for y in b)
 
 
 def motif_partage(chemin: str, motifs: Iterable[str]) -> str:
     """Le premier motif de fichier partagé qui couvre ce chemin ou cette entrée de périmètre,
     ou "" s'il n'est pas partagé."""
-    return next((motif for motif in motifs if fnmatch(chemin, motif)), "")
+    return next((motif for motif in motifs if _correspond(chemin, motif)), "")
 
 
 # Les deux façons de fusionner un fichier partagé : « union » garde les lignes des deux côtés,
