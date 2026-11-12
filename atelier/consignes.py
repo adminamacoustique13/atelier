@@ -25,14 +25,46 @@ sans risque : chacune demanderait une autorisation à la personne qui suit le ch
 la ferait attendre."""
 
 
+# Le signe qu'un agent met au début d'une ligne quand une commande lui est refusée ou qu'un outil
+# lui manque. Le moteur le cherche tel quel et en début de ligne seulement, pour ne pas prendre
+# une sortie de test citée pour un empêchement (`refus.MARQUE_EMPECHEMENT` : le même texte).
+MARQUE_EMPECHE = "EMPÊCHÉ :"
+
+# Comment écrire ce signe : l'ouvrier et les trois vérifications reçoivent la même phrase.
+_LIGNE_EMPECHE = f"""une ligne qui commence par « {MARQUE_EMPECHE} », au tout début de la \
+ligne, sans tiret ni puce devant, suivie de la commande et du message reçu, tel quel. Par exemple :
+{MARQUE_EMPECHE} uv run pytest -q — (le message reçu)"""
+
+EMPECHE_OUVRIER = f"""## Si tu es empêché
+Si une commande t'est refusée ou qu'un outil te manque (commande non permise, programme absent, \
+réseau coupé), écris dans ton compte rendu final {_LIGNE_EMPECHE}
+L'Atelier lit ces lignes : il demande alors à la personne le bon réglage (permettre la commande, \
+installer l'outil) au lieu de relancer ta tâche à l'aveugle, ce qui buterait au même endroit. \
+Une autre commande permise qui fait le même travail reste bienvenue ; mais ne fais pas passer la \
+commande refusée sous une autre forme (un autre shell, un script qui la lance) : la liste des \
+commandes permises est un choix de la personne. Signale le refus dans les deux cas.
+"""
+
+EMPECHE_VERIFICATEUR = f"""## Si tu es empêché
+Si une commande t'est refusée ou qu'un outil te manque (commande non permise, programme absent, \
+réseau coupé), écris dans ton verdict {_LIGNE_EMPECHE}
+Reporte la même chose dans le champ "empeche" du JSON, même si tu as pu conclure par un autre \
+moyen. Sans ce signe, l'Atelier prendrait ton refus pour un défaut du livrable et relancerait \
+l'agent pour rien : la vérification suivante buterait au même endroit. Avec lui, il demande à \
+la personne le bon réglage."""
+
+
 def _liste(elements: list[str]) -> str:
     return "\n".join(f"{i}. {e}" for i, e in enumerate(elements, 1)) or "(aucun)"
+
+
+def _commandes(profil: dict) -> str:
+    return "\n".join(f"- `{c}`" for c in profil.get("commandes", [])) or "- (aucune)"
 
 
 def consigne_ouvrier(tache: Tache, contrat: Contrat, profil: dict, remarques: str = "") -> str:
     """Rédige la consigne d'un ouvrier : tâche, pourquoi, critères, périmètre, interdits."""
     regles = "\n".join(f"- {r}" for r in profil.get("regles", [])) or "- (aucune règle propre)"
-    commandes = "\n".join(f"- `{c}`" for c in profil.get("commandes", [])) or "- (aucune)"
     zones = "\n".join(f"- {z}" for z in contrat.zones_rouges)
     reprise = ""
     if remarques:
@@ -62,10 +94,23 @@ Tu peux attendre : {tache.attend or "rien"}
 ## Règles du projet
 {regles}
 
+Si une règle du projet te demande de toucher un fichier hors de ton périmètre (une ligne au \
+journal des décisions, par exemple), ne le touche pas : écris dans ta fiche de relais ce que tu \
+y aurais mis. Le contrôle du périmètre refuserait ton travail, et les tâches qui travaillent en \
+même temps que toi se heurteraient dans ce fichier commun ; la tâche de raccord recopiera ta ligne.
+
 Commandes de contrôle, à faire passer avant de rendre ton travail :
-{commandes}
+{_commandes(profil)}
 {reprise}
 {SUIVI}
+## Ta fiche de relais
+`chantier/relais/{tache.id}.md` est toujours permis, en plus de ton périmètre, et entre dans la \
+branche principale avec ton travail : les tâches suivantes et la tâche de raccord le lisent. \
+Écris-y ce qu'une tâche qui prend ta suite doit savoir, et ce qu'une règle du projet t'aurait \
+fait écrire hors de ton périmètre. Si tu n'as rien à transmettre, ne la crée pas. Si elle existe \
+déjà quand tu commences, elle vient d'un chantier précédent : remplace son contenu, l'ancien \
+reste dans l'historique de git.
+
 ## Interdits
 - Rien hors de ton périmètre. Si tu penses en avoir besoin, arrête-toi et dis-le \
 dans ton compte rendu.
@@ -82,27 +127,151 @@ compte rendu chaque outil installé et chaque bibliothèque ajoutée au produit,
 Pour tes commandes, {COMMANDES_SIMPLES} Pour modifier un fichier, sers-toi des outils Edit \
 et Write.
 
+{EMPECHE_OUVRIER}
 ## À rendre
 Termine par un compte rendu en cinq rubriques courtes : Fait (critère par critère), \
 Fichiers touchés, Contrats modifiés, Reste à faire, Doutes et demandes.
 """
 
 
-COPIE_JETABLE = """Tu travailles dans une copie jetable du livrable : l'atelier la jette après \
+# Ce que dit la reprise selon ce qui a refusé le livrable : le constat, puis ce qu'il faut faire.
+REPRISES = {
+    "verdict": (
+        "Le vérificateur a refusé ton livrable. Voici son verdict en entier",
+        "Corrige chaque point qu'il recale. Un vérificateur neuf contrôlera ensuite ces points, "
+        "et vérifiera que tes corrections n'ont rien défait ; il ne refera pas le reste.",
+    ),
+    "perimetre": (
+        "Le contrôle du périmètre a refusé ton livrable : tu as modifié des fichiers qui n'en "
+        "font pas partie",
+        "Défais tes changements dans ces fichiers : `git diff -- <chemin>` te les montre, et "
+        "`rm <chemin>` retire un fichier que tu as créé. Un fichier hors de ton périmètre fait "
+        "refuser le livrable quoi qu'il contienne. Si une règle du projet te demandait d'y "
+        "écrire, mets plutôt dans ta fiche de relais ce que tu y aurais mis ; si la tâche en a "
+        "vraiment besoin, dis-le dans ton compte rendu.",
+    ),
+    "controles": (
+        "Les commandes de contrôle du projet échouent sur ton livrable. Voici la fin de leur "
+        "sortie",
+        "Trouve ce qui les fait échouer et corrige-le.",
+    ),
+}
+
+
+def consigne_reprise(tache: Tache, origine: str, complet: str | list[str], profil: dict) -> str:
+    """Le message donné à l'ouvrier repris dans sa propre session après un refus.
+
+    Il a déjà sa consigne d'origine : ce message ne dit que ce qui a été refusé et ce qu'il faut
+    corriger. `origine` vaut "verdict", "perimetre" ou "controles" (sinon `ValueError`) ;
+    `complet` est le verdict entier, les fichiers hors périmètre (une liste ou un texte) ou la
+    fin de la sortie des contrôles, rendu tel quel.
+    """
+    if origine not in REPRISES:
+        raise ValueError(f"Origine de reprise inconnue : {origine!r}")
+    constat, correction = REPRISES[origine]
+    if isinstance(complet, (list, tuple)):
+        complet = "\n".join(f"- `{f}`" for f in complet)
+    if profil.get("commandes"):
+        controles = (
+            "Relance ensuite les commandes de contrôle, jusqu'à ce qu'elles passent :\n"
+            f"{_commandes(profil)}\n"
+            "L'Atelier les rejoue après toi, avec le contrôle du périmètre, avant tout "
+            "vérificateur."
+        )
+    else:
+        controles = "Relance ensuite les tests qui portent sur ce que tu as corrigé."
+    return f"""## Reprise de la tâche {tache.id} après un refus
+{constat} :
+[début]
+{complet.strip() or "(rien n'a été transmis)"}
+[fin]
+
+{correction}
+
+Ne change rien d'autre, et ne défais pas ce qui était juste : tout ton travail est encore dans \
+ce dossier, et ce qui n'a pas été relevé n'est pas en cause. Chaque changement de plus serait à \
+vérifier de nouveau et pourrait casser ce qui passait.
+
+{controles}
+
+Si tu tiens une fiche de relais (`chantier/relais/{tache.id}.md`), mets-la à jour pour qu'elle \
+décrive ton travail après correction. Si une commande t'est refusée, écris la ligne \
+« {MARQUE_EMPECHE} » comme le dit ta consigne.
+
+Termine par un compte rendu court : ce que tu as corrigé, point par point, et ce qui reste.
+"""
+
+
+def _copie_jetable(mutations: bool) -> str:
+    """Le cadre du vérificateur dans sa copie jetable, avec ou sans mutations."""
+    mutation = (
+        "- pour une mutation (changer le code pour voir si un test échoue), modifie le fichier "
+        "avec l'outil Edit, lance le test, puis remets le texte d'origine avec Edit ;\n"
+        if mutations
+        else ""
+    )
+    essai = "essai_mutation.py" if mutations else "essai.py"
+    return f"""Tu travailles dans une copie jetable du livrable : l'atelier la jette après \
 ton verdict, et ce qu'il enregistre est le livrable de l'agent, pas cette copie. Tu ne corriges \
 rien : une correction ne serait pas gardée. Mais tu peux y faire tes essais sans rien demander, \
 à condition de t'y prendre ainsi :
-- pour une mutation (changer le code pour voir si un test échoue), modifie le fichier avec \
-l'outil Edit, lance le test, puis remets le texte d'origine avec Edit ;
-- pour un essai de plus de quelques mots, écris un script dans ce dossier avec l'outil Write, \
-puis lance-le (par exemple `python3 essai_mutation.py`) ;
-- """ + COMMANDES_SIMPLES + """
+{mutation}- pour un essai de plus de quelques mots, écris un script dans ce dossier avec l'outil \
+Write, puis lance-le (par exemple `python3 {essai}`) ;
+- {COMMANDES_SIMPLES}
 Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent ; \
 lis-les avant tes essais, qui y apparaîtraient ensuite."""
+
+
+COPIE_JETABLE = _copie_jetable(mutations=True)
+# La vérification bornée ne fait pas de mutations : son cadre ne lui en parle pas.
+COPIE_JETABLE_SANS_MUTATION = _copie_jetable(mutations=False)
 
 LECTURE_SEULE = """Tu ne modifies, ne crées et ne supprimes aucun fichier. Travaille dans le \
 dossier courant.
 Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent."""
+
+
+def _cadre(copie_jetable: bool, mutations: bool) -> str:
+    """Le cadre des vérifications bornée et restreinte ; la règle des commandes y est toujours."""
+    if not copie_jetable:
+        return f"{LECTURE_SEULE}\nPour tes commandes, {COMMANDES_SIMPLES}"
+    return COPIE_JETABLE if mutations else COPIE_JETABLE_SANS_MUTATION
+
+
+def _but_et_criteres(tache: Tache, contrat: Contrat) -> str:
+    return f"""## But de la tâche {tache.id} — {tache.titre}
+{tache.pourquoi or contrat.objectif}
+
+## Critères demandés à l'agent
+{_liste(tache.criteres)}"""
+
+
+# Le contrôle du périmètre laisse toujours passer `chantier/relais/` (`controles.TOUJOURS_PERMIS`) :
+# les trois vérifications le disent dans les mêmes mots, pour qu'aucune ne recale une fiche.
+RELAIS_PERMIS = """S'y ajoute toujours le dossier `chantier/relais/`, où l'agent écrit sa fiche \
+de relais : ces fiches sont toujours permises et ne comptent jamais comme un débord de \
+périmètre."""
+
+
+def _perimetre_verifie(tache: Tache) -> str:
+    return f"""## Périmètre autorisé
+{", ".join(tache.perimetre)}
+{RELAIS_PERMIS}"""
+
+
+# Le verdict, le même pour les trois vérifications : `lire_verdict` le lit.
+_VERDICT = """Un court verdict en français, puis, sur la toute dernière ligne, un objet JSON seul :
+{"valide": true ou false, "motif": "bacle" ou "ne_sait_pas" ou "consigne", \
+"resume": "une ou deux phrases"}
+
+- "bacle" : une partie de la consigne a été négligée, l'agent aurait pu le faire.
+- "ne_sait_pas" : l'agent s'est trompé sur le fond.
+- "consigne" : les critères sont ambigus ou ne suffisent pas à prouver le but."""
+_CHAMP_EMPECHE = """- "empeche" : à ajouter à l'objet seulement si tu as été empêché de \
+vérifier, un élément par empêchement : "empeche": ["la commande — le message reçu"]."""
+_CHAMP_REMARQUES = """- "remarques" : à ajouter à l'objet seulement pour des défauts mineurs, qui \
+ne recalent pas, un élément par remarque : "remarques": ["..."]."""
+_STRICT = """Sois strict : n'écris "valide": true que pour ce que tu as constaté toi-même."""
 
 
 def consigne_verificateur(
@@ -113,7 +282,6 @@ def consigne_verificateur(
     Avec `copie_jetable`, il travaille dans une copie du livrable que l'atelier jettera, et
     peut y faire ses essais ; sinon il relit en lecture seule.
     """
-    commandes = "\n".join(f"- `{c}`" for c in profil.get("commandes", [])) or "- (aucune)"
     cadre = COPIE_JETABLE if copie_jetable else LECTURE_SEULE
     essais = (
         "Fais tes essais dans ce dossier, comme dit plus haut, en remettant chaque fichier."
@@ -123,14 +291,9 @@ def consigne_verificateur(
     return f"""Tu es vérificateur. Tu contrôles le livrable d'un autre agent, sans rien corriger.
 {cadre}
 
-## But de la tâche {tache.id} — {tache.titre}
-{tache.pourquoi or contrat.objectif}
+{_but_et_criteres(tache, contrat)}
 
-## Critères demandés à l'agent
-{_liste(tache.criteres)}
-
-## Périmètre autorisé
-{", ".join(tache.perimetre)}
+{_perimetre_verifie(tache)}
 
 ## Ce que tu dois faire
 1. Vérifie chaque critère par toi-même, en exécutant réellement le code quand c'est possible.
@@ -140,18 +303,149 @@ def consigne_verificateur(
 4. Si le sujet relève d'une norme ou d'une formule physique, confronte le code au texte \
 de référence et à ses cas tests, pas seulement à ta relecture.
 5. Lance les commandes de contrôle :
-{commandes}
+{_commandes(profil)}
 
 {SUIVI}
-## Ce que tu rends
-Un court verdict en français, puis, sur la toute dernière ligne, un objet JSON seul :
-{{"valide": true ou false, "motif": "bacle" ou "ne_sait_pas" ou "consigne", \
-"resume": "une ou deux phrases"}}
+{EMPECHE_VERIFICATEUR}
 
-- "bacle" : une partie de la consigne a été négligée, l'agent aurait pu le faire.
-- "ne_sait_pas" : l'agent s'est trompé sur le fond.
-- "consigne" : les critères sont ambigus ou ne suffisent pas à prouver le but.
-Sois strict : n'écris "valide": true que pour ce que tu as constaté toi-même.
+## Ce que tu rends
+{_VERDICT}
+{_CHAMP_EMPECHE}
+{_STRICT}
+"""
+
+
+def _controles_rejoues(profil: dict) -> str:
+    """Après une reprise, l'Atelier a rejoué les contrôles avant de lancer le vérificateur."""
+    if not profil.get("commandes"):
+        return (
+            "Le projet n'a pas de commande de contrôle : lance les tests qui portent sur les "
+            "points corrigés."
+        )
+    return (
+        "L'Atelier a rejoué après la correction les commandes de contrôle du projet :\n"
+        f"{_commandes(profil)}\n"
+        "Elles passent : rien de ce que ces tests couvrent n'a cassé. Ne relance pas toute la "
+        "suite, seulement les tests qui portent sur les points corrigés."
+    )
+
+
+def consigne_reverification(
+    tache: Tache,
+    contrat: Contrat,
+    profil: dict,
+    verdict_precedent: str,
+    copie_jetable: bool = False,
+) -> str:
+    """La consigne du vérificateur neuf qui suit une reprise : il reçoit le verdict précédent en
+    entier, contrôle que chaque point recalé est corrigé sans rien défaire, et ne refait pas le
+    reste. Même verdict que la consigne complète."""
+    essais = (
+        "Fais tes essais dans ce dossier, comme dit plus haut, en remettant chaque fichier."
+        if copie_jetable
+        else "Tu ne peux rien écrire ici : juge-le en lisant le test et en le lançant."
+    )
+    return f"""Tu es vérificateur. Un autre agent a corrigé son livrable après un refus : tu \
+contrôles cette correction, sans rien corriger toi-même.
+{_cadre(copie_jetable, mutations=True)}
+
+{_but_et_criteres(tache, contrat)}
+
+{_perimetre_verifie(tache)}
+
+## Le verdict précédent
+Un premier vérificateur a refusé ce livrable. L'agent a repris son travail dans la même copie \
+pour corriger ce qui était relevé. Voici ce verdict en entier :
+[début du verdict précédent]
+{verdict_precedent.strip()}
+[fin du verdict précédent]
+
+## Ce que tu dois faire
+Ce que le verdict précédent n'a pas recalé a déjà été vérifié : le refaire coûterait une \
+vérification entière sans rien t'apprendre. Ta vérification porte sur la correction. `git diff` \
+montre tout le livrable, pas seulement la correction : sers-toi du verdict pour savoir où regarder.
+1. Pour chaque point recalé, vérifie par toi-même qu'il est corrigé, en exécutant réellement le \
+code quand c'est possible.
+2. Vérifie que ces corrections n'ont rien défait : relis le code qu'elles touchent et ce qui en \
+dépend, et lance les tests qui portent dessus. Si une correction ajoute ou change un test, \
+vérifie qu'il peut échouer. {essais}
+3. Ne refais pas le reste de la vérification. Si tu vois pourtant en chemin un défaut qui \
+bloquerait (comportement faux, perte de travail, faille), recale pour lui aussi.
+4. {_controles_rejoues(profil)}
+
+{SUIVI}
+{EMPECHE_VERIFICATEUR}
+
+## Ce que tu rends
+{_VERDICT}
+{_CHAMP_EMPECHE}
+{_STRICT}
+"""
+
+
+# La fin de la sortie des contrôles que reçoit le vérificateur borné, en caractères.
+SORTIE_BORNEE = 1500
+
+
+def _controles_faits(profil: dict, sortie: str) -> str:
+    """Ce que l'Atelier vient de faire passer, avec la fin de ce que les contrôles ont affiché."""
+    if not profil.get("commandes"):
+        return (
+            "Le projet n'a pas de commande de contrôle : l'Atelier n'a rien fait passer. Lance "
+            "toi-même les tests qui prouvent les critères."
+        )
+    fin = (sortie or "")[-SORTIE_BORNEE:].strip() or "(les commandes n'ont rien affiché)"
+    return f"""L'Atelier vient de faire passer les commandes de contrôle du projet sur ce \
+livrable, et elles passent :
+{_commandes(profil)}
+Voici la fin de ce qu'elles ont affiché :
+[début de la sortie]
+{fin}
+[fin de la sortie]
+Ne relance pas toute la suite : elle vient de passer sur ce code, la relancer coûterait des \
+minutes sans rien t'apprendre. Lance seulement le test précis dont tu as besoin pour voir un \
+comportement."""
+
+
+def consigne_verificateur_bornee(
+    tache: Tache, contrat: Contrat, profil: dict, sortie_controles: str, copie_jetable: bool = False
+) -> str:
+    """La vérification bornée : chaque critère, et seulement ce qui bloquerait. Le vérificateur
+    reçoit la fin de la sortie des contrôles (`SORTIE_BORNEE` caractères au plus), ne relance
+    pas la suite, ne fait pas de mutations, et peut rendre des `remarques` qui ne recalent pas."""
+    return f"""Tu es vérificateur. Tu contrôles le livrable d'un autre agent, sans rien corriger. \
+Ta vérification est bornée : tu contrôles chaque critère et tu ne cherches que ce qui bloquerait.
+{_cadre(copie_jetable, mutations=False)}
+
+{_but_et_criteres(tache, contrat)}
+
+{_perimetre_verifie(tache)}
+
+## Les contrôles déjà faits
+{_controles_faits(profil, sortie_controles)}
+
+## Ce que tu dois faire
+Cette tâche a été jugée assez simple pour une vérification bornée : une vérification complète, \
+mutations comprises, y coûterait plus de temps qu'elle n'en ferait gagner. Les tâches délicates \
+la gardent.
+1. Vérifie chaque critère par toi-même : lis le code qui le remplit et le test qui le prouve, et \
+lance ce test, ou un essai court, quand la lecture ne suffit pas. Un critère sans preuve n'est \
+pas rempli.
+2. Ne cherche que ce qui bloquerait : un comportement faux, une perte de travail ou de données, \
+une faille de sécurité. Le reste (style, nom, commentaire, cas improbable) ne recale pas : \
+note-le dans "remarques".
+3. Ne fais pas de mutation (changer le code pour voir si un test échoue) : juge en lisant si \
+chaque test vérifie bien ce qu'il annonce.
+
+{SUIVI}
+{EMPECHE_VERIFICATEUR}
+
+## Ce que tu rends
+{_VERDICT}
+{_CHAMP_EMPECHE}
+{_CHAMP_REMARQUES}
+Sois strict sur ce qui bloque : n'écris "valide": true que pour ce que tu as constaté \
+toi-même. Une remarque ne recale pas : un livrable correct avec des remarques est valide.
 """
 
 
@@ -174,6 +468,11 @@ après l'autre ; des tâches indépendantes travaillent ensemble.
 pour être écrite et contrôlée. Pas par prudence, ni pour imposer un ordre de lecture : si deux \
 tâches doivent seulement s'accorder sur une interface, décris-la dans « fournit » et \
 « attend », et elles partent ensemble.
+- Une vraie dépendance se reconnaît aux contrôles. Chaque tâche est contrôlée seule, dans sa \
+copie partie de la branche principale, avec toute la suite de tests du projet : une tâche dont \
+le code a besoin de celui d'une autre pour passer ces contrôles (elle l'importe, l'appelle, ou \
+ses tests s'en servent) en dépend vraiment, même sans fichier commun. Lancée sans elle, elle \
+échouerait à coup sûr.
 - Donne à chaque tâche le périmètre le plus étroit : des fichiers nommés plutôt que des \
 dossiers entiers. Un motif avec `*` couvre tout ce qui est en dessous, sous-dossiers compris, \
 et retient toute autre tâche qui y touche. Donne aussi à chaque tâche son propre fichier de \
@@ -185,6 +484,13 @@ deux tâches qui pouvaient travailler ensemble.
 - Les fichiers que plusieurs tâches voudraient toucher (journal, documentation, fichier \
 d'assemblage ou de branchement, où l'on inscrit chaque nouveau morceau) sortent des tâches. \
 Confie-les à une tâche finale de raccord, qui dépend des autres et fait ces ajouts en une fois.
+- Quand une règle du projet demande que chaque tâche touche un même fichier (une ligne au \
+journal des décisions par tâche, par exemple), ce fichier n'entre dans le périmètre d'aucune \
+tâche : sinon elles passeraient toutes l'une après l'autre. Chaque ouvrier écrit à la place, \
+dans sa fiche de relais (`chantier/relais/<id de la tâche>.md`), ce qu'il y aurait mis : ce \
+dossier est toujours permis, et la fiche entre dans la branche principale avec le travail de la \
+tâche. La tâche de raccord dépend de ces tâches et recopie ces lignes dans le fichier ; \
+écris-le dans ses critères, en nommant le fichier et les fiches à relire.
 - Une grosse tâche se coupe en morceaux indépendants, qui partent ensemble, plutôt qu'en \
 étapes enchaînées, chaque fois que c'est possible.
 - Vise le moins de vagues possible. Avant de rendre le plan, relis-le : pour chaque dépendance \
@@ -215,6 +521,9 @@ Sur la toute dernière ligne, un objet JSON seul :
 
 BALISE_PLAN = "```atelier-plan"
 BALISE_OUTILS = "```atelier-outils"
+# Le début du message de blocage : le rôle de l'orchestrateur le cite, pour qu'il reconnaisse
+# un message de l'atelier et non de la personne.
+MARQUE_BLOCAGE = "[Blocage signalé par l'atelier"
 
 ROLE_ORCHESTRATEUR = """Tu es l'orchestrateur d'un atelier de code à plusieurs agents. Tu parles \
 à la personne qui dirige le projet sans écrire le code elle-même. Réponds en français, en la \
@@ -246,6 +555,17 @@ Ne demande jamais de modifier ce fichier à la main. Forme :
 « commandes_permises » s'ajoute à ce qui est déjà permis ; « commandes » remplace la liste des \
 contrôles. Chacune de ces deux clés peut être omise.
 
+Blocage. Quand une tâche est bloquée (refusée plusieurs fois pour la même raison, ou un agent \
+empêché de travailler par une commande refusée ou un outil absent), l'atelier t'envoie un \
+message qui commence par « """ + MARQUE_BLOCAGE + """ ». Il ne vient pas de la personne, mais \
+c'est elle qui lira ta réponse : réponds-lui comme d'habitude. Ce message cite la tâche, ses \
+derniers refus et ce qui a empêché les agents. Cherche la cause dans le dépôt, toujours en \
+lecture seule. Si c'est une commande ou un outil, propose dans un bloc atelier-outils le plus \
+petit réglage qui lève l'empêchement : accepté d'un clic, il prend effet aussitôt et la tâche \
+peut repartir. \
+Sinon, explique simplement ce qui bloque et ce que la personne peut choisir. Permettre une \
+commande reste sa décision : dis ce que le réglage permettrait aux agents, sans insister.
+
 Quand l'objectif est assez clair pour être découpé, termine ta réponse par un bloc de plan. \
 S'il manque une information qui change le découpage, pose une seule question à la place. Tant \
 que le contrat n'est pas validé, tu peux rendre un nouveau bloc pour corriger le plan ; une \
@@ -260,6 +580,73 @@ Forme du bloc, à la toute fin de la réponse :
 "type": "courante", "pourquoi": "...", "criteres": ["..."], "perimetre": ["chemin/fichier.py"], \
 "depend_de": [], "fournit": "...", "attend": "..."}]}
 ```
+"""
+
+# Le message de blocage cite au plus les cinq derniers refus, chacun par sa fin : la cause est
+# presque toujours dans les dernières lignes d'un verdict ou d'une sortie de contrôles.
+PREUVES_MAX = 5
+PREUVE_MAX_CARACTERES = 2000
+
+
+def _preuve(preuve) -> str:
+    """Une preuve : le texte d'un refus, ou une entrée d'historique (tentative, issue, détail)."""
+    if isinstance(preuve, dict):
+        reperes = [f"tentative {preuve['tentative']}" if "tentative" in preuve else ""]
+        reperes += [str(preuve.get(cle) or "") for cle in ("origine", "issue")]
+        tete = ", ".join(r for r in reperes if r)
+        detail = str(preuve.get("detail") or "")
+        texte = f"{tete} : {detail}" if tete else detail
+    else:
+        texte = str(preuve)
+    texte = texte.strip()
+    if len(texte) > PREUVE_MAX_CARACTERES:
+        texte = "[…] " + texte[-PREUVE_MAX_CARACTERES:]
+    return texte
+
+
+def message_de_diagnostic(tache: Tache, preuves: list, empechements: list[str]) -> str:
+    """Le message envoyé à l'orchestrateur quand une tâche est bloquée.
+
+    `preuves` : les derniers refus, du plus ancien au plus récent, en textes ou en entrées
+    d'historique ; seuls les `PREUVES_MAX` derniers sont cités. `empechements` : ce qui a
+    empêché les agents (commande refusée, outil absent), tel que le moteur l'a relevé.
+    """
+    retenues = [p for p in (_preuve(p) for p in list(preuves or [])[-PREUVES_MAX:]) if p]
+    empeches = [str(e).strip() for e in empechements or [] if str(e).strip()]
+    liste_empeches = "\n".join(f"- {e}" for e in empeches) or (
+        "- aucun n'a été signalé : ce sont les refus qui se répètent."
+    )
+    return f"""{MARQUE_BLOCAGE} : tâche {tache.id}]
+La tâche {tache.id} — {tache.titre} est bloquée : elle revient à la personne, et les autres \
+tâches continuent. La relancer telle quelle ne changerait rien tant que la cause reste là.
+
+Ce qu'elle devait faire :
+{_liste(tache.criteres)}
+Son périmètre : {", ".join(tache.perimetre) or "(aucun)"}
+
+Ses derniers refus, du plus ancien au plus récent :
+{_liste(retenues)}
+
+Ce qui a empêché les agents de travailler :
+{liste_empeches}
+
+Ce que l'atelier attend de toi :
+1. Cherche la cause, en lecture seule : lis les refus, puis le code et les tests qu'ils citent. \
+Une commande refusée, un outil absent, un critère impossible à tenir dans le périmètre, un test \
+qui échoue pour une raison étrangère à la tâche ?
+2. Si c'est une commande interdite aux agents, propose le réglage dans un bloc atelier-outils, \
+sous la forme que décrit ton rôle ; l'état du chantier donne les commandes déjà permises. Dans \
+« commandes_permises », mets le premier mot de la commande (par exemple uv), jamais un lanceur \
+général (bash, sh, sudo, env, npx) : il permettrait aux agents de tout lancer. Ne mets \
+« commandes » que si les contrôles eux-mêmes sont en cause, et alors leur liste entière, \
+puisqu'elle remplace l'actuelle. Accepté, le réglage relance la tâche seule, au même niveau. Si \
+c'est un outil absent de l'ordinateur, dis lequel : un réglage ne l'installe pas, sauf s'il \
+suffit de permettre aux agents la commande qui l'installe.
+3. Sinon, dis en quelques phrases simples ce qui bloque et ce que la personne peut faire : \
+relancer au même niveau, relancer un cran plus haut, ou abandonner la tâche.
+Permettre une commande reste la décision de la personne : dis-lui ce que le réglage permettrait \
+aux agents, puis laisse-la choisir. Ne rends pas de bloc de plan : le plan ne change plus une \
+fois le contrat validé.
 """
 
 
@@ -300,20 +687,41 @@ def dernier_json(texte: str) -> dict | None:
     return trouve
 
 
+# Les champs facultatifs du verdict : `remarques` (défauts mineurs, qui ne recalent pas) et
+# `empeche` (ce qui a empêché de vérifier). Absents ou vides, ils ne figurent pas dans le verdict
+# lu : un verdict sans eux se lit exactement comme avant.
+CHAMPS_FACULTATIFS = ("remarques", "empeche")
+
+
+def _textes(valeur) -> list[str]:
+    """Une chaîne ou une liste de chaînes, rendue en liste de textes non vides ; le reste est
+    ignoré."""
+    elements = valeur if isinstance(valeur, list) else [valeur]
+    return [e.strip() for e in elements if isinstance(e, str) and e.strip()]
+
+
 def lire_verdict(texte: str) -> dict:
-    """Lit le verdict du vérificateur. Un verdict illisible vaut refus."""
+    """Lit le verdict du vérificateur. Un verdict illisible vaut refus.
+
+    `remarques` et `empeche` sont rendus en listes de textes quand ils sont là et non vides.
+    """
     objet = dernier_json(texte) or {}
     if "valide" not in objet:
-        return {
+        verdict = {
             "valide": False,
             "motif": "ne_sait_pas",
             "resume": "Le vérificateur n'a pas rendu de verdict lisible.",
         }
-    motif = objet.get("motif")
-    if motif not in ("bacle", "ne_sait_pas", "consigne"):
-        motif = "bacle"
-    return {
-        "valide": bool(objet["valide"]),
-        "motif": motif,
-        "resume": str(objet.get("resume", "")).strip(),
-    }
+    else:
+        motif = objet.get("motif")
+        if motif not in ("bacle", "ne_sait_pas", "consigne"):
+            motif = "bacle"
+        verdict = {
+            "valide": bool(objet["valide"]),
+            "motif": motif,
+            "resume": str(objet.get("resume", "")).strip(),
+        }
+    for cle in CHAMPS_FACULTATIFS:
+        if textes := _textes(objet.get(cle)):
+            verdict[cle] = textes
+    return verdict

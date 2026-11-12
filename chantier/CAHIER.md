@@ -104,6 +104,12 @@ Mesuré par le second vérificateur : 0 faux positif sur 3 046 paires de refus r
 - la demande de blocage cite les deux détails, pour que la personne voie une confusion ;
 - amélioration essayée par le vérificateur, à reprendre : des vetos sur les identifiants (noms de tests, numéros de critère, codes ruff) ramènent les faux positifs synthétiques de 14 à 4 sans perdre le cas réel.
 
+### V3-consignes : accepté ; remarques mineures pour une retouche groupée
+- « n'entre dans le périmètre d'aucune tâche » : préciser « d'aucune autre tâche que le raccord ».
+- Reprise après un débord : dire de défaire la modification avec l'outil d'édition, pas par git (qui ouvrirait une carte).
+- La re-vérification ne dit pas que les remarques d'un verdict borné ne sont pas des points recalés.
+- Pour V3e : la règle « mécanique seule sans fichier modifié » doit compter les fichiers hors de `chantier/relais/`.
+
 ### Restes relevés par les vérificateurs de V0, V1 et M8
 - V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.
 - V1 : la consigne ne dit pas quoi faire d'un fichier que chaque tâche doit toucher (le journal d'un projet) ; la phrase de `plan.py` devient illisible quand beaucoup de tâches partagent un fichier ; aucun test ne garde les consignes ; accords (« toutes deux », « A et A ») ; récursion sur une chaîne de 1 000 tâches.
