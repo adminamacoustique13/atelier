@@ -118,6 +118,11 @@ Mesuré par le second vérificateur : 0 faux positif sur 3 046 paires de refus r
 - La panne pendant une reprise est tracée `reprise: false` ; les statistiques comptent la reprise comme un refus.
 - La démonstration enregistre 46 vues au lieu de 42 (quatre étapes de reprise) ; les trois essais concernés sont accordés.
 
+### V3b-serveur : accepté après seconde passe ; reste pour une retouche groupée
+- Le filtre des lanceurs laisse encore passer, au diagnostic et à la validation : la famille de `sudo` (`pkexec`, `runuser`, `chroot`), les shells à suffixe de version (`ksh93`, `zsh-5.9`), `wsl`, `py -c`, `pythonw -c` ; et, mineurs : `rbash`, `nu`, `xonsh`, `ssh`, `strace`, `toybox`, `expect`, `find -exec`, `awk`, `R -e`, `julia -e`, `yarn dlx`, `bun x`, `uv tool run`, `pipx run`. Rien ne passe sans le clic de la personne.
+- Les tests du filtre sont paramétrés sur la constante elle-même : retirer un nom de la liste ne fait échouer aucun test. Les paramétrer sur une liste écrite en dur dans le test.
+- Si la personne tranche un blocage pendant le diagnostic, la question de la demande d'outils promet encore une relance qui n'aura pas lieu.
+
 ### Restes relevés par les vérificateurs de V0, V1 et M8
 - V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.
 - V1 : la consigne ne dit pas quoi faire d'un fichier que chaque tâche doit toucher (le journal d'un projet) ; la phrase de `plan.py` devient illisible quand beaucoup de tâches partagent un fichier ; aucun test ne garde les consignes ; accords (« toutes deux », « A et A ») ; récursion sur une chaîne de 1 000 tâches.
