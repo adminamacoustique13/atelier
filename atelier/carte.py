@@ -893,19 +893,27 @@ class SuiviCarte:
     def _analyser(self) -> None:
         with self.verrou:
             self.travail, self.probleme = "analyse", ""
+        self._relever_puis_expliquer("L'analyse s'est arrêtée")
+        self.demarrer_veille()
+
+    def _relever_puis_expliquer(self, arret: str) -> None:
+        """Relève la carte, la sauve, puis explique ce qui reste à expliquer.
+
+        Une erreur ne remonte pas : elle est écrite dans `probleme`, précédée de `arret`. Dans
+        tous les cas, le travail en cours est remis à zéro à la fin.
+        """
         try:
             carte = relever(self.depot, self.carte)
             with self.verrou:
                 self.carte = carte
                 sauver(self.depot, carte)
             self._expliquer()
-        except Exception as erreur:  # noqa: BLE001 - l'analyse ne doit jamais tuer le serveur
+        except Exception as erreur:  # noqa: BLE001 - le travail de fond ne doit jamais tuer le serveur
             with self.verrou:
-                self.probleme = f"L'analyse s'est arrêtée : {erreur}"
+                self.probleme = f"{arret} : {erreur}"
         finally:
             with self.verrou:
                 self.travail, self.restants = "", 0
-        self.demarrer_veille()
 
     def _expliquer(self) -> None:
         with self.verrou:
@@ -966,18 +974,7 @@ class SuiviCarte:
         return True
 
     def _mettre_a_jour(self) -> None:
-        try:
-            carte = relever(self.depot, self.carte)
-            with self.verrou:
-                self.carte = carte
-                sauver(self.depot, carte)
-            self._expliquer()
-        except Exception as erreur:  # noqa: BLE001
-            with self.verrou:
-                self.probleme = f"La mise à jour de la carte s'est arrêtée : {erreur}"
-        finally:
-            with self.verrou:
-                self.travail, self.restants = "", 0
+        self._relever_puis_expliquer("La mise à jour de la carte s'est arrêtée")
 
     def signaler(self) -> None:
         """Une nouvelle version vient peut-être d'arriver : la veille regarde tout de suite."""

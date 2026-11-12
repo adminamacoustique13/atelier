@@ -17,7 +17,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M5. Une seule fonction pour appeler git | à lancer, attend une décision | Opus | complète, Fable | | |
 | M6a. Page : les petits calculs écrits plusieurs fois | vérifié | Opus | bornée, Opus : accepté | 1 | 758 tests, 365 vérifications dans le navigateur ; égalité avant/après prouvée par deux scripts indépendants (ouvrier, vérificateur) |
 | M6b. Page : envois au serveur, minuteries, tracés de fil | à lancer | Opus | bornée, Fable | | |
-| M7. Moteur et carte : doublons internes | à lancer, après M1 | Opus | complète, Fable | | |
+| M7. Moteur et carte : doublons internes | vérifié | Opus | complète, Fable : accepté | 1 | 758 tests inchangés et verts ; plus de 150 000 scénarios comparés avant/après sans écart ; 12 casses sur 28 vues par les tests, le reste couvert par la comparaison |
 
 ### Restes mineurs relevés par le vérificateur de M1, non corrigés
 - `atelier/guichet.py:20`, `SCENARIO_EPUISE` : le texte parle encore du « scénario de démonstration ». C'est une chaîne du code d'un garde-fou, hors du périmètre de M1.
@@ -39,6 +39,12 @@ Ils changeraient un comportement : ils attendent la décision de la personne res
 - Après un réglage d'outils refusé pour profil illisible, la demande reste marquée comme répondue : un second clic après correction ne fait rien.
 - Les deux phrases de raison (« pas lisible », « pas pu être écrit ») sont écrites à trois endroits de `serveur.py`.
 - Les tests existants ne voient pas une réécriture inutile du profil, ni un changement de son format (indentation, accents).
+
+### M7 : ce que le vérificateur a relevé
+- La réunion du calcul « monter puis vérifier le plafond » n'est que partielle, à raison : une garde différente s'intercale à chaque endroit, et tout réunir ferait lever une erreur là où le code rend aujourd'hui « non ».
+- Le critère 1 comptait une ligne qui sert aussi, légitimement, au contexte des agents : consigne mal posée par l'orchestrateur, signalée par l'ouvrier.
+- Tests qui manquent, antérieurs au chantier : une entrée d'historique ajoutée hors du verrou, le plafond dans `_relancer_seul`, et presque tout le suivi de la carte (texte du problème, relance de la veille, sauvegarde) ne feraient échouer aucun test.
+- Doublon noté par l'ouvrier, non traité : `_rendre` et `_demander` construisent la même demande.
 
 ## Contrôles communs
 

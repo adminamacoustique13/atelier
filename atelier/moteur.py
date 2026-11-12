@@ -153,6 +153,28 @@ class Moteur:
             self.chantier.cout_usd += resultat.cout_usd
             self.chantier.tokens += resultat.tokens
 
+    def _tracer(self, tache: Tache, issue: str, detail: str, decalage: int = 0) -> None:
+        """Sous le verrou : ajoute à l'historique de la tâche l'entrée d'une tentative.
+
+        Le décalage vaut 1 pour une tentative arrêtée avant son départ, qui n'a pas encore été
+        comptée dans `tache.tentatives`.
+        """
+        tache.historique.append(
+            {
+                "tentative": tache.tentatives + decalage,
+                "modele": tache.modele,
+                "effort": tache.effort,
+                "issue": issue,
+                "detail": detail,
+            }
+        )
+
+    def _sous_plafond(self, suivant: tuple[str, str] | None) -> bool:
+        """Dit si le cran proposé par `dosage.monter` existe et reste sous le plafond du contrat."""
+        contrat = self.chantier.contrat
+        plafond = (contrat.plafond_modele, contrat.plafond_effort)
+        return suivant is not None and dosage.dans_plafond(*suivant, plafond)
+
     def _rendre(self, tache: Tache, raison: str) -> None:
         """Rend une tâche à la personne responsable, avec une seule décision à prendre."""
         with self.verrou:
@@ -173,15 +195,7 @@ class Moteur:
     def _demander(self, tache: Tache, raison: str, detail: str) -> None:
         """Sous le verrou : rend la tâche après une panne, avec sa trace et sa décision."""
         tache.etat = "revenu"
-        tache.historique.append(
-            {
-                "tentative": tache.tentatives,
-                "modele": tache.modele,
-                "effort": tache.effort,
-                "issue": PANNE,
-                "detail": detail,
-            }
-        )
+        self._tracer(tache, PANNE, detail)
         self.chantier.demandes.append(
             {
                 "id": f"{tache.id}-{len(self.chantier.demandes) + 1}",
@@ -343,15 +357,7 @@ class Moteur:
                         self._enregistrement.discard(tache.id)
                     motif, detail = "ne_sait_pas", probleme
             with self.verrou:
-                tache.historique.append(
-                    {
-                        "tentative": tache.tentatives,
-                        "modele": tache.modele,
-                        "effort": tache.effort,
-                        "issue": motif or "valide",
-                        "detail": detail,
-                    }
-                )
+                self._tracer(tache, motif or "valide", detail)
             if motif is None:
                 with self.verrou:
                     tache.etat = "verifie"
@@ -396,15 +402,7 @@ class Moteur:
     def _arret_avant_depart(self, tache: Tache) -> None:
         """Rend la tâche arrêtée avant qu'un ouvrier n'ait travaillé, en gardant la trace."""
         with self.verrou:
-            tache.historique.append(
-                {
-                    "tentative": tache.tentatives + 1,
-                    "modele": tache.modele,
-                    "effort": tache.effort,
-                    "issue": ARRETEE,
-                    "detail": DETAIL_ARRET,
-                }
-            )
+            self._tracer(tache, ARRETEE, DETAIL_ARRET, decalage=1)
         self._rendre(tache, MOTIF_ARRET)
 
     def _juger(self, tache: Tache, resultat, dossier) -> tuple[str | None, str]:
@@ -499,10 +497,9 @@ class Moteur:
             self._noter(f"Refusée. {detail} Seconde chance au même niveau.", tache)
             return True
         suivant = dosage.monter(tache.modele, tache.effort, motif)
-        plafond = (contrat.plafond_modele, contrat.plafond_effort)
         with self.verrou:
             trop_de_montees = self.chantier.montees >= contrat.max_montees
-        if suivant is None or trop_de_montees or not dosage.dans_plafond(*suivant, plafond):
+        if trop_de_montees or not self._sous_plafond(suivant):
             self._rendre(tache, f"le plafond d'escalade du contrat est atteint. {detail}")
             return False
         with self.verrou:
@@ -518,13 +515,11 @@ class Moteur:
         Seulement RELANCES_AUTO fois par tâche, et sous le plafond d'escalade du contrat : au-delà,
         la tâche revient vers la personne responsable, comme avant.
         """
-        contrat = self.chantier.contrat
         suivant = dosage.monter(tache.modele, tache.effort, motif)
-        plafond = (contrat.plafond_modele, contrat.plafond_effort)
         with self.verrou:
             if tache.relances_auto >= RELANCES_AUTO:
                 return False
-            if suivant is None or not dosage.dans_plafond(*suivant, plafond):
+            if not self._sous_plafond(suivant):
                 return False
             tache.relances_auto += 1
             tache.modele, tache.effort = suivant
