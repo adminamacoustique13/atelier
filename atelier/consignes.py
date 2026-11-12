@@ -88,7 +88,8 @@ puis lance-le (par exemple `python3 essai_mutation.py`) ;
 lignes), pas de heredoc (`<<EOF`), pas de variable du shell (`$?`, `$(...)` : le code de \
 retour de la commande t'est déjà donné), pas de `sed -i` ni de `rm -rf`, pas de dossier \
 temporaire ailleurs (`mktemp`, `/tmp`). Claude Code ne sait pas découper ces commandes-là \
-sans risque : chacune demanderait une autorisation à la personne qui suit le chantier, et la ferait attendre.
+sans risque : chacune demanderait une autorisation à la personne qui suit le chantier, et \
+la ferait attendre.
 Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent ; \
 lis-les avant tes essais, qui y apparaîtraient ensuite."""
 
