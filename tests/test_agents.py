@@ -18,6 +18,10 @@ from claude_agent_sdk import PermissionResultAllow  # noqa: E402
 
 from atelier import agents  # noqa: E402
 from atelier.agents import (  # noqa: E402
+    COMMANDES_DEV,
+    GIT_LECTURE,
+    LECTURE_SHELL,
+    WEB_LECTURE,
     AgentClaude,
     AgentSimule,
     Resultat,
@@ -306,10 +310,10 @@ def test_une_regle_retenue_entre_deux_messages_vaut_des_le_suivant():
     profil = {"autorisations": []}
     agent, fabrique = claude([fin()], [fin()], profil=profil)
     converser(agent)
-    assert "Bash(ls:*)" not in fabrique.clients[0].options.allowed_tools
-    profil["autorisations"] = ["Bash(ls:*)"]  # « Toujours pour ce projet », écrit à chaud
+    assert "Bash(curl:*)" not in fabrique.clients[0].options.allowed_tools
+    profil["autorisations"] = ["Bash(curl:*)"]  # « Toujours pour ce projet », écrit à chaud
     converser(agent, reprise=True)
-    assert fabrique.clients[1].options.allowed_tools[-1] == "Bash(ls:*)"
+    assert fabrique.clients[1].options.allowed_tools[-1] == "Bash(curl:*)"
 
 
 def test_la_conversation_reste_en_lecture_seule_sans_les_commandes_du_projet():
@@ -323,8 +327,10 @@ def test_la_conversation_reste_en_lecture_seule_sans_les_commandes_du_projet():
     # les commandes permises d'office aux ouvriers (ici npm), non.
     retenues = ["Bash(npm install:*)", "WebFetch(domain:docs.python.org)"]
     assert options.allowed_tools[-2:] == retenues
-    assert all(o.startswith("Bash(git ") for o in options.allowed_tools[3:-2])
+    socle = GIT_LECTURE + LECTURE_SHELL + WEB_LECTURE
+    assert options.allowed_tools[3:-2] == socle
     assert "Bash(npm:*)" not in options.allowed_tools
+    assert not set(COMMANDES_DEV) & set(options.allowed_tools)
     assert "Bash(git status:*)" in options.allowed_tools
     assert set(options.disallowed_tools) >= ECRITURE
     assert options.permission_mode == "default"
@@ -881,3 +887,28 @@ def test_l_agent_simule_suit_un_changement_de_mode_en_marche():
 def test_lire_mode(valeur, attendu):
     assert agents.lire_mode(valeur) == attendu
     assert agents.mode_valide(valeur) is (valeur == attendu)
+
+
+# --- Le socle permis d'avance : de quoi travailler sans carte ------------------------------
+
+
+@pytest.mark.parametrize("contexte, lecture_seule", [(OUVRIER, False), (VERIFICATEUR, True)])
+def test_les_outils_courants_sont_permis_quel_que_soit_le_profil(contexte, lecture_seule):
+    agent, fabrique = claude([fin()], profil={"commandes_permises": []})
+    lancer(agent, contexte, lecture_seule)
+    allowed = set(fabrique.clients[0].options.allowed_tools)
+    attendus = {"Bash(ls:*)", "Bash(cat:*)", "Bash(pytest:*)", "Bash(ruff:*)", "Bash(node:*)"}
+    assert attendus | {"WebSearch"} <= allowed
+    assert set(COMMANDES_DEV + LECTURE_SHELL + GIT_LECTURE) <= allowed
+    assert "WebFetch" not in allowed
+
+
+def test_le_socle_ne_contient_ni_lanceur_ni_commande_qui_detruit():
+    from atelier.guichet import INTERPRETES, LANCEURS
+
+    noms = [r[len("Bash("):-len(":*)")] for r in LECTURE_SHELL + COMMANDES_DEV]
+    assert not set(noms) & LANCEURS
+    lecture = {r[len("Bash("):-len(":*)")] for r in LECTURE_SHELL}
+    assert not lecture & INTERPRETES
+    assert not lecture & {"sed", "awk", "find", "xargs", "sort", "rg", "less", "more", "echo"}
+    assert not set(noms) & {"rm", "mv", "cp", "chmod", "chown", "curl", "wget", "git"}

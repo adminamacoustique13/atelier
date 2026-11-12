@@ -91,7 +91,7 @@ Dans PowerShell :
    uv run python -m atelier servir --depot C:\chemin\de\ton\depot
    ```
 
-Cette voie est la moins sûre : les commandes que l'Atelier permet d'avance aux agents (`python3`, `npm`, `uv`...) portent leurs noms Linux et Mac, et la préparation des copies de travail par git n'a jamais tourné sous Windows. Si la démonstration marche mais que les vrais agents butent, passe par WSL.
+Cette voie est la moins sûre : les commandes que l'Atelier permet d'avance aux agents (`python3`, `npm`, `uv`, `pytest`, `ls`...) portent leurs noms Linux et Mac, et la préparation des copies de travail par git n'a jamais tourné sous Windows. Si la démonstration marche mais que les vrais agents butent, passe par WSL.
 
 ## Ce que tu dois regarder au premier lancement réel
 
