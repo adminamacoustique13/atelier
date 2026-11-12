@@ -21,7 +21,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 765 tests (1 nouveau, rouge sur le code de départ) ; le texte de l'arrêt n'est plus écrit qu'une fois dans `atelier/` |
 | M9. Profil : écriture d'un seul geste, réglage d'outils qu'on peut réessayer, valeur mal formée refusée | en cours | Opus | complète, Fable | 1 | |
 | M10. Les tests qui manquent : suivi de la carte, moteur | vérifié | Opus | bornée, Opus, par casses : accepté | 1 | 786 tests (14 nouveaux) ; les 12 casses de la consigne et 6 des 7 casses du vérificateur font échouer un test nouveau |
-| M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | en cours | Opus | mécanique, diff relu par l'orchestrateur | 1 | |
+| M10.1. Carte : une mise à jour réussie efface l'ancien message d'erreur ; deux tests de plus | vérifié | Opus | mécanique, diff relu par l'orchestrateur | 1 | 788 tests (2 nouveaux : l'un rouge avant la correction, l'autre rouge sous la casse 7b) ; deux lignes dans `_mettre_a_jour` |
 | M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | à lancer, après M6b | Opus | bornée, Fable | | |
 | M11. Le code qui ne vit que pour les tests : sorti du produit ou retiré | à lancer, après M5 et M9 | Opus | bornée, Fable | | |
 | M12. `serveur.py` découpé en modules | à lancer, après M9 et M11 | Opus | complète, Fable | | |

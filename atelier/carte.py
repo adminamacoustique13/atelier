@@ -968,6 +968,8 @@ class SuiviCarte:
         return True
 
     def _mettre_a_jour(self) -> None:
+        with self.verrou:
+            self.probleme = ""
         self._relever_puis_expliquer("La mise à jour de la carte s'est arrêtée")
 
     def signaler(self) -> None:

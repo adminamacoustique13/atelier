@@ -475,7 +475,6 @@ def test_une_erreur_de_l_explication_est_dite_et_le_travail_remis_a_zero(tmp_pat
     assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
     assert suivi.travail == "" and suivi.restants == 0
     assert carte.charger(d) == suivi.carte  # le relevé, fait avant l'erreur, est gardé
-    suivi.probleme = ""
     suivi._mettre_a_jour()
     assert suivi.probleme == "La mise à jour de la carte s'est arrêtée : Claude injoignable"
     assert suivi.travail == "" and suivi.restants == 0
@@ -505,3 +504,29 @@ def test_les_explications_recues_sont_sur_le_disque_meme_si_le_portrait_echoue(t
     assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
     sur_disque = carte.charger(d)
     assert carte.a_expliquer(sur_disque) == [] and sur_disque == suivi.carte
+
+
+def test_une_mise_a_jour_reussie_efface_le_probleme_de_la_precedente(tmp_path, monkeypatch):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d)
+    suivi._analyser()
+    with monkeypatch.context() as m:
+        m.setattr(carte, "relever", releve_en_panne)
+        suivi._mettre_a_jour()
+    assert suivi.probleme == "La mise à jour de la carte s'est arrêtée : disque illisible"
+    suivi._mettre_a_jour()
+    assert suivi.probleme == "" and carte.charger(d) == suivi.carte
+
+
+def test_une_erreur_sur_un_lot_est_dite_meme_si_la_synthese_reussit(tmp_path):
+    class LotEnPanne(FauxExplicateur):
+        def expliquer(self, texte):
+            if "=== Dossier" not in texte:  # un lot de fichiers, pas la synthèse
+                raise RuntimeError("Claude injoignable")
+            return super().expliquer(texte)
+
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d, LotEnPanne())
+    suivi._analyser()
+    assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
+    assert suivi.travail == "" and suivi.restants == 0
