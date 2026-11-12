@@ -4,7 +4,7 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| F1. Fichiers partagés et leur fusion | reprise à chaud (3 points bloquants du vérificateur) | Opus | complète, Opus : refusé une fois | 1 + 1 reprise | |
+| F1. Fichiers partagés et leur fusion | en seconde vérification (même vérificateur, à chaud) | Opus | complète, Opus : refusé une fois | 1 + 1 reprise | suite 1 697 dans sa copie, 25 tests de fusion |
 | F2. V3f : six places, vérificateur hors place, réveil, régulateur | en cours | Opus | complète, Opus | 1 | |
 | F3.1. Un outil refusé ne bloque que si un contrôle du projet en a besoin ; même règle pour le vérificateur | en cours (même ouvrier, à chaud) | Opus | bornée, Opus | 1 | |
 | F5. Un plan trop étroit est élargi avant d'être proposé (la forme du plan, écrite en V1, n'était branchée nulle part) | reportée à un prochain chantier (arrêtée sur décision de la personne responsable) | Opus | | | |
