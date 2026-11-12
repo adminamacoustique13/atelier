@@ -15,7 +15,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M3a. Archives et carte : table des efforts, format d'un coût | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (1 nouveau) ; égalité des deux formats prouvée par script sur 19 valeurs |
 | M3b. Serveur et rythme : nom d'agent, coupe aux balises, phrases du profil | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (2 nouveaux) ; remplacements d'expressions identiques |
 | M4. Serveur : une seule lecture et une seule écriture du profil | vérifié | Opus | complète, Fable : accepté | 1 | 761 tests (3 nouveaux, rouges sur le code de départ) ; 1 104 scénarios comparés avant/après sans différence ; 13 casses sur 14 vues par les tests |
-| M6b. (voir plus haut) | en vérification | Opus | bornée, Fable | 1 | |
+| M6b. Page : envois au serveur, minuteries de message, tracés de fil | vérifié | Opus | bornée, Fable : accepté | 1 | 365 vérifications dans le navigateur ; 211 comparaisons avant/après par le vérificateur, pannes du serveur comprises, sans différence |
 | M5a. Une base commune pour appeler git, adoptée par `projets`, `essai`, `carte` | en cours | Opus | complète, Fable | 1 | |
 | M5b. La base git adoptée par `controles` et `mise_a_jour` | à lancer, après M5a | Opus | complète, Fable | | |
 | M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | en cours | Sonnet | bornée, Opus | 1 | |
@@ -54,6 +54,12 @@ Ils changeraient un comportement : ils attendent la décision de la personne res
 - Le critère 1 comptait une ligne qui sert aussi, légitimement, au contexte des agents : consigne mal posée par l'orchestrateur, signalée par l'ouvrier.
 - Tests qui manquent, antérieurs au chantier : une entrée d'historique ajoutée hors du verrou, le plafond dans `_relancer_seul`, et presque tout le suivi de la carte (texte du problème, relance de la veille, sauvegarde) ne feraient échouer aucun test.
 - Doublon noté par l'ouvrier, non traité : `_rendre` et `_demander` construisent la même demande.
+
+### M6b : restes mineurs du vérificateur, repris dans la consigne de M8
+- Le paramètre `poser` de `messagePassager` porte le nom de la fonction globale `poser(id, html)`.
+- Trois commentaires à préciser : celui de `trace` et `arrondi` (« ne rendent pas la même chaîne » est trop absolu), celui d'`envoyer` (elle ne sert pas qu'à la conversation), celui du bouton « Arrêter », qui décrit le mécanisme à deux clics de `arreter()` ; le titre « Projets » et la doc de `demander` sont fondus en un bloc.
+- Une quatrième minuterie du même genre reste (`minuteMode`).
+- Les essais du dépôt ne couvrent les pannes du serveur que pour deux adresses : la preuve de M6b sur ce point vit dans des scripts hors dépôt.
 
 ## Contrôles communs
 

@@ -888,7 +888,7 @@ const franchies = new Set();
 /* Ce que la page retient entre deux interrogations du serveur : cartes d'autorisation (champ de refus,
    envoi en cours, remarque), détails dépliés, journaux dépliés, arrêts armés ou demandés, avis passager. */
 const cartes = new Map(), details = new Set(), deroules = new Set(), arretes = new Set();
-let armee = "", armeeLe = 0, minuteArmee = null, avisTexte = "", minuteAvis = null;
+let armee = "", armeeLe = 0, minuteArmee = null, avisTexte = "";
 
 const propre = (texte) => String(texte ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -1194,9 +1194,8 @@ function afficherConversation(vue) {
   habillerArret(arret, "orchestrateur");
 }
 
-/* Le bouton « Arrêter » : un premier clic l'arme quelques secondes (« Confirmer l'arrêt »), le second agit. */
 /* Ce que montre le bouton d'arrêt de la clé donnée : arrêt déjà demandé, armé ou au repos, son libellé et son titre. */
-function habitArret(cle) {
+function aspectArret(cle) {
   const demande = arretes.has(cle), arme = armee === cle;
   return {
     demande,
@@ -1205,17 +1204,18 @@ function habitArret(cle) {
     titre: arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.",
   };
 }
+/* Le bouton « Arrêter » : un premier clic l'arme quelques secondes (« Confirmer l'arrêt »), le second agit. */
 function habillerArret(bouton, cle) {
-  const habit = habitArret(cle);
-  bouton.textContent = habit.libelle;
-  bouton.disabled = habit.demande;
-  bouton.classList.toggle("confirme", habit.confirme);
-  bouton.title = habit.titre;
+  const aspect = aspectArret(cle);
+  bouton.textContent = aspect.libelle;
+  bouton.disabled = aspect.demande;
+  bouton.classList.toggle("confirme", aspect.confirme);
+  bouton.title = aspect.titre;
 }
 function boutonArret(cle, tache) {
-  const habit = habitArret(cle);
-  return `<button class="discret${habit.confirme ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${habit.demande ? " disabled" : ""}
-    title="${habit.titre}">${habit.libelle}</button>`;
+  const aspect = aspectArret(cle);
+  return `<button class="discret${aspect.confirme ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${aspect.demande ? " disabled" : ""}
+    title="${aspect.titre}">${aspect.libelle}</button>`;
 }
 
 /* ---------- Chantier ---------- */
@@ -1434,7 +1434,8 @@ function disposer(taches) {
   });
   return { couches: rangees, parents };
 }
-/* Un fil orthogonal, aux coins arrondis, qui passe par les points donnés. */
+/* Le chemin SVG d'un fil du Plan, orthogonal et aux coins arrondis, qui passe par les points donnés : les points répétés
+   sont écartés et les coordonnées écrites telles quelles (arrondi(), le même dessin pour la carte du code, les écrit au dixième). */
 function trace(points, rayon = 10) {
   const net = points.filter((p, i) => !i || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1]);
   let d = `M${net[0][0]},${net[0][1]}`;
@@ -1579,7 +1580,8 @@ function etatEtape(taches, attend) {
   if (etats.some((e) => e === "en_cours" || e === "en_verification")) return "en_cours";
   return etats.length && etats.every((e) => e === "verifie") ? "verifie" : "a_venir";
 }
-/* Arrondit les coins d'un tracé du sol (segments parallèles aux axes) en quarts de cercle. */
+/* Arrondit les coins d'un tracé du sol (segments parallèles aux axes) en quarts de cercle : à la différence de trace() et
+   d'arrondi(), qui rendent un chemin SVG, elle rend une liste de points où chaque coin est échantillonné en sept points. */
 function arrondir(points, rayon) {
   const sortie = [points[0]];
   for (let i = 1; i < points.length - 1; i++) {
@@ -1838,13 +1840,20 @@ function avancer() {
   if (attendue && !franchies.has(attendue)) { clearInterval(minuterie); minuterie = null; }
 }
 
-/* Un avis passager, sous la zone de saisie et en tête de « Ce qui t'attend ». */
-function dire(texte) {
-  avisTexte = texte;
-  clearTimeout(minuteAvis);
-  minuteAvis = setTimeout(() => { avisTexte = ""; rafraichir(); }, 9000);
-  rafraichir();
+/* Fabrique un message passager : la fonction rendue, appelée avec un texte et une durée en ms (sinon dureeParDefaut),
+   pose le texte, le montre, et l'efface au bout de cette durée (jamais si elle vaut 0, ni si le texte est vide).
+   Chaque message a sa propre minuterie : un nouveau texte annule l'effacement prévu du sien, jamais celui d'un autre. */
+function messagePassager(poser, montrer, dureeParDefaut) {
+  let effacement = null;
+  return (texte, duree = dureeParDefaut) => {
+    poser(texte);
+    clearTimeout(effacement);
+    if (texte && duree) effacement = setTimeout(() => { poser(""); montrer(); }, duree);
+    montrer();
+  };
 }
+/* Un avis passager, sous la zone de saisie et en tête de « Ce qui t'attend ». */
+const dire = messagePassager((texte) => { avisTexte = texte; }, () => rafraichir(), 9000);
 function rafraichir() {
   if (!derniere || derniere.aucun_projet) return;
   afficherConversation(derniere);
@@ -1853,7 +1862,14 @@ function rafraichir() {
   afficherPlan(derniere);
 }
 
-/* Rend la vue du serveur, ou null si la réponse n'est pas bonne. */
+/* Le seul POST vers le serveur, dont le corps est l'objet donné, écrit en JSON. Rend la promesse de fetch telle quelle :
+   ce que l'on fait de la réponse, d'une erreur ou d'une panne de réseau revient aux trois fonctions qui s'en servent,
+   envoyer(), envoyerSansAfficher() et demander(). */
+function posterJson(adresse, corps) {
+  return fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+}
+/* Envoie une action de la conversation et affiche la vue rendue (la rend aussi), null si la réponse est en erreur ; une panne
+   de réseau ou une réponse illisible lève, à l'appelant de la rattraper ; en démonstration rejouée, n'envoie rien et avance. */
 async function envoyer(adresse, corps) {
   if (rejoue) {
     if (adresse === "/api/arreter") { dire("Démonstration rejouée : il n'y a pas d'agent derrière, rien n'est arrêté."); return null; }
@@ -1864,7 +1880,7 @@ async function envoyer(adresse, corps) {
     if (!minuterie) minuterie = setInterval(avancer, 900);
     return null;
   }
-  const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
+  const retour = await posterJson(adresse, corps || {});
   if (!retour.ok) return null;
   const donnees = await retour.json();
   afficher(donnees);
@@ -1913,7 +1929,7 @@ async function arreter(cle, tache) {
    clic arme le bouton cinq secondes (« Confirmer la mise à jour »), le second lance la mise à jour. Si elle a
    réussi, Atelier s'arrête et son agent de lancement le relance : la page attend son retour sans alarme. */
 const DELAI_RETOUR = 2500, PATIENCE_RETOUR = 120000; // ms : un retour plus rapide n'est pas encore un redémarrage
-let majArmee = false, majArmeeLe = 0, minuteMaj = null, majEnvoi = false, majPhrase = "", minutePhrase = null, majAttente = null;
+let majArmee = false, majArmeeLe = 0, minuteMaj = null, majEnvoi = false, majPhrase = "", majAttente = null;
 
 const majDisponible = (vue) => Boolean(vue && vue.mise_a_jour && vue.mise_a_jour.disponible === true);
 function afficherMaj(vue) {
@@ -1930,12 +1946,8 @@ function afficherMaj(vue) {
   zone.hidden = !lignes.length;
   zone.innerHTML = lignes.join("");
 }
-function direMaj(texte, duree = 15000) {
-  majPhrase = texte;
-  clearTimeout(minutePhrase);
-  if (texte && duree) minutePhrase = setTimeout(() => { majPhrase = ""; afficherMaj(derniere); }, duree);
-  afficherMaj(derniere);
-}
+/* La phrase sous le bouton « Mettre à jour ». */
+const direMaj = messagePassager((texte) => { majPhrase = texte; }, () => afficherMaj(derniere), 15000);
 /* Appelée à chaque réponse réussie de /api/etat, dans charger() : Atelier est-il revenu après son redémarrage ? */
 function majRetour() {
   if (!majAttente) return;
@@ -1970,11 +1982,7 @@ async function mettreAJour() {
   if (rejoue) return direMaj("Démonstration rejouée : il n'y a rien à mettre à jour.");
   majEnvoi = true;
   direMaj("");
-  let donnees = null;
-  try {
-    const retour = await fetch("/api/mise-a-jour", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (retour.ok) donnees = await retour.json();
-  } catch (erreur) { donnees = null; }
+  const donnees = await envoyerSansAfficher("/api/mise-a-jour", {});
   majEnvoi = false;
   const faite = donnees && donnees.mise_a_jour_faite;
   if (!faite || typeof faite.phrase !== "string") return direMaj("La demande n'est pas partie. Réessaie dans un instant.");
@@ -1986,19 +1994,15 @@ async function mettreAJour() {
 /* « Nouveau chantier » : un clic ouvre un petit formulaire où l'on nomme le chantier qui se termine (le nom
    proposé vient du serveur), puis « Archiver et repartir » l'envoie. Le serveur archive le chantier avec son
    journal et repart d'une page blanche. Le formulaire ouvert n'est jamais réécrit par les rafraîchissements. */
-let ncEnvoi = false, ncPhrase = "", minuteNcPhrase = null;
+let ncEnvoi = false, ncPhrase = "";
 function afficherNouveauChantier() {
   const zone = document.getElementById("nouveau-chantier-phrase"), bouton = document.getElementById("archiver-chantier");
   zone.textContent = ncPhrase;
   bouton.disabled = ncEnvoi;
   bouton.textContent = ncEnvoi ? "Archivage en cours" : "Archiver et repartir";
 }
-function direNouveauChantier(texte, duree = 20000) {
-  ncPhrase = texte;
-  clearTimeout(minuteNcPhrase);
-  if (texte && duree) minuteNcPhrase = setTimeout(() => { ncPhrase = ""; afficherNouveauChantier(); }, duree);
-  afficherNouveauChantier();
-}
+/* La phrase du formulaire « Nouveau chantier ». */
+const direNouveauChantier = messagePassager((texte) => { ncPhrase = texte; }, () => afficherNouveauChantier(), 20000);
 function ouvrirNouveauChantier(ouvrir) {
   const form = document.getElementById("form-nouveau-chantier"), champ = document.getElementById("nom-chantier");
   form.hidden = !ouvrir;
@@ -2021,12 +2025,8 @@ async function nouveauChantier() {
   if (rejoue) { ouvrirNouveauChantier(false); return direNouveauChantier("Démonstration rejouée : rien n'est archivé."); }
   ncEnvoi = true;
   afficherNouveauChantier();
-  let donnees = null;
-  try {
-    const nom = document.getElementById("nom-chantier").value.trim();
-    const retour = await fetch("/api/chantier/nouveau", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nom }) });
-    if (retour.ok) donnees = await retour.json();
-  } catch (erreur) { donnees = null; }
+  const nom = document.getElementById("nom-chantier").value.trim();
+  const donnees = await envoyerSansAfficher("/api/chantier/nouveau", { nom });
   ncEnvoi = false;
   const fait = donnees && donnees.nouveau_chantier;
   if (!fait || typeof fait.phrase !== "string") return direNouveauChantier("La demande n'est pas partie. Réessaie dans un instant.");
@@ -2077,9 +2077,11 @@ async function lireArchive(id) {
   if (!fenetre.open) fenetre.showModal();
   fenetre.scrollTop = 0;
 }
+/* Envoie sans rien afficher et rend le JSON de la réponse, ou null pour tout échec (erreur, panne de réseau, réponse illisible) :
+   elle ne lève jamais. */
 async function envoyerSansAfficher(adresse, corps) {
   try {
-    const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
+    const retour = await posterJson(adresse, corps || {});
     return retour.ok ? await retour.json() : null;
   } catch (erreur) { return null; }
 }
@@ -2402,6 +2404,8 @@ const etiquetteNoms = (noms) => {
   const montres = deux ? [noms[0], noms[1]] : [noms[0]];
   return montres.map(coupe).join(" · ") + (noms.length > montres.length ? ` +${noms.length - montres.length}` : "");
 };
+/* Le chemin SVG d'un fil de la carte du code : le même dessin que trace(), mais coordonnées écrites au dixième et coins
+   de 9 par défaut, si bien que les deux ne rendent pas la même chaîne et restent séparées. */
 function arrondi(points, rayon = 9) {
   let d = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`;
   for (let i = 1; i < points.length - 1; i++) {
@@ -2798,9 +2802,11 @@ async function charger() {
     } else document.getElementById("rail-point").textContent = "Le moteur ne répond pas. Relance l'atelier.";
   }
 }
-/* Projets : passer de l'un à l'autre, en créer un nouveau. */
+/* Projets : passer de l'un à l'autre, en créer un nouveau.
+   demander() envoie et rend { ok, donnees } avec le JSON lu même quand la réponse est en erreur, pour en montrer le champ
+   « erreur » ; une panne de réseau ou une réponse illisible lève. */
 async function demander(adresse, corps) {
-  const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+  const retour = await posterJson(adresse, corps);
   return { ok: retour.ok, donnees: await retour.json() };
 }
 function changerDeProjet(vue) { signatureFil = ""; choisie = null; afficher(vue); if (location.hash === "#accueil") chargerAccueil(); }
