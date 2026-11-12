@@ -49,7 +49,7 @@ h1, h2, h3, p, ol, ul { margin: 0; }
 }
 
 /* Le verre : les cartes sont translucides, c'est la plaque qui floute la pièce */
-.carte, .rail, .fiche, .toile, .boite, .carte-fil, .msg.toi, .infos {
+.carte, .rail, .fiche, .toile, .code-cadre, .boite, .carte-fil, .msg.toi, .infos {
   background: var(--verre); border: 1px solid var(--bord); border-top-color: var(--reflet); box-shadow: var(--ombre);
 }
 @media (prefers-reduced-transparency: reduce) { .app { background: var(--fond); -webkit-backdrop-filter: none; backdrop-filter: none; } }
@@ -377,7 +377,76 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
 .mode-reel, .mode-refus { color: var(--refus); }
 @media (prefers-reduced-motion: reduce) { button.mode-btn.envoi { animation: none; } }
 
+/* Code : l'explorateur, la constellation et la fiche d'un fichier */
+.code-cadre { flex: 1 1 0; min-width: 0; min-height: 0; border-radius: var(--rayon); padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.code-barre { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 16px; }
+.segments { display: inline-flex; padding: 2px; border-radius: 999px; border: 1px solid var(--bord); background: var(--creux); }
+.segments button { height: 26px; padding: 0 12px; border: 0; background: transparent; color: var(--discret); font-size: 12px; font-weight: 400; }
+.segments button[aria-pressed="true"] { background: var(--verre-fort); color: var(--texte); font-weight: 500; }
+.code-etat { flex: 1 1 260px; min-width: 0; overflow-wrap: anywhere; }
+.code-etat .souci { color: var(--refus); }
+.code-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.code-actions .petit { max-width: 520px; }
+.code-corps { flex: 1 1 0; min-height: 0; position: relative; display: flex; flex-direction: column; }
+.code-vide { margin: auto; max-width: 520px; display: flex; flex-direction: column; gap: 10px; text-align: center; }
+.code-vide:empty { display: none; }
+.code-vide h2 { font-size: 15px; font-weight: 600; }
+.code-vide p { color: var(--discret); font-size: 13px; line-height: 1.5; }
+.explorateur { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; font-size: 13px; }
+.explorateur[hidden], .constellation[hidden] { display: none; }
+button.ligne-arbre { display: grid; grid-template-columns: 14px auto minmax(0, 1fr) auto auto; align-items: center; gap: 6px; width: 100%; height: 28px;
+  padding: 0 8px 0 calc(6px + var(--p, 0) * 16px); border: 0; border-radius: 8px; background: transparent; color: var(--texte); font-weight: 400; text-align: left; }
+button.ligne-arbre:hover { background: var(--creux); }
+button.ligne-arbre.choisi { background: var(--verre-fort); }
+button.ligne-arbre.dossier { grid-template-columns: 14px minmax(0, 1fr) auto auto; color: var(--discret); }
+.ligne-arbre .chevron { color: var(--faible); font-size: 10px; }
+.ligne-arbre .nom { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ligne-arbre .petit { font-family: var(--mono); font-size: 10.5px; }
+.ligne-arbre .marques { display: flex; gap: 4px; }
+.ligne-arbre .badge { margin-left: 0; }
+.badge.change { color: var(--reussite); border-color: color-mix(in srgb, var(--reussite) 55%, transparent); }
+.point-change { width: 6px; height: 6px; border-radius: 50%; background: var(--reussite); }
+.pastille-genre { width: 7px; height: 7px; border-radius: 50%; background: var(--couleur, var(--texte)); }
+.g-code { --couleur: #ffffff; } .g-tests { --couleur: var(--reussite); } .g-page { --couleur: #a9c1ff; }
+.g-reglages { --couleur: #d4c4ff; } .g-documentation { --couleur: rgba(255, 255, 255, 0.5); } .g-autre { --couleur: rgba(255, 255, 255, 0.35); }
+.fichier-ouvert { margin: 2px 0 8px calc(42px + var(--p, 0) * 16px); padding: 8px 12px; border-left: 1px solid var(--trait); display: flex; flex-direction: column; gap: 6px; }
+.fichier-ouvert > p { color: var(--discret); line-height: 1.45; }
+ul.pieces { list-style: none; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+ul.pieces li { display: grid; grid-template-columns: minmax(80px, max-content) minmax(0, 1fr); gap: 10px; font-size: 12px; color: var(--discret); }
+ul.pieces code { font-family: var(--mono); font-size: 11.5px; color: var(--texte); overflow-wrap: anywhere; }
+ul.pieces .vide { color: var(--faible); }
+@keyframes clignoter { 50% { opacity: 0.3; } }
+@keyframes clignoter-fond { 50% { background: color-mix(in srgb, var(--refus) 22%, transparent); } }
+button.ligne-arbre.en-cours { animation: clignoter-fond 1.2s ease-in-out infinite; }
+.badge.en-cours-badge { animation: clignoter 1.2s ease-in-out infinite; }
+.constellation { flex: 1 1 0; min-height: 0; position: relative; border-radius: 14px; background: var(--creux); overflow: hidden; touch-action: none; cursor: grab; }
+.constellation.glisse { cursor: grabbing; }
+.constellation svg { display: block; width: 100%; height: 100%; }
+.constellation .lien { stroke: rgba(255, 255, 255, 0.16); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.constellation .lien.actif { stroke: rgba(255, 255, 255, 0.75); }
+.constellation .amas { fill: var(--faible); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; text-anchor: middle; pointer-events: none; }
+.etoile { cursor: pointer; }
+.etoile circle.zone { fill: transparent; stroke: none; animation: none; }
+.etoile circle:not(.zone) { fill: var(--couleur); stroke: transparent; stroke-width: 2; vector-effect: non-scaling-stroke; }
+.etoile text { fill: var(--texte); font-size: 11px; text-anchor: middle; opacity: 0; pointer-events: none; paint-order: stroke; stroke: rgba(30, 30, 34, 0.8); stroke-width: 3px; }
+.etoile:hover text, .etoile:focus text, .etoile.nomme text, .etoile.choisi text, .etoile.voisin text, .etoile.en-cours text { opacity: 1; }
+.etoile.nouveau circle:not(.zone), .etoile.modifie circle:not(.zone) { stroke: var(--reussite); }
+.etoile.choisi circle:not(.zone) { stroke: #ffffff; stroke-width: 3; }
+.etoile.en-cours circle:not(.zone) { stroke: var(--refus); stroke-width: 3; animation: clignoter 1s ease-in-out infinite; }
+.constellation.focus .etoile:not(.choisi):not(.voisin) { opacity: 0.35; }
+.constellation-outils { position: absolute; right: 10px; bottom: 10px; display: flex; gap: 6px; }
+.legende-code { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 11.5px; color: var(--faible); }
+.legende-code span { display: inline-flex; align-items: center; gap: 6px; }
+.fiche .en-cours-texte { color: var(--refus); }
+.fiche button.lien-fichier { height: auto; padding: 2px 0; border: 0; background: transparent; color: var(--discret); font-family: var(--mono); font-size: 11.5px; font-weight: 400; text-align: left; overflow-wrap: anywhere; }
+.fiche button.lien-fichier:hover { color: var(--texte); text-decoration: underline; }
+@media (prefers-reduced-motion: reduce) {
+  button.ligne-arbre.en-cours, .badge.en-cours-badge, .etoile.en-cours circle:not(.zone) { animation: none; }
+  button.ligne-arbre.en-cours { background: color-mix(in srgb, var(--refus) 18%, transparent); }
+}
 @media (max-width: 900px) {
+  #vue-code.active { flex-direction: column; overflow-y: auto; }
+  .code-cadre { flex: none; min-height: 70vh; }
   .journal { padding-left: 0; }
   button.agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
   button.agent-ligne .role { display: none; }
@@ -409,6 +478,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
       <a href="#conversation" data-onglet="conversation">Conversation<i class="pt" id="pt-conversation" title="Quelque chose t'attend"></i></a>
       <a href="#chantier" data-onglet="chantier">Chantier<span class="cpt" id="cpt-chantier"></span></a>
       <a href="#plan" data-onglet="plan">Plan<span class="cpt" id="cpt-plan"></span></a>
+      <a href="#code" data-onglet="code">Code<i class="pt" id="pt-code" title="Un agent modifie le code en ce moment"></i></a>
     </nav>
     <div class="pousse"></div>
     <button type="button" class="discret" id="maj" data-action="maj" hidden>Mettre à jour</button>
@@ -466,6 +536,25 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
       <article class="carte"><h2>Fil du chantier</h2><ol class="evenements" id="evenements"></ol></article>
       <article class="carte" id="carte-archives" hidden><h2>Chantiers archivés</h2><div class="archives" id="archives"></div></article>
     </div>
+  </section>
+
+  <section class="vue" id="vue-code" aria-label="Code">
+    <div class="code-cadre">
+      <div class="code-barre">
+        <div class="segments" role="group" aria-label="Affichage du code">
+          <button type="button" data-action="code-vue" data-vue="explorateur" aria-pressed="true">Explorateur</button>
+          <button type="button" data-action="code-vue" data-vue="constellation" aria-pressed="false">Constellation</button>
+        </div>
+        <p class="petit code-etat" id="code-etat" aria-live="polite"></p>
+        <div class="code-actions" id="code-actions"></div>
+      </div>
+      <div class="code-corps">
+        <div class="code-vide" id="code-vide"></div>
+        <div class="explorateur" id="explorateur" hidden></div>
+        <div class="constellation" id="constellation" hidden></div>
+      </div>
+    </div>
+    <aside class="fiche" id="fiche-code" aria-label="Détail du fichier"></aside>
   </section>
 
   <section class="vue" id="vue-plan" aria-label="Plan">
@@ -1070,6 +1159,7 @@ function afficher(vue) {
   infos.hidden = ![...infos.children].some((e) => e.textContent);
   document.getElementById("cpt-chantier").textContent = vue.taches.length ? `${verifiees}/${vue.taches.length}` : "";
   document.getElementById("cpt-plan").textContent = vue.taches.length || "";
+  afficherCode(vue);
   document.getElementById("pt-conversation").classList.toggle("allume", ilFautRepondre(vue));
   const presents = new Set(agentsDe(vue).map((a) => a.tache || "orchestrateur"));
   [...arretes].forEach((cle) => { if (!presents.has(cle)) arretes.delete(cle); });
@@ -1082,12 +1172,13 @@ function afficher(vue) {
 }
 
 function onglet() {
-  const nom = ["conversation", "chantier", "plan"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "conversation";
+  const nom = ["conversation", "chantier", "plan", "code"].includes(location.hash.slice(1)) ? location.hash.slice(1) : "conversation";
   document.querySelectorAll(".vue").forEach((v) => v.classList.toggle("active", v.id === `vue-${nom}`));
   document.querySelectorAll(".onglets a").forEach((a) => {
     if (a.dataset.onglet === nom) a.setAttribute("aria-current", "page"); else a.removeAttribute("aria-current");
   });
   if (nom === "conversation") { const cadre = document.getElementById("fil"); cadre.scrollTop = cadre.scrollHeight; }
+  if (nom === "code" && derniere) { afficherCode(derniere); chargerCarte(true); }
 }
 window.addEventListener("hashchange", onglet);
 
@@ -1355,6 +1446,307 @@ async function envoyerSansAfficher(adresse, corps) {
 }
 document.getElementById("fermer-archive").addEventListener("click", () => document.getElementById("archive").close());
 
+/* ---------- Code : l'explorateur, la constellation et la fiche d'un fichier ----------
+   Le serveur garde la carte du code (vue.carte en donne l'état ; /api/carte/lire la carte complète, relue quand sa
+   version change). Les fichiers qu'un agent modifie en ce moment arrivent avec chaque vue et clignotent. */
+let carteComplete = null, carteVersion = -1, carteChargement = false, vueCode = "explorateur", fichierChoisi = "";
+let estimationCarte = null, codePhrase = "", disposition = null, zoomCiel = { x: 0, y: 0, k: 1 }, glisseCiel = null;
+const dossiersOuverts = new Set(), fichiersOuverts = new Set(), positionsCiel = new Map();
+const GENRES_FR = { code: "Code", tests: "Tests", page: "Interface", "réglages": "Réglages", documentation: "Documentation", autre: "Autre" };
+const genreClasse = (g) => "g-" + (g === "réglages" ? "reglages" : g);
+const carteDe = (vue) => (vue && vue.carte) || { etat: "absente", en_cours: [] };
+const nomCourt = (chemin) => chemin.split("/").pop();
+const pluriel = (n, mot) => `${n} ${mot}${n > 1 ? "s" : ""}`;
+function enCoursDe(vue) {
+  const carte = new Map();
+  for (const e of carteDe(vue).en_cours || []) carte.set(e.chemin, e.agents || []);
+  return carte;
+}
+
+async function chargerCarte(force) {
+  const resume = carteDe(derniere);
+  if (rejoue || resume.etat !== "prete" || carteChargement) return;
+  if (!force && resume.version === carteVersion) return;
+  carteChargement = true;
+  const donnees = await envoyerSansAfficher("/api/carte/lire", {});
+  carteChargement = false;
+  if (!donnees || !donnees.carte_complete) return;
+  const premiere = !carteComplete;
+  carteComplete = donnees.carte_complete;
+  carteVersion = carteComplete.version;
+  if (premiere) ouvrirDossiersDeDepart();
+  disposition = disposerCiel(carteComplete.fichiers, carteComplete.liens);
+  afficherCode(derniere);
+}
+function ouvrirDossiersDeDepart() {
+  if (carteComplete.fichiers.length > 80) return;
+  for (const f of carteComplete.fichiers) { const premier = f.chemin.split("/")[0]; if (f.chemin.includes("/")) dossiersOuverts.add(premier); }
+}
+
+function etatCodeHtml(resume, enCours) {
+  const morceaux = [];
+  if (resume.travail === "analyse") morceaux.push("Analyse du code en cours…");
+  if (resume.travail === "explications") morceaux.push(`Explications en cours : encore ${pluriel(resume.restants || 0, "fichier")}.`);
+  if (resume.etat === "prete") {
+    let ligne = pluriel(resume.fichiers, "fichier");
+    if (!resume.auto) ligne += `, ${resume.expliques} expliqué${resume.expliques > 1 ? "s" : ""}`;
+    if (!resume.auto && resume.a_expliquer && !resume.travail) ligne += `, ${resume.a_expliquer} en attente`;
+    ligne += ` · analysé le ${resume.analyse_le}`;
+    if (resume.changements) ligne += ` · dernière version le ${resume.maj_le} : ${resume.changements}`;
+    if (!resume.auto) ligne += ` · coût équivalent ${resume.cout}`;
+    morceaux.push(ligne + ".");
+  }
+  if (enCours.size) morceaux.push(`<span class="souci">${pluriel(enCours.size, "fichier")} en cours de modification par un agent.</span>`);
+  if (resume.probleme) morceaux.push(`<span class="souci">${propre(resume.probleme)}</span>`);
+  if (codePhrase) morceaux.push(codePhrase);
+  return morceaux.map((m) => (m.startsWith("<span") ? m : propre(m))).join(" ");
+}
+function actionsCodeHtml(resume) {
+  if (rejoue || resume.travail) return "";
+  if (estimationCarte) {
+    return `<span class="petit">${propre(estimationCarte.phrase)}</span>
+      <button type="button" class="principal" data-action="lancer-analyse">Lancer l'analyse</button>
+      <button type="button" data-action="annuler-analyse">Annuler</button>`;
+  }
+  return resume.etat === "prete"
+    ? `<button type="button" class="discret" data-action="analyser-code" title="Relit tout le code ; les explications à jour sont gardées.">Réanalyser</button>`
+    : `<button type="button" class="principal" data-action="analyser-code">Analyser le code</button>`;
+}
+function videCodeHtml(resume) {
+  if (rejoue) return `<h2>La carte du code</h2><p>Elle n'existe pas dans la démonstration rejouée : ouvre la démonstration servie pour la voir.</p>`;
+  if (resume.etat === "prete") return carteComplete ? "" : `<p>Chargement de la carte…</p>`;
+  if (resume.travail || resume.etat === "en_cours") return `<h2>Analyse en cours</h2><p>L'Atelier relit le code du projet. La carte apparaît dans un instant.</p>`;
+  return `<h2>La carte du code</h2>
+    <p>L'Atelier relit le code du projet et te montre chaque fichier, à quoi il sert en français, et qui se sert de qui.</p>
+    <p>Ensuite la carte suit le code toute seule : à chaque nouvelle version, seuls les fichiers changés sont relus, et ce qu'un agent est en train de modifier clignote.</p>`;
+}
+
+function afficherCode(vue) {
+  const resume = carteDe(vue), enCours = enCoursDe(vue);
+  document.getElementById("pt-code").classList.toggle("allume", enCours.size > 0);
+  if (location.hash !== "#code") return;
+  if (resume.etat === "prete" && resume.version !== carteVersion) chargerCarte(false);
+  document.getElementById("code-etat").innerHTML = etatCodeHtml(resume, enCours);
+  poser("code-actions", actionsCodeHtml(resume));
+  poser("code-vide", videCodeHtml(resume));
+  const pret = Boolean(carteComplete) && resume.etat === "prete";
+  document.querySelectorAll('[data-action="code-vue"]').forEach((b) => b.setAttribute("aria-pressed", String(b.dataset.vue === vueCode)));
+  document.getElementById("explorateur").hidden = !pret || vueCode !== "explorateur";
+  document.getElementById("constellation").hidden = !pret || vueCode !== "constellation";
+  if (pret && vueCode === "explorateur") poser("explorateur", arbreHtml(arbreDe(carteComplete.fichiers), 0, enCours));
+  if (pret && vueCode === "constellation") dessinerCiel(enCours);
+  poser("fiche-code", pret ? ficheCodeHtml(enCours) : "");
+}
+
+/* L'explorateur : les dossiers et les fichiers, comme dans un éditeur de code, avec à quoi sert chacun. */
+function arbreDe(fichiers) {
+  const racine = { chemin: "", dossiers: new Map(), fichiers: [] };
+  for (const f of fichiers) {
+    let noeud = racine, chemin = "";
+    for (const partie of f.chemin.split("/").slice(0, -1)) {
+      chemin = chemin ? `${chemin}/${partie}` : partie;
+      if (!noeud.dossiers.has(partie)) noeud.dossiers.set(partie, { nom: partie, chemin, dossiers: new Map(), fichiers: [] });
+      noeud = noeud.dossiers.get(partie);
+    }
+    noeud.fichiers.push(f);
+  }
+  return racine;
+}
+function contenuDe(noeud) { return [...noeud.fichiers, ...[...noeud.dossiers.values()].flatMap(contenuDe)]; }
+function arbreHtml(noeud, profondeur, enCours) {
+  let html = "";
+  for (const d of [...noeud.dossiers.values()].sort((a, b) => a.nom.localeCompare(b.nom))) {
+    const ouvert = dossiersOuverts.has(d.chemin), dedans = contenuDe(d);
+    const actif = dedans.some((f) => enCours.has(f.chemin)), change = dedans.some((f) => f.statut);
+    html += `<button type="button" class="ligne-arbre dossier${actif && !ouvert ? " en-cours" : ""}" style="--p:${profondeur}" data-action="dossier" data-chemin="${propre(d.chemin)}" aria-expanded="${ouvert}">
+      <span class="chevron" aria-hidden="true">${ouvert ? "▾" : "▸"}</span><span class="nom">${propre(d.nom)}</span>
+      <span class="marques">${change && !ouvert ? `<i class="point-change" title="Changé dans la dernière version"></i>` : ""}</span><span class="petit">${dedans.length}</span></button>`;
+    if (ouvert) html += arbreHtml(d, profondeur + 1, enCours);
+  }
+  for (const f of [...noeud.fichiers].sort((a, b) => a.chemin.localeCompare(b.chemin))) html += fichierHtml(f, profondeur, enCours);
+  return html;
+}
+function badgesHtml(f, enCours) {
+  return (enCours.has(f.chemin) ? `<span class="badge en-cours-badge">En cours</span>` : "")
+    + (f.statut === "nouveau" ? `<span class="badge change">Nouveau</span>` : f.statut === "modifie" ? `<span class="badge change">Modifié</span>` : "");
+}
+function fichierHtml(f, profondeur, enCours) {
+  const ouvert = fichiersOuverts.has(f.chemin);
+  const classes = `ligne-arbre fichier ${genreClasse(f.genre)}${enCours.has(f.chemin) ? " en-cours" : ""}${f.chemin === fichierChoisi ? " choisi" : ""}`;
+  let html = `<button type="button" class="${classes}" style="--p:${profondeur}" data-action="fichier" data-chemin="${propre(f.chemin)}" aria-expanded="${ouvert}" title="${propre(f.chemin)}">
+    <span class="chevron" aria-hidden="true">${ouvert ? "▾" : "▸"}</span><i class="pastille-genre" aria-hidden="true"></i><span class="nom">${propre(nomCourt(f.chemin))}</span>
+    <span class="marques">${badgesHtml(f, enCours)}</span><span class="petit">${f.lignes} l.</span></button>`;
+  if (ouvert) html += `<div class="fichier-ouvert" style="--p:${profondeur}"><p>${propre(f.resume)}</p>${piecesHtml(f)}</div>`;
+  return html;
+}
+function piecesHtml(f) {
+  if (!f.pieces.length) return "";
+  const publiques = f.pieces.filter((p) => !p.nom.startsWith("_")), internes = f.pieces.length - publiques.length;
+  const lignes = publiques.map((p) => `<li><code>${propre(p.nom)}</code>${p.role ? `<span>${propre(p.role)}</span>` : `<span class="vide">Pas encore expliquée.</span>`}</li>`).join("");
+  const reste = internes ? `<p class="petit">Et ${internes} partie${internes > 1 ? "s" : ""} interne${internes > 1 ? "s" : ""}, qui servent à celles-ci.</p>` : "";
+  return (lignes ? `<ul class="pieces">${lignes}</ul>` : "") + reste;
+}
+
+/* La constellation : une étoile par fichier, rangées en amas par dossier, reliées quand l'une se sert de l'autre. */
+const groupeDe = (f) => (f.chemin.includes("/") ? f.chemin.split("/")[0] : "racine");
+function graine(texte) { let h = 2166136261; for (const c of texte) { h ^= c.charCodeAt(0); h = Math.imul(h, 16777619); } return ((h >>> 0) % 10000) / 10000; }
+function rayonDe(f) { return Math.max(3.5, Math.min(14, 3 + Math.sqrt(f.lignes) / 3)); }
+function disposerCiel(fichiers, liens) {
+  const visibles = fichiers.length > 600 ? [...fichiers].sort((a, b) => b.lignes - a.lignes).slice(0, 600) : fichiers;
+  const groupes = [...new Set(visibles.map(groupeDe))].sort();
+  const rayon = groupes.length > 1 ? 120 + 30 * groupes.length : 0;
+  const centres = new Map(groupes.map((g, i) => { const a = (2 * Math.PI * i) / groupes.length - Math.PI / 2; return [g, { x: Math.cos(a) * rayon, y: Math.sin(a) * rayon }]; }));
+  const noeuds = visibles.map((f) => {
+    const ancien = positionsCiel.get(f.chemin), c = centres.get(groupeDe(f));
+    return { f, x: ancien ? ancien.x : c.x + (graine(f.chemin) - 0.5) * 90, y: ancien ? ancien.y : c.y + (graine(`${f.chemin}#`) - 0.5) * 90, vx: 0, vy: 0, fixe: Boolean(ancien) };
+  });
+  const index = new Map(noeuds.map((n, i) => [n.f.chemin, i]));
+  const aretes = liens.map(([a, b]) => [index.get(a), index.get(b)]).filter(([a, b]) => a !== undefined && b !== undefined);
+  const tours = noeuds.every((n) => n.fixe) ? 0 : noeuds.some((n) => n.fixe) ? 90 : 320;
+  for (let t = 0; t < tours; t++) {
+    const chaleur = 1 - t / tours;
+    for (let i = 0; i < noeuds.length; i++) for (let j = i + 1; j < noeuds.length; j++) {
+      const a = noeuds[i], b = noeuds[j], dx = a.x - b.x, dy = a.y - b.y, d2 = Math.max(dx * dx + dy * dy, 30), force = 2600 / d2;
+      a.vx += dx * force / Math.sqrt(d2); a.vy += dy * force / Math.sqrt(d2); b.vx -= dx * force / Math.sqrt(d2); b.vy -= dy * force / Math.sqrt(d2);
+    }
+    for (const [i, j] of aretes) {
+      const a = noeuds[i], b = noeuds[j], dx = b.x - a.x, dy = b.y - a.y, d = Math.max(Math.hypot(dx, dy), 1), force = (d - 85) * 0.012;
+      a.vx += dx / d * force; a.vy += dy / d * force; b.vx -= dx / d * force; b.vy -= dy / d * force;
+    }
+    for (const n of noeuds) {
+      const c = centres.get(groupeDe(n.f));
+      n.vx += (c.x - n.x) * 0.007 - n.x * 0.001; n.vy += (c.y - n.y) * 0.007 - n.y * 0.001;
+      const pas = Math.hypot(n.vx, n.vy), borne = (12 * chaleur + 1) * (n.fixe ? 0.25 : 1);
+      if (pas > borne) { n.vx *= borne / pas; n.vy *= borne / pas; }
+      n.x += n.vx; n.y += n.vy; n.vx *= 0.6; n.vy *= 0.6;
+    }
+  }
+  for (const n of noeuds) positionsCiel.set(n.f.chemin, { x: n.x, y: n.y });
+  const grands = new Set([...visibles].sort((a, b) => b.lignes - a.lignes).slice(0, 10).map((f) => f.chemin));
+  return { noeuds, aretes, groupes, grands, coupe: fichiers.length - visibles.length };
+}
+function voisinsDe(chemin) {
+  const voisins = new Set();
+  for (const [a, b] of carteComplete.liens) { if (a === chemin) voisins.add(b); if (b === chemin) voisins.add(a); }
+  return voisins;
+}
+function dessinerCiel(enCours) {
+  if (!disposition) disposition = disposerCiel(carteComplete.fichiers, carteComplete.liens);
+  const { noeuds, aretes, groupes, grands } = disposition;
+  if (!noeuds.length) return poser("constellation", `<p class="calme" style="margin: auto; padding: 40px; text-align: center">Aucun fichier à montrer.</p>`);
+  const xs = noeuds.map((n) => n.x), ys = noeuds.map((n) => n.y), marge = 60;
+  const x0 = Math.min(...xs) - marge, y0 = Math.min(...ys) - marge, l = Math.max(...xs) - x0 + marge, h = Math.max(...ys) - y0 + marge;
+  const voisins = fichierChoisi ? voisinsDe(fichierChoisi) : new Set();
+  const traits = aretes.map(([i, j]) => {
+    const a = noeuds[i], b = noeuds[j], actif = fichierChoisi && (a.f.chemin === fichierChoisi || b.f.chemin === fichierChoisi);
+    return `<line class="lien${actif ? " actif" : ""}" x1="${a.x.toFixed(1)}" y1="${a.y.toFixed(1)}" x2="${b.x.toFixed(1)}" y2="${b.y.toFixed(1)}"/>`;
+  }).join("");
+  const amas = groupes.map((g) => {
+    const membres = noeuds.filter((n) => groupeDe(n.f) === g), cx = membres.reduce((s, n) => s + n.x, 0) / membres.length;
+    return `<text class="amas" x="${cx.toFixed(1)}" y="${(Math.min(...membres.map((n) => n.y - rayonDe(n.f))) - 30).toFixed(1)}">${propre(g)}</text>`;
+  }).join("");
+  const etoiles = noeuds.map((n) => {
+    const f = n.f, r = rayonDe(f);
+    const classes = ["etoile", genreClasse(f.genre), f.statut, enCours.has(f.chemin) ? "en-cours" : "", grands.has(f.chemin) ? "nomme" : "",
+      f.chemin === fichierChoisi ? "choisi" : "", voisins.has(f.chemin) ? "voisin" : ""].filter(Boolean).join(" ");
+    return `<g class="${classes}" transform="translate(${n.x.toFixed(1)} ${n.y.toFixed(1)})" data-action="etoile" data-chemin="${propre(f.chemin)}" tabindex="0" role="button" aria-label="${propre(f.chemin)}">
+      <circle class="zone" r="${(r + 8).toFixed(1)}"/><circle r="${r.toFixed(1)}"/><text y="${(-r - 5).toFixed(1)}">${propre(nomCourt(f.chemin))}</text></g>`;
+  }).join("");
+  const z = zoomCiel, coupe = disposition.coupe ? `<p class="petit" style="position: absolute; left: 12px; bottom: 10px">Les ${disposition.coupe} plus petits fichiers ne sont pas montrés.</p>` : "";
+  poser("constellation", `<svg viewBox="${x0.toFixed(0)} ${y0.toFixed(0)} ${l.toFixed(0)} ${h.toFixed(0)}" role="img" aria-label="Constellation des fichiers du projet">
+    <g id="ciel" transform="translate(${z.x} ${z.y}) scale(${z.k})">${traits}${amas}${etoiles}</g></svg>${coupe}
+    <div class="constellation-outils"><button type="button" class="discret" data-action="recentrer">Recentrer</button></div>`);
+  document.getElementById("constellation").classList.toggle("focus", Boolean(fichierChoisi));
+}
+function appliquerZoom() {
+  const ciel = document.getElementById("ciel");
+  if (ciel) ciel.setAttribute("transform", `translate(${zoomCiel.x} ${zoomCiel.y}) scale(${zoomCiel.k})`);
+}
+function pointSvg(e) {
+  const svg = document.querySelector("#constellation svg"), matrice = svg.getScreenCTM().inverse();
+  const p = new DOMPoint(e.clientX, e.clientY).matrixTransform(matrice);
+  return { x: p.x, y: p.y };
+}
+const ciel = document.getElementById("constellation");
+ciel.addEventListener("wheel", (e) => {
+  if (!ciel.querySelector("svg")) return;
+  e.preventDefault();
+  const p = pointSvg(e), k = Math.min(6, Math.max(0.3, zoomCiel.k * (e.deltaY < 0 ? 1.15 : 1 / 1.15)));
+  zoomCiel = { x: p.x - (p.x - zoomCiel.x) * (k / zoomCiel.k), y: p.y - (p.y - zoomCiel.y) * (k / zoomCiel.k), k };
+  appliquerZoom();
+}, { passive: false });
+ciel.addEventListener("pointerdown", (e) => {
+  if (!ciel.querySelector("svg") || e.target.closest("button")) return;
+  glisseCiel = { depart: pointSvg(e), zoom: { ...zoomCiel }, bouge: false, id: e.pointerId };
+});
+ciel.addEventListener("pointermove", (e) => {
+  if (!glisseCiel) return;
+  const p = pointSvg(e), dx = p.x - glisseCiel.depart.x, dy = p.y - glisseCiel.depart.y;
+  if (!glisseCiel.bouge && Math.hypot(dx, dy) < 4) return;
+  if (!glisseCiel.bouge) { glisseCiel.bouge = true; ciel.classList.add("glisse"); ciel.setPointerCapture(glisseCiel.id); }
+  zoomCiel = { ...glisseCiel.zoom, x: glisseCiel.zoom.x + dx, y: glisseCiel.zoom.y + dy };
+  appliquerZoom();
+});
+function finGlisse() { if (glisseCiel && glisseCiel.bouge) { ciel.classList.remove("glisse"); ciel.dataset.vientDeGlisser = "1"; setTimeout(() => delete ciel.dataset.vientDeGlisser, 0); } glisseCiel = null; }
+ciel.addEventListener("pointerup", finGlisse);
+ciel.addEventListener("pointercancel", finGlisse);
+ciel.addEventListener("keydown", (e) => { const etoile = e.target.closest(".etoile"); if (etoile && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); choisirFichier(etoile.dataset.chemin); } });
+
+/* La fiche d'un fichier : à quoi il sert, ses parties, de qui il se sert et qui se sert de lui. */
+function legendeCodeHtml() {
+  const genres = ["code", "tests", "page", "réglages", "documentation"].map((g) => `<span class="${genreClasse(g)}"><i class="pastille-genre"></i>${GENRES_FR[g]}</span>`).join("");
+  return `<div class="legende-code">${genres}</div>
+    <p class="petit">Contour turquoise : nouveau ou modifié dans la dernière version. Orange qui clignote : un agent y travaille en ce moment. Taille : la longueur du fichier.</p>`;
+}
+function listeFichiersHtml(titre, chemins) {
+  if (!chemins.length) return "";
+  return `<section><h3>${titre}</h3>${chemins.sort().map((c) => `<button type="button" class="lien-fichier" data-action="choisir-fichier" data-chemin="${propre(c)}">${propre(c)}</button>`).join("")}</section>`;
+}
+function ficheCodeHtml(enCours) {
+  const f = carteComplete.fichiers.find((x) => x.chemin === fichierChoisi);
+  if (!f) {
+    const supprimes = carteComplete.supprimes.length ? `<section><h3>Supprimés dans la dernière version</h3><ul class="fichiers">${carteComplete.supprimes.map((c) => `<li>${propre(c)}</li>`).join("")}</ul></section>` : "";
+    const naissants = carteComplete.nouveaux_absents.length ? `<section><h3>En préparation par un agent</h3><ul class="fichiers">${carteComplete.nouveaux_absents.map((c) => `<li>${propre(c)}</li>`).join("")}</ul></section>` : "";
+    return `<header><h2>Aucun fichier choisi</h2><p class="petit">Clique un fichier dans l'explorateur ou une étoile de la constellation : son rôle s'affiche ici.</p></header>${naissants}${supprimes}<section>${legendeCodeHtml()}</section>`;
+  }
+  const agents = enCours.get(f.chemin) || [];
+  const sert = carteComplete.liens.filter(([a]) => a === f.chemin).map(([, b]) => b);
+  const utilise = carteComplete.liens.filter(([, b]) => b === f.chemin).map(([a]) => a);
+  const statut = f.statut === "nouveau" ? " · nouveau dans la dernière version" : f.statut === "modifie" ? " · modifié dans la dernière version" : "";
+  const provisoire = f.attente && !carteDe(derniere).auto ? `<p class="petit">Explication provisoire, tirée du code lui-même : celle de Claude arrive.</p>` : "";
+  return `<header><h2>${propre(nomCourt(f.chemin))}</h2><p class="petit">${propre(f.chemin)}</p>
+      <p class="petit">${GENRES_FR[f.genre] || f.genre} · ${f.lignes} lignes${statut}</p>
+      ${agents.length ? `<p class="en-cours-texte">En cours de modification par ${propre(agents.join(", "))}.</p>` : ""}</header>
+    <section><h3>À quoi il sert</h3><p>${propre(f.resume)}</p>${f.detail ? `<p class="calme">${propre(f.detail)}</p>` : ""}${provisoire}</section>
+    ${f.pieces.length ? `<section><h3>Ses parties</h3>${piecesHtml(f)}</section>` : ""}
+    ${listeFichiersHtml("Il se sert de", sert)}${listeFichiersHtml("Ils se servent de lui", utilise)}`;
+}
+function choisirFichier(chemin) {
+  fichierChoisi = chemin;
+  const parties = chemin.split("/");
+  for (let i = 1; i < parties.length; i++) dossiersOuverts.add(parties.slice(0, i).join("/"));
+  afficherCode(derniere);
+  if (vueCode === "explorateur") {
+    const ligne = [...document.querySelectorAll("#explorateur .ligne-arbre.fichier")].find((b) => b.dataset.chemin === chemin);
+    if (ligne) ligne.scrollIntoView({ block: "nearest" });
+  }
+}
+async function analyserCode() {
+  if (rejoue) return;
+  codePhrase = "Estimation en cours…";
+  afficherCode(derniere);
+  const donnees = await envoyerSansAfficher("/api/carte/estimer", {});
+  codePhrase = donnees && donnees.estimation ? "" : "L'estimation n'a pas pu se faire. Réessaie dans un instant.";
+  estimationCarte = donnees && donnees.estimation ? donnees.estimation : null;
+  afficherCode(derniere);
+}
+async function lancerAnalyse() {
+  estimationCarte = null;
+  const donnees = await envoyerSansAfficher("/api/carte/analyser", {});
+  codePhrase = donnees && donnees.analyse ? (donnees.analyse.fait ? "" : donnees.analyse.phrase) : "L'analyse n'a pas pu partir. Réessaie dans un instant.";
+  if (donnees && Array.isArray(donnees.taches)) afficher(donnees); else afficherCode(derniere);
+}
+
 function agir(cible) {
   const action = cible.dataset.action;
   if (action === "valider") envoyer("/api/contrat/valider");
@@ -1370,6 +1762,15 @@ function agir(cible) {
   if (action === "nouveau-chantier") ouvrirNouveauChantier(true);
   if (action === "nouveau-chantier-annuler") ouvrirNouveauChantier(false);
   if (action === "lire-archive") lireArchive(cible.dataset.id);
+  if (action === "code-vue") { vueCode = cible.dataset.vue; afficherCode(derniere); }
+  if (action === "dossier") { const c = cible.dataset.chemin; if (dossiersOuverts.has(c)) dossiersOuverts.delete(c); else dossiersOuverts.add(c); afficherCode(derniere); }
+  if (action === "fichier") { const c = cible.dataset.chemin; if (fichiersOuverts.has(c)) fichiersOuverts.delete(c); else fichiersOuverts.add(c); choisirFichier(c); }
+  if (action === "etoile" && !document.getElementById("constellation").dataset.vientDeGlisser) choisirFichier(fichierChoisi === cible.dataset.chemin ? "" : cible.dataset.chemin);
+  if (action === "choisir-fichier") choisirFichier(cible.dataset.chemin);
+  if (action === "recentrer") { zoomCiel = { x: 0, y: 0, k: 1 }; appliquerZoom(); }
+  if (action === "analyser-code") analyserCode();
+  if (action === "lancer-analyse") lancerAnalyse();
+  if (action === "annuler-analyse") { estimationCarte = null; afficherCode(derniere); }
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();

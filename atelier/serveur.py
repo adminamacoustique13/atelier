@@ -9,6 +9,7 @@ import json
 import os
 import sys
 import threading
+import time
 import uuid
 from collections import deque
 from contextlib import suppress
@@ -17,6 +18,7 @@ from pathlib import Path
 
 from atelier import archives, dosage
 from atelier.agents import MODE_PAR_DEFAUT, MODES_OUVRIERS, AgentSimule, lire_mode, mode_valide
+from atelier.carte import ExplicateurAuto, ExplicateurClaude, SuiviCarte
 from atelier.consignes import (
     BALISE_OUTILS,
     BALISE_PLAN,
@@ -366,6 +368,9 @@ class Activite:
 ACCEPTER_OUTILS, REFUSER_OUTILS = "Accepter ce réglage", "Refuser"
 
 
+RACINE_ATELIER = Path(__file__).resolve().parent.parent  # la démonstration cartographie l'Atelier
+EN_COURS_TTL_S = 3.0  # le travail en cours des agents est relu au plus toutes les 3 secondes
+
 ACCUEIL = "Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage."
 CHANTIER_OCCUPE = (
     "Un agent travaille ou l'orchestrateur répond : attends qu'il ait fini, ou arrête-le, "
@@ -421,6 +426,16 @@ class Atelier:
         self.sur_vue = None
         self.moteur = Moteur(chantier, agent, controles, profil, sur_changement=self._sauver)
         self.archives = archives.lister(self.depot)  # relue à chaque archivage, pas à chaque vue
+        # La carte du code : en démonstration, celle de l'Atelier lui-même, expliquée par ses
+        # propres commentaires ; un vrai projet fait écrire ses explications par Claude.
+        simule = isinstance(agent, AgentSimule)
+        explicateur = ExplicateurAuto() if simule else ExplicateurClaude(self.depot)
+        self.carte = SuiviCarte(
+            RACINE_ATELIER if mode == "démonstration" else self.depot, explicateur
+        )
+        if self.carte.carte is not None and mode != "démonstration":
+            self.carte.demarrer_veille()
+        self._en_cours_cache: tuple[float, dict] = (0.0, {})
         if not chantier.taches and not chantier.evenements:
             chantier.noter(ACCUEIL, auteur="orchestrateur")
         if isinstance(profil, dict) and "mode_ouvriers" in profil and not mode_valide(lu):
@@ -515,6 +530,8 @@ class Atelier:
             ecrire_cahier(chantier, self.depot / "chantier" / "CAHIER.md")
             if self.sur_vue:
                 self.sur_vue(self.vue())
+        if hasattr(self, "carte"):
+            self.carte.signaler()  # une tâche vient peut-être d'entrer dans le code
 
     def en_marche(self) -> bool:
         return bool(self.fil and self.fil.is_alive())
@@ -538,6 +555,7 @@ class Atelier:
         donnees["agents"] = self.activite.agents()
         donnees["mode_ouvriers"] = self._vue_mode()
         donnees["archives"] = list(self.archives)
+        donnees["carte"] = self.carte.resume(self.en_cours())
         donnees["nom_propose"] = archives.nom_propose(self.moteur.chantier)
         controles = self.moteur.controles
         if hasattr(controles, "distant"):
@@ -826,6 +844,79 @@ class Atelier:
         else:
             self._sauver()
         return {"fait": True, "phrase": phrase}
+
+    # --- la carte du code ---------------------------------------------------------------
+
+    def en_cours(self) -> dict[str, list[str]]:
+        """Les fichiers que les agents sont en train de modifier, et par qui : {chemin: [agents]}.
+
+        Lu dans la copie de travail de chaque tâche en cours, au plus toutes les 3 secondes. En
+        démonstration, rien n'est modifié pour de vrai : chaque tâche en cours fait clignoter
+        deux fichiers de la carte, toujours les mêmes.
+        """
+        maintenant = time.monotonic()
+        if maintenant - self._en_cours_cache[0] < EN_COURS_TTL_S:
+            return self._en_cours_cache[1]
+        with self.moteur.verrou:
+            actives = [
+                t for t in self.moteur.chantier.taches if t.etat in ("en_cours", "en_verification")
+            ]
+        noms = {}
+        for agent in self.activite.agents():
+            noms.setdefault(agent.get("tache", ""), []).append(agent["nom"])
+        resultat: dict[str, list[str]] = {}
+        for tache in actives:
+            for chemin in self._fichiers_en_cours(tache):
+                resultat.setdefault(chemin, []).extend(noms.get(tache.id) or [f"tâche {tache.id}"])
+        self._en_cours_cache = (maintenant, resultat)
+        return resultat
+
+    def _fichiers_en_cours(self, tache) -> list[str]:
+        controles = self.moteur.controles
+        if hasattr(controles, "_arbre"):
+            dossier = controles._arbre(tache)
+            if not dossier.exists():
+                return []
+            with suppress(Exception):
+                return controles.fichiers_modifies(tache, dossier, None)
+            return []
+        if self.mode != "démonstration" or self.carte.carte is None:
+            return []
+        codes = sorted(c for c, f in self.carte.carte["fichiers"].items() if f["genre"] == "code")
+        if not codes:
+            return []
+        rang = sum(map(ord, tache.id)) % len(codes)
+        return sorted({codes[rang], codes[(rang + 3) % len(codes)]})
+
+    def estimer_carte(self) -> dict:
+        """Ce que coûterait l'analyse : combien de fichiers, combien d'appels à Claude."""
+        e = self.carte.estimer()
+        if self.mode == "démonstration":
+            phrase = (
+                f"Démonstration : la carte montre le code de l'Atelier, {e['fichiers']} fichiers. "
+                "Les explications sont tirées de ses commentaires, sans appel à Claude."
+            )
+        elif not self.carte.explicateur.reel:
+            phrase = (
+                f"{e['fichiers']} fichiers. Les explications sont tirées des commentaires du code."
+            )
+        elif not e["a_expliquer"]:
+            phrase = f"{e['fichiers']} fichiers, tous déjà expliqués : aucun appel à Claude."
+        else:
+            phrase = (
+                f"{e['fichiers']} fichiers, dont {e['a_expliquer']} à expliquer : environ "
+                f"{e['appels']} appel{'s' if e['appels'] > 1 else ''} à Claude (Sonnet), sur ton "
+                "abonnement. Ensuite, seuls les fichiers modifiés seront réexpliqués."
+            )
+        return {**e, "phrase": phrase}
+
+    def analyser_carte(self) -> dict:
+        if not self.carte.analyser():
+            return {"fait": False, "phrase": "L'analyse est déjà en cours."}
+        return {
+            "fait": True,
+            "phrase": "Analyse lancée : la carte se remplit au fil des explications.",
+        }
 
     def _contexte_archive(self) -> dict:
         """Ce que le journal dit de la livraison : le mode, le dépôt en ligne, le dernier envoi."""
@@ -1128,6 +1219,9 @@ ROUTES = {
         "nouveau_chantier": r.atelier.nouveau_chantier(c.get("nom", ""))
     },
     "/api/archives/lire": lambda r, c: {"archive": r.atelier.lire_archive(c["id"])},
+    "/api/carte/estimer": lambda r, c: {"estimation": r.atelier.estimer_carte()},
+    "/api/carte/analyser": lambda r, c: {"analyse": r.atelier.analyser_carte()},
+    "/api/carte/lire": lambda r, c: {"carte_complete": r.atelier.carte.vue(r.atelier.en_cours())},
 }
 
 

@@ -186,11 +186,29 @@ Le bouton « Relier à un dépôt en ligne », en haut à côté du nom du proje
 
 L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en ligne) mais ne le modifie jamais : la liaison passe par ce bouton, pas par des commandes à taper.
 
-## Les trois onglets
+## Les quatre onglets
 
 - **Conversation** : tu écris à l'orchestrateur. C'est une session Claude (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.
 - **Chantier** : le tableau de bord (point d'étape, ce qui t'attend, dosage, enveloppe, tâches, fil).
 - **Plan** : le graphe des tâches et de ce qui attend quoi. Un clic sur une tâche montre ses critères, son périmètre et ses tentatives.
+- **Code** : la carte du code du projet, décrite plus bas.
+
+## La carte du code
+
+L'onglet Code montre le code du projet de deux façons :
+
+- **L'explorateur**, comme dans un éditeur de code : les dossiers et les fichiers. Un clic déroule un fichier et dit, en français, à quoi il sert et à quoi servent ses parties (fonctions, classes).
+- **La constellation** : une étoile par fichier, rangées en amas par dossier, reliées quand l'une se sert de l'autre. La taille d'une étoile suit la longueur du fichier. Un clic met en avant ses voisines ; la molette zoome, un glisser déplace.
+
+Dans les deux vues, la fiche à droite dit à quoi sert le fichier choisi, de quels fichiers il se sert et lesquels se servent de lui.
+
+**Construire la carte.** Le bouton « Analyser le code » estime d'abord le travail : combien de fichiers, combien d'appels à Claude (Sonnet, effort faible, sur ton abonnement). Rien ne part avant « Lancer l'analyse ». Les dépendances et les parties sont lues dans le code lui-même, sans Claude ; seules les explications en français demandent Claude, par lots de huit fichiers. Pendant qu'elles arrivent, chaque fichier montre une explication provisoire tirée de ses commentaires. La carte est gardée dans `.atelier/carte.json`.
+
+**La carte suit le code.** Elle ne repart jamais de zéro : chaque fichier est reconnu à son empreinte git. Quand une nouvelle version arrive sur la branche du projet (une tâche fusionnée par l'Atelier, ou un commit fait ailleurs), un fil de fond la compare à la précédente en quinze secondes au plus, et seuls les fichiers nouveaux ou modifiés sont réexpliqués. Ils portent un contour turquoise et un badge « Nouveau » ou « Modifié » ; les fichiers supprimés sont listés dans la fiche.
+
+**Ce qui est en train de changer clignote.** Les fichiers qu'un agent modifie dans sa copie de travail clignotent en orange, dans l'explorateur comme dans la constellation, et la fiche dit quel agent y travaille. Le point orange de l'onglet Code s'allume tant qu'un agent travaille.
+
+Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqué par ses seuls commentaires : aucun appel à Claude. Les explications de Claude n'ont pas encore été essayées pour de vrai.
 
 ## Comment une tâche se déroule
 
@@ -212,6 +230,7 @@ Pas encore essayé avec de vrais agents : aucune machine du chantier n'était co
 |---|---|
 | `atelier/dosage.py` | Table de départ, échelles, montée d'un cran, choix du vérificateur |
 | `atelier/modele.py` | Tâche, contrat, chantier, et leur écriture en fichiers |
+| `atelier/carte.py` | La carte du code : relevé des fichiers, dépendances, explications par Claude, suivi des nouvelles versions |
 | `atelier/consignes.py` | Les consignes de l'ouvrier, du vérificateur et du découpage |
 | `atelier/agents.py` | Les agents : celui qui passe par le pont vers Claude, et le simulateur |
 | `atelier/sdk.py` | Le pont vers `claude-agent-sdk` : sessions, autorisations, arrêt |

@@ -1075,8 +1075,10 @@ def test_la_vue_porte_le_mode_des_ouvriers_et_ses_cinq_choix(tableau, tmp_path):
     serveur = tableau(atelier_simule(tmp_path))
     mode = serveur.etat()["mode_ouvriers"]
     assert (mode["choisi"], mode["libelle"], mode["appliques"]) == (
-        "acceptEdits", "Accepter les modifications", []
-    )  # fmt: skip
+        "acceptEdits",
+        "Accepter les modifications",
+        [],
+    )
     assert [(c["mode"], c["libelle"]) for c in mode["choix"]] == CHOIX_ATTENDUS
     assert all(set(c) == {"mode", "libelle", "explication"} for c in mode["choix"])
     explications = {c["mode"]: c["explication"] for c in mode["choix"]}
@@ -1126,16 +1128,26 @@ def test_la_route_du_mode_l_enregistre_au_profil_sans_toucher_au_reste(tableau, 
 @pytest.mark.parametrize(
     "mode, phrase",
     [
-        ("bypassPermissions", "Le mode bypassPermissions, qui laisserait les agents tout faire "
-         "sans rien demander, n'est pas proposé par l'Atelier : rien n'a changé."),
-        ("AUTO", "Ce mode n'existe pas : choisis parmi « Me demander », « Accepter les "
-         "modifications », « Répétition », « Refuser sans demander », « Laisser un arbitre "
-         "décider ». Rien n'a changé."),
-        (None, None), (42, None), (["auto"], None), ("", None),
+        (
+            "bypassPermissions",
+            "Le mode bypassPermissions, qui laisserait les agents tout faire "
+            "sans rien demander, n'est pas proposé par l'Atelier : rien n'a changé.",
+        ),
+        (
+            "AUTO",
+            "Ce mode n'existe pas : choisis parmi « Me demander », « Accepter les "
+            "modifications », « Répétition », « Refuser sans demander », « Laisser un arbitre "
+            "décider ». Rien n'a changé.",
+        ),
+        (None, None),
+        (42, None),
+        (["auto"], None),
+        ("", None),
     ],
-)  # fmt: skip
-def test_la_route_refuse_bypass_et_tout_mode_inconnu_sans_rien_ecrire(tableau, tmp_path, mode,
-                                                                       phrase):  # fmt: skip
+)
+def test_la_route_refuse_bypass_et_tout_mode_inconnu_sans_rien_ecrire(
+    tableau, tmp_path, mode, phrase
+):
     atelier = atelier_simule(tmp_path)
     serveur = tableau(atelier)
     avant = textes_du_fil(atelier)
@@ -1176,8 +1188,9 @@ def test_un_profil_illisible_n_empeche_pas_le_choix_et_le_dit(tableau, tmp_path,
 def test_l_ecriture_du_mode_passe_par_le_verrou_du_profil(tmp_path):
     atelier = atelier_simule(tmp_path)
     chemin = atelier.depot / "chantier" / "profil.json"
-    assert ecrire_pendant_que_le_verrou_est_tenu(atelier, lambda: atelier.changer_mode("auto"),
-                                                 chemin)  # fmt: skip
+    assert ecrire_pendant_que_le_verrou_est_tenu(
+        atelier, lambda: atelier.changer_mode("auto"), chemin
+    )
     assert json.loads(chemin.read_text("utf-8")) == {"mode_ouvriers": "auto"}
 
 
@@ -1190,9 +1203,13 @@ def test_le_mode_du_profil_vaut_a_l_ouverture(tmp_path):
 
 @pytest.mark.parametrize(
     "valeur, montre",
-    [("bypassPermissions", "« bypassPermissions »"), ("Auto", "« Auto »"), (42, "illisible"),
-     (None, "illisible")],
-)  # fmt: skip
+    [
+        ("bypassPermissions", "« bypassPermissions »"),
+        ("Auto", "« Auto »"),
+        (42, "illisible"),
+        (None, "illisible"),
+    ],
+)
 def test_un_mode_refuse_dans_le_profil_vaut_accept_edits_et_le_fil_le_dit_une_fois(
     tmp_path, valeur, montre
 ):
@@ -1229,8 +1246,10 @@ def test_le_mode_change_a_chaud_pendant_qu_un_ouvrier_simule_tourne(tableau, tmp
     }
     assert attendre(lambda: len(lignes_de_la_vue(serveur, "A-ouvrier-1")) == 3)
     assert lignes_de_la_vue(serveur, "A-ouvrier-1") == [
-        "Lit la consigne", REFUS_LIGNE, "Mode réellement appliqué : Me demander."
-    ]  # fmt: skip
+        "Lit la consigne",
+        REFUS_LIGNE,
+        "Mode réellement appliqué : Me demander.",
+    ]
     assert attendre(lambda: RETOMBEE in textes_du_fil(atelier))
     etat = serveur.etat()
     assert etat["mode_ouvriers"]["choisi"] == "auto"
@@ -1251,8 +1270,13 @@ def test_le_mode_change_a_chaud_pendant_qu_un_ouvrier_simule_tourne(tableau, tmp
 def test_une_seule_phrase_par_agent_et_par_changement_de_mode_reel(tmp_path):
     atelier = atelier_simule(tmp_path)
     rappel = atelier.moteur.agent.sur_evenement
-    mode = {"agent": "B-ouvrier-1", "type": "mode", "contenu": "default", "demande": "auto",
-            "raison": "le mode auto n'est pas disponible pour son modèle"}  # fmt: skip
+    mode = {
+        "agent": "B-ouvrier-1",
+        "type": "mode",
+        "contenu": "default",
+        "demande": "auto",
+        "raison": "le mode auto n'est pas disponible pour son modèle",
+    }
     for _ in range(3):
         rappel(mode)
     rappel({**mode, "contenu": "auto", "raison": ""})
@@ -1265,9 +1289,12 @@ def test_une_seule_phrase_par_agent_et_par_changement_de_mode_reel(tmp_path):
     )
     fil = textes_du_fil(atelier)
     assert fil.count(phrase) == 3
-    assert fil.count(
-        "B-ouvrier-1 travaille de nouveau dans le mode demandé, « Laisser un arbitre décider »."
-    ) == 1
+    assert (
+        fil.count(
+            "B-ouvrier-1 travaille de nouveau dans le mode demandé, « Laisser un arbitre décider »."
+        )
+        == 1
+    )
     etat = json.loads((tmp_path / ".atelier" / "etat.json").read_text("utf-8"))
     assert phrase in [e["texte"] for e in etat["evenements"]]  # la phrase est enregistrée
 
@@ -1282,8 +1309,9 @@ def test_un_vrai_agent_dit_au_fil_que_le_mode_auto_est_indisponible(tmp_path):
     atelier.annoncer_connexion({})
     contexte = {"role": "ouvrier", "tache": "A", "tentative": 1}
     assert agent.executer("Va.", "opus", "high", None, False, contexte).ok
-    assert agent.executer("Vérifie.", "opus", "high", None, True,
-                          {**contexte, "role": "verificateur"}).ok  # fmt: skip
+    assert agent.executer(
+        "Vérifie.", "opus", "high", None, True, {**contexte, "role": "verificateur"}
+    ).ok
     phrase = (
         "A-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
         "« Me demander » qui est appliqué : le mode auto n'est pas disponible pour son modèle."
@@ -1420,9 +1448,21 @@ def test_une_retombee_qui_revient_apres_un_nouveau_choix_est_redite(tmp_path):
     def etape(n):
         return jusqu_a(lambda _client: pas["n"] >= n)
 
-    fabrique = Fabrique([init(mode="auto"), etape(1), statut("default"), etape(2), statut("auto"),
-                         etape(3), statut("default"), etape(4), statut("default"), etape(5),
-                         fin()])  # fmt: skip
+    fabrique = Fabrique(
+        [
+            init(mode="auto"),
+            etape(1),
+            statut("default"),
+            etape(2),
+            statut("auto"),
+            etape(3),
+            statut("default"),
+            etape(4),
+            statut("default"),
+            etape(5),
+            fin(),
+        ]
+    )
     atelier, agent, fil = ouvrier_claude_en_marche(tmp_path, fabrique, {"mode_ouvriers": "auto"})
     retombee = (
         "B-ouvrier-1 devait travailler en mode « Laisser un arbitre décider », mais c'est le mode "
@@ -1536,7 +1576,9 @@ def fil_de(atelier):
 def test_la_vue_porte_la_mise_a_jour_lue_dans_l_etat_garde(maj_servie):
     tableau, suivi, _, _ = maj_servie()
     assert tableau.etat()["mise_a_jour"] == {
-        "disponible": True, "phrase": "Une mise à jour d'Atelier est disponible."}
+        "disponible": True,
+        "phrase": "Une mise à jour d'Atelier est disponible.",
+    }
     suivi.etat = Etat(False, "Atelier est à jour.", True)
     assert tableau.etat()["mise_a_jour"] == {"disponible": False, "phrase": "Atelier est à jour."}
 
@@ -1573,7 +1615,8 @@ def test_un_serveur_sans_suivi_dit_pas_de_mise_a_jour_et_refuse_la_route(tableau
 
 @pytest.mark.parametrize("cas", ["chantier", "orchestrateur"])
 def test_un_agent_au_travail_empeche_la_mise_a_jour_et_le_fil_dit_pourquoi(
-        maj_servie, cas, tmp_path):
+    maj_servie, cas, tmp_path
+):
     atelier = atelier_simule(tmp_path / "un")
     liberer = threading.Event()
     if cas == "chantier":
@@ -1607,8 +1650,7 @@ def test_un_agent_dans_un_autre_projet_ouvert_compte_aussi(maj_servie, tmp_path)
     assert arrets == []
 
 
-def test_sans_agent_au_travail_la_mise_a_jour_est_lancee_puis_le_processus_s_arrete(
-        maj_servie):
+def test_sans_agent_au_travail_la_mise_a_jour_est_lancee_puis_le_processus_s_arrete(maj_servie):
     recue = threading.Event()
     constats = []
     arrets = []
@@ -1658,7 +1700,8 @@ def test_une_seule_mise_a_jour_a_la_fois(maj_servie):
     tableau, _, faux, arrets = maj_servie(faux)
     premiere = []
     fil = threading.Thread(
-        target=lambda: premiere.append(tableau.appeler("/api/mise-a-jour")), daemon=True)
+        target=lambda: premiere.append(tableau.appeler("/api/mise-a-jour")), daemon=True
+    )
     fil.start()
     assert faux.entree.wait(5)
     code, vue = tableau.appeler("/api/mise-a-jour")  # pendant la première : rend tout de suite
@@ -1678,7 +1721,9 @@ def test_sans_fonction_d_arret_le_serveur_ne_s_arrete_pas_meme_si_fait_est_vrai(
     assert code == 200
     # Le double de la démonstration rend « fait » vrai : la phrase est la sienne, sans redémarrage.
     assert vue["mise_a_jour_faite"] == {
-        "fait": True, "phrase": "Atelier a été mis à jour. Il va redémarrer."}
+        "fait": True,
+        "phrase": "Atelier a été mis à jour. Il va redémarrer.",
+    }
 
 
 def test_la_demonstration_passe_par_le_double_simule_et_ne_s_arrete_pas(tmp_path):
@@ -1691,7 +1736,9 @@ def test_la_demonstration_passe_par_le_double_simule_et_ne_s_arrete_pas(tmp_path
         code, vue = serveur.appeler("/api/mise-a-jour")
         assert code == 200
         assert vue["mise_a_jour_faite"] == {
-            "fait": True, "phrase": "Mise à jour simulée : rien n'a changé."}
+            "fait": True,
+            "phrase": "Mise à jour simulée : rien n'a changé.",
+        }
         assert "Mise à jour simulée : rien n'a changé." in fil_de(atelier)
         assert suivi.arreter is None
         assert serveur.etat()["mise_a_jour"]["disponible"] is True  # le double l'annonce toujours
@@ -1731,12 +1778,13 @@ def monter_commande(monkeypatch, tmp_path):
 
 
 def test_servir_vise_le_dossier_d_atelier_et_s_arrete_par_la_fonction_d_arret(
-        monkeypatch, tmp_path):
+    monkeypatch, tmp_path
+):
     principal, pris = monter_commande(monkeypatch, tmp_path)
     principal.commande_servir(Namespace(port=0))
     suivi = pris["suivi"]
     assert isinstance(suivi.maj, MiseAJour)
-    racine = (pathlib.Path(principal.__file__).resolve().parent.parent)
+    racine = pathlib.Path(principal.__file__).resolve().parent.parent
     assert suivi.maj.dossier == racine and (racine / "atelier").is_dir()
     assert suivi.arreter is principal.arreter_le_processus
     assert pris["demarre"] is True
@@ -1907,3 +1955,84 @@ def test_sans_nom_le_chantier_archive_prend_son_objectif(tmp_path):
     assert atelier.vue()["nom_propose"] == "Moteur de calcul de la norme"
     assert atelier.nouveau_chantier()["fait"] is True
     assert atelier.vue()["archives"][0]["nom"] == "Moteur de calcul de la norme"
+
+
+# --- La carte du code ----------------------------------------------------------------------
+
+
+def test_la_vue_porte_l_etat_de_la_carte_et_un_projet_neuf_n_a_pas_encore_de_carte(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    resume = atelier.vue()["carte"]
+    assert resume["etat"] == "absente" and resume["en_cours"] == [] and resume["auto"] is True
+
+
+def test_la_carte_s_analyse_et_se_lit_par_les_routes(tableau, tmp_path):
+    (tmp_path / "app.py").write_text('"""Le coeur du projet."""\n\n\ndef lancer():\n    pass\n')
+    (tmp_path / "outil.py").write_text("import app\n")
+    atelier = atelier_simule(tmp_path)
+    serveur = tableau(atelier)
+    _, vue = serveur.appeler("/api/carte/estimer")
+    # Deux fichiers de code, et le cahier que l'Atelier écrit dans chaque projet.
+    assert vue["estimation"]["fichiers"] == 3 and vue["estimation"]["appels"] == 0
+    assert vue["estimation"]["phrase"] == (
+        "3 fichiers. Les explications sont tirées des commentaires du code."
+    )
+    _, vue = serveur.appeler("/api/carte/analyser")
+    assert vue["analyse"] == {
+        "fait": True,
+        "phrase": "Analyse lancée : la carte se remplit au fil des explications.",
+    }
+    assert attendre(lambda: not atelier.carte.occupe())
+    assert serveur.etat()["carte"]["etat"] == "prete"
+    _, vue = serveur.appeler("/api/carte/lire")
+    fiches = {f["chemin"]: f for f in vue["carte_complete"]["fichiers"]}
+    assert fiches["app.py"]["resume"] == "Le coeur du projet."
+    assert vue["carte_complete"]["liens"] == [["outil.py", "app.py"]]
+    atelier.carte.finir()
+
+
+def test_une_seconde_analyse_pendant_la_premiere_est_refusee(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    porte = threading.Event()
+    atelier.carte._fil = threading.Thread(target=porte.wait, daemon=True)
+    atelier.carte._fil.start()
+    assert atelier.analyser_carte() == {"fait": False, "phrase": "L'analyse est déjà en cours."}
+    porte.set()
+
+
+def test_en_demonstration_la_carte_est_celle_de_l_atelier_et_ses_taches_font_clignoter(tmp_path):
+    atelier = projet_simule(tmp_path / "demo", "Démo", 0.0)
+    assert atelier.carte.depot == pathlib.Path(__file__).resolve().parent.parent
+    phrase = atelier.estimer_carte()["phrase"]
+    assert phrase.startswith("Démonstration : la carte montre le code de l'Atelier, ")
+    atelier.carte.carte = {
+        "fichiers": {
+            "a.py": {"genre": "code"},
+            "b.py": {"genre": "code"},
+            "c.md": {"genre": "documentation"},
+        }
+    }
+    atelier.moteur.chantier.taches = [tache("A", etat="en_cours"), tache("B", etat="a_lancer")]
+    en_cours = atelier.en_cours()
+    assert set(en_cours) <= {"a.py", "b.py"} and en_cours
+    assert all(agents == ["tâche A"] for agents in en_cours.values())
+
+
+def test_les_fichiers_en_cours_viennent_de_la_copie_de_travail_de_chaque_tache(tmp_path):
+    class Controles(ControlesSimules):
+        def _arbre(self, t):
+            return tmp_path / "arbres" / t.id
+
+        def fichiers_modifies(self, t, dossier, resultat):
+            return {"A": ["app.py", "neuf.py"], "B": ["app.py"]}[t.id]
+
+    (tmp_path / "arbres" / "A").mkdir(parents=True)
+    (tmp_path / "arbres" / "B").mkdir(parents=True)
+    atelier = atelier_simule(tmp_path, controles=Controles())
+    atelier.moteur.chantier.taches = [
+        tache("A", etat="en_cours"),
+        tache("B", etat="en_verification"),
+        tache("C", etat="verifie"),
+    ]
+    atelier.activite.ajouter({"agent": "A-ouvrier-1", "type": "outil", "contenu": "Modifie app.py"})
+    assert atelier.en_cours() == {"app.py": ["A-ouvrier-1", "tâche B"], "neuf.py": ["A-ouvrier-1"]}
