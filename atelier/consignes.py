@@ -15,6 +15,16 @@ en route). La personne qui suit le chantier lit ces lignes pour savoir où tu en
 """
 
 
+# Une demande d'autorisation bloque l'agent et sa place jusqu'à ce que la personne réponde :
+# l'ouvrier et le vérificateur reçoivent donc la même règle, écrite une seule fois ici.
+COMMANDES_SIMPLES = """une commande simple par appel : pas de commandes enchaînées (`;`, `&&`, \
+plusieurs lignes), pas de heredoc (`<<EOF`), pas de variable du shell (`$?`, `$(...)` : le code \
+de retour de la commande t'est déjà donné), pas de `sed -i` ni de `rm -rf`, pas de dossier \
+temporaire ailleurs (`mktemp`, `/tmp`). Claude Code ne sait pas découper ces commandes-là \
+sans risque : chacune demanderait une autorisation à la personne qui suit le chantier, et \
+la ferait attendre."""
+
+
 def _liste(elements: list[str]) -> str:
     return "\n".join(f"{i}. {e}" for i, e in enumerate(elements, 1)) or "(aucun)"
 
@@ -69,6 +79,8 @@ Tu peux installer librement un outil de travail (test, contrôle de forme, lectu
 documents), depuis une source officielle (pip, npm, crates.io, le dépôt de l'éditeur). \
 Jamais de script téléchargé depuis un site inconnu exécuté directement. Signale dans ton \
 compte rendu chaque outil installé et chaque bibliothèque ajoutée au produit, avec sa licence.
+Pour tes commandes, {COMMANDES_SIMPLES} Pour modifier un fichier, sers-toi des outils Edit \
+et Write.
 
 ## À rendre
 Termine par un compte rendu en cinq rubriques courtes : Fait (critère par critère), \
@@ -84,12 +96,7 @@ rien : une correction ne serait pas gardée. Mais tu peux y faire tes essais san
 l'outil Edit, lance le test, puis remets le texte d'origine avec Edit ;
 - pour un essai de plus de quelques mots, écris un script dans ce dossier avec l'outil Write, \
 puis lance-le (par exemple `python3 essai_mutation.py`) ;
-- une commande simple par appel : pas de commandes enchaînées (`;`, `&&`, plusieurs \
-lignes), pas de heredoc (`<<EOF`), pas de variable du shell (`$?`, `$(...)` : le code de \
-retour de la commande t'est déjà donné), pas de `sed -i` ni de `rm -rf`, pas de dossier \
-temporaire ailleurs (`mktemp`, `/tmp`). Claude Code ne sait pas découper ces commandes-là \
-sans risque : chacune demanderait une autorisation à la personne qui suit le chantier, et \
-la ferait attendre.
+- """ + COMMANDES_SIMPLES + """
 Le travail à contrôler n'est pas encore enregistré : `git status` et `git diff` le montrent ; \
 lis-les avant tes essais, qui y apparaîtraient ensuite."""
 
@@ -148,6 +155,42 @@ Sois strict : n'écris "valide": true que pour ce que tu as constaté toi-même.
 """
 
 
+# Les règles de découpage, écrites une fois : la conversation (`ROLE_ORCHESTRATEUR`) et la
+# planification directe (`consigne_planification`) disent la même chose.
+REGLES_DECOUPAGE = """- Chaque tâche a des critères vérifiables, un seul comportement par critère.
+- Les critères doivent prouver le but : un livrable qui ne changerait rien ne doit pas les passer.
+- Chaque tâche a un périmètre : la liste des fichiers qu'elle peut créer ou modifier.
+- Type de tâche : "mecanique", "courante", "delicate" (sécurité, contrat entre modules), \
+"physique" (formule ou norme), "conception". L'atelier choisit le modèle et l'effort d'après \
+ce type : classe selon ce que coûterait une erreur passée inaperçue.
+
+Un plan large va vite. L'atelier lance en même temps toutes les tâches prêtes. Une tâche est \
+prête quand ses dépendances sont vérifiées et entrées dans la branche principale, et que les \
+fichiers de son périmètre ne sont pris par aucune tâche en cours. Chaque dépendance et chaque \
+fichier partagé coûte donc une attente : la tâche retenue ne part qu'une fois l'autre écrite, \
+vérifiée et enregistrée, souvent une demi-heure plus tard. Des tâches enchaînées passent l'une \
+après l'autre ; des tâches indépendantes travaillent ensemble.
+- Ne déclare une dépendance que si la tâche a réellement besoin que le code de l'autre existe \
+pour être écrite et contrôlée. Pas par prudence, ni pour imposer un ordre de lecture : si deux \
+tâches doivent seulement s'accorder sur une interface, décris-la dans « fournit » et \
+« attend », et elles partent ensemble.
+- Donne à chaque tâche le périmètre le plus étroit : des fichiers nommés plutôt que des \
+dossiers entiers. Un motif avec `*` couvre tout ce qui est en dessous, sous-dossiers compris, \
+et retient toute autre tâche qui y touche. Donne aussi à chaque tâche son propre fichier de \
+tests : un fichier de tests commun suffit à faire attendre l'une pour l'autre.
+- Deux tâches qui toucheraient le même fichier sans avoir besoin l'une de l'autre sont \
+redécoupées pour ne plus le partager, ou ce fichier va à la tâche de raccord. Une dépendance \
+n'est pas le moyen de régler un partage de fichier : elle ferait une file de \
+deux tâches qui pouvaient travailler ensemble.
+- Les fichiers que plusieurs tâches voudraient toucher (journal, documentation, fichier \
+d'assemblage ou de branchement, où l'on inscrit chaque nouveau morceau) sortent des tâches. \
+Confie-les à une tâche finale de raccord, qui dépend des autres et fait ces ajouts en une fois.
+- Une grosse tâche se coupe en morceaux indépendants, qui partent ensemble, plutôt qu'en \
+étapes enchaînées, chaque fois que c'est possible.
+- Vise le moins de vagues possible. Avant de rendre le plan, relis-le : pour chaque dépendance \
+et chaque fichier partagé, demande-toi s'il est nécessaire, et retire-le s'il ne l'est pas."""
+
+
 def consigne_planification(objectif: str, profil: dict) -> str:
     """Rédige la consigne de découpage d'un objectif en tâches."""
     return f"""Tu es l'orchestrateur d'un chantier de code. Découpe l'objectif en tâches.
@@ -160,12 +203,7 @@ Explore le dépôt courant en lecture seule pour connaître l'existant. Ne modif
 {profil.get("description", "")}
 
 ## Règles de découpage
-- Chaque tâche a des critères numérotés, vérifiables, un seul comportement par critère.
-- Les critères doivent prouver le but : un livrable qui ne changerait rien ne doit pas les passer.
-- Chaque tâche a un périmètre : la liste des fichiers qu'elle peut créer ou modifier.
-- Deux tâches sans lien de dépendance ne partagent aucun fichier.
-- Type de tâche : "mecanique", "courante", "delicate" (sécurité, contrat entre modules), \
-"physique" (formule ou norme), "conception".
+{REGLES_DECOUPAGE}
 
 ## Ce que tu rends
 Sur la toute dernière ligne, un objet JSON seul :
@@ -214,13 +252,7 @@ que le contrat n'est pas validé, tu peux rendre un nouveau bloc pour corriger l
 fois le contrat validé, le plan ne se change plus depuis la conversation.
 
 Règles de découpage :
-- Chaque tâche a des critères vérifiables, un seul comportement par critère.
-- Les critères doivent prouver le but : un livrable qui ne changerait rien ne doit pas les passer.
-- Chaque tâche a un périmètre : la liste des fichiers qu'elle peut créer ou modifier.
-- Deux tâches sans lien de dépendance ne partagent aucun fichier.
-- Type de tâche : "mecanique", "courante", "delicate" (sécurité, contrat entre modules), \
-"physique" (formule ou norme), "conception". L'atelier choisit le modèle et l'effort d'après \
-ce type : classe selon ce que coûterait une erreur passée inaperçue.
+""" + REGLES_DECOUPAGE + """
 
 Forme du bloc, à la toute fin de la réponse :
 ```atelier-plan
