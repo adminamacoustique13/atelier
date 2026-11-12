@@ -106,13 +106,14 @@ Pour que l'Atelier tourne sans toi, les commandes courantes du travail sont perm
 
 Ce qui reste hors de cette liste, exprès : `sed`, `awk`, `find`, `xargs`, `sort` et `rg`, qui savent lancer une autre commande ; `rm`, `mv`, `cp`, que le mode « Accepter les modifications » laisse déjà passer dans la copie de travail, et seulement là ; `curl`, `wget` et la lecture d'une page web (`WebFetch`), par où des données pourraient sortir. La liste est dans `atelier/agents.py` (`LECTURE_SHELL`, `COMMANDES_DEV`, `WEB_LECTURE`).
 
-Quand un agent veut lancer une commande ou un outil que rien ne permet encore, il s'arrête et une carte d'autorisation apparaît dans le tableau de bord. Elle a jusqu'à trois boutons :
+Quand un agent veut lancer une commande ou un outil que rien ne permet encore, il s'arrête et une carte d'autorisation apparaît dans le tableau de bord. Elle a trois boutons :
 
 - **Autoriser une fois** : l'agent poursuit, mais la question reviendra la prochaine fois ;
-- **Toujours pour ce projet** : l'Atelier retient une règle et l'inscrit dans le profil du projet. Ce bouton manque quand aucune règle sûre n'existe pour la demande : il ne reste alors que « Autoriser une fois » et « Refuser » ;
+- **Toujours pour ce projet** : l'Atelier retient une règle étroite et l'inscrit dans le profil du projet ;
+- **Toujours pendant ce chantier**, à la place du précédent quand aucune règle étroite n'existe : l'Atelier retient une règle plus large, gardée dans l'état du chantier en cours. Elle vaut pour tous les agents du chantier, survit à un redémarrage de l'Atelier et s'efface quand le chantier est archivé (« Nouveau chantier ») ; le profil du projet n'est pas touché. Pour une chaîne de commandes (`pytest -q | sed -e ...`), chaque commande reçoit sa règle, la carte les montre toutes avant ton clic. Il n'y a pas de règle pour un lanceur pur (`bash`, `sh`, `sudo`, `env`, `xargs`, `eval`, `timeout`...), pour une substitution (`$(...)`) ni pour `git` sur son seul premier mot : il ne reste alors que « Autoriser une fois » et « Refuser » ;
 - **Refuser**, avec une indication facultative que l'agent lit pour changer de méthode.
 
-Attention à « Toujours pour ce projet » : la règle retenue couvre toute commande qui commence de la même façon. Une règle sur un outil qui exécute du code (`python3 -m`, `npm run`) autorise en pratique n'importe quelle commande, puisque ce que l'outil lance dépend de ce qu'on lui donne ou du code du projet. Réserve ce bouton aux commandes simples, et préfère « Autoriser une fois » dans le doute. Un filtre écarte les lanceurs les plus connus, mais aucune liste ne les connaît tous.
+Attention à « Toujours pour ce projet » comme à « Toujours pendant ce chantier » : la règle retenue couvre toute commande qui commence de la même façon. Une règle de chantier porte souvent sur le seul premier mot (`Bash(sed:*)`, `Bash(curl:*)`) : elle permet alors tout ce que cette commande sait faire, jusqu'à la fin du chantier. Une règle sur un outil qui exécute du code (`python3 -m`, `npm run`) autorise en pratique n'importe quelle commande, puisque ce que l'outil lance dépend de ce qu'on lui donne ou du code du projet. Réserve ce bouton aux commandes simples, et préfère « Autoriser une fois » dans le doute. Un filtre écarte les lanceurs les plus connus, mais aucune liste ne les connaît tous.
 
 Tu peux aussi écrire des règles à l'avance dans `chantier/profil.json`, avec la clé `autorisations` : une liste de règles Claude Code, ajoutées aux outils permis de chaque agent. Elles ont la même forme que dans `.claude/settings.json`, mais l'Atelier ne garde que les règles simples : un nom d'outil, suivi ou non d'une seule paire de parenthèses au contenu non vide, sans virgule ni parenthèse à l'intérieur. Les autres sont écartées sans prévenir. Exemple gardée : `Bash(npm install:*)`. Exemple écartée : `Bash(git commit -m (test))` (parenthèse dans le contenu).
 
@@ -265,7 +266,7 @@ Pas encore essayé avec de vrais agents : aucune machine du chantier n'était co
 | `atelier/consignes.py` | Les consignes de l'ouvrier, du vérificateur et du découpage |
 | `atelier/agents.py` | Les agents : celui qui passe par le pont vers Claude, et le simulateur |
 | `atelier/sdk.py` | Le pont vers `claude-agent-sdk` : sessions, autorisations, arrêt |
-| `atelier/guichet.py` | Le guichet des autorisations : demandes en attente, règle « toujours », phrases des cartes |
+| `atelier/guichet.py` | Le guichet des autorisations : demandes en attente, règles « toujours » et « pendant ce chantier », phrases des cartes |
 | `atelier/controles.py` | Périmètre, commandes du profil, copies de travail et fusion git |
 | `atelier/moteur.py` | Le chef de chantier |
 | `atelier/projets.py` | Les projets ouverts : création, reprise d'un dépôt existant, liaison à un dépôt en ligne |

@@ -449,6 +449,8 @@ class Atelier:
         self.brouillon = {"texte": "", "outils": []}
         self.sur_vue = None
         self.moteur = Moteur(chantier, agent, controles, profil, sur_changement=self._sauver)
+        # Les agents lisent à chaque lancement les règles du chantier en cours, quel qu'il soit.
+        agent.regles_chantier = self._regles_du_chantier
         self.archives = archives.lister(self.depot)  # relue à chaque archivage, pas à chaque vue
         # La carte du code : en démonstration, celle de l'Atelier lui-même, expliquée par ses
         # propres commentaires ; un vrai projet fait écrire ses explications par Claude.
@@ -714,21 +716,33 @@ class Atelier:
     def autoriser(self, identifiant, choix, message="") -> dict:
         """Répond à une demande d'autorisation ouverte et dit si elle a été réglée.
 
-        « Toujours » ajoute la règle de la demande aux autorisations du profil du projet.
+        « Toujours » ajoute la règle de la demande aux autorisations du profil du projet ;
+        « chantier » retient ses règles dans l'état du chantier en cours, qui partent avec lui.
         """
         message = message if isinstance(message, str) else ""
         demande = next((d for d in self._ouvertes() if d["id"] == identifiant), None)
         regle = demande["regle"] if demande else ""
+        regles = demande.get("regles_chantier", []) if demande else []
         if self.guichet is not None and self.guichet.repondre(identifiant, choix, message):
+            if choix == "chantier":
+                return {"reglee": True, "phrase": self._retenir_pour_le_chantier(regles)}
             return {"reglee": True, "phrase": self._retenir(choix, regle)}
         if choix not in CHOIX:
-            phrase = "Ce choix n'existe pas : réponds « une fois », « toujours » ou « non »."
+            phrase = (
+                "Ce choix n'existe pas : réponds « une fois », « toujours », "
+                "« pendant ce chantier » ou « non »."
+            )
         elif demande is None:
             phrase = (
                 "Cette demande n'existe plus : elle a déjà reçu une réponse, "
                 "ou son agent s'est arrêté."
             )
-        elif not regle:
+        elif choix == "chantier" and not regles:
+            phrase = (
+                "Aucune règle n'est possible pour cette demande, même pour ce chantier : "
+                "autorise-la une fois, ou refuse-la."
+            )
+        elif choix == "toujours" and not regle:
             phrase = (
                 "Aucune règle sûre n'existe pour cette demande : "
                 "autorise-la une fois, ou refuse-la."
@@ -758,6 +772,27 @@ class Atelier:
             self._sauver()
             return f"Autorisé pour ce projet : la règle {regle} est enregistrée dans le profil."
         return f"Autorisé cette fois, mais la règle n'a pas pu être enregistrée : {raison}"
+
+    def _regles_du_chantier(self) -> list[str]:
+        """Les règles retenues pour le chantier en cours ; une copie, lue par les agents.
+
+        Sans verrou : un agent la lit à son lancement, parfois sous le verrou du moteur, et
+        copier une liste ne laisse rien voir à moitié.
+        """
+        return list(self.moteur.chantier.autorisations_chantier)
+
+    def _retenir_pour_le_chantier(self, regles: list[str]) -> str:
+        """Ajoute les règles, sans doublon, au chantier en cours ; le note au fil et sauve."""
+        liste = ", ".join(regles)
+        with self.moteur.verrou:  # le chantier ne peut pas être archivé entre-temps
+            retenues = self.moteur.chantier.autorisations_chantier
+            retenues.extend(r for r in dict.fromkeys(regles) if r not in retenues)
+            self.moteur.chantier.noter(f"Autorisation retenue pendant ce chantier : {liste}.")
+        self._sauver()
+        return (
+            f"Autorisé pendant ce chantier : {liste}. Ces règles s'effaceront quand le chantier "
+            "sera archivé ; le profil du projet n'est pas touché."
+        )
 
     def _inscrire_regle(self, regle: str) -> None:
         """Ajoute une règle, sans doublon, aux autorisations de `chantier/profil.json`."""

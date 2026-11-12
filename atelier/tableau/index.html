@@ -960,9 +960,11 @@ function porteeRegle(regle) {
   return "cette règle sera retenue telle quelle pour ce projet, sans que je sache dire en mots ce qu'elle permet.";
 }
 
-/* Une demande d'autorisation : qui demande quoi, la règle exacte que « Toujours » retiendrait, trois choix. */
+/* Une demande d'autorisation : qui demande quoi, la règle exacte que « Toujours » retiendrait, trois choix.
+   Sans règle pour le projet, les règles plus larges que « Toujours pendant ce chantier » retiendrait. */
 function autorisationHtml(a) {
   const e = etatCarte(a.id), regle = String(a.regle || "").trim(), detail = String(a.detail || "");
+  const pourChantier = regle ? [] : (Array.isArray(a.regles_chantier) ? a.regles_chantier : []).map((r) => String(r).trim()).filter(Boolean);
   const ouvert = details.has(a.id), bloque = e.envoi ? " disabled" : "";
   const id = propre(a.id);
   const lire = detail
@@ -973,6 +975,10 @@ function autorisationHtml(a) {
   const portee = regle
     ? `<p class="petit">« Toujours pour ce projet » retient la règle <code class="regle">${propre(regle)}</code> :
         ${propre(porteeRegle(regle))}</p>`
+    : pourChantier.length
+    ? `<p class="petit">Aucune règle n'est assez étroite pour le projet. « Toujours pendant ce chantier » retient
+        ${pourChantier.length > 1 ? "les règles" : "la règle"} ${pourChantier.map((r) => `<code class="regle">${propre(r)}</code>`).join(" ")} :
+        ${pourChantier.map((r, i) => { const t = porteeRegle(r); return propre(i ? t[0].toUpperCase() + t.slice(1) : t); }).join(" ")} Elles s'effacent à l'archivage du chantier.</p>`
     : `<p class="petit">Aucune règle n'est possible pour cette demande : tu peux l'autoriser cette fois, ou la refuser.</p>`;
   const choix = e.refus
     ? `<div class="refus-champ"><span class="etiquette">Dis-lui plutôt quoi faire (facultatif)</span>
@@ -981,6 +987,7 @@ function autorisationHtml(a) {
         <button data-action="refus-retour" data-id="${id}"${bloque}>Retour</button></div>`
     : `<div class="boutons"><button class="principal" data-action="autoriser" data-choix="une_fois" data-id="${id}"${bloque}>Autoriser une fois</button>
         ${regle ? `<button data-action="autoriser" data-choix="toujours" data-id="${id}"${bloque}>Toujours pour ce projet</button>` : ""}
+        ${pourChantier.length ? `<button data-action="autoriser" data-choix="chantier" data-id="${id}"${bloque}>Toujours pendant ce chantier</button>` : ""}
         <button data-action="refuser" data-id="${id}"${bloque}>Refuser</button></div>`;
   return `<div class="autorisation" data-autorisation="${id}">${lire}${portee}${choix}${e.remarque ? `<p class="alerte" role="alert">${propre(e.remarque)}</p>` : ""}</div>`;
 }
@@ -1096,7 +1103,7 @@ function fil(vue) {
 function afficherConversation(vue) {
   const b = vue.brouillon || { texte: "", outils: [] };
   const signature = [vue.evenements.length, vue.occupe, b.texte.length, b.outils.length, vue.contrat.valide, vue.taches.length, ouvertes(vue).map((d) => d.id).join(),
-    autorisationsDe(vue).map((a) => `${a.id}:${a.phrase}:${a.regle}:${details.has(a.id)}:${JSON.stringify(etatCarte(a.id))}`).join()].join("|");
+    autorisationsDe(vue).map((a) => `${a.id}:${a.phrase}:${a.regle}:${(a.regles_chantier || []).join(",")}:${details.has(a.id)}:${JSON.stringify(etatCarte(a.id))}`).join()].join("|");
   if (signature !== signatureFil) {
     const cadre = document.getElementById("fil");
     const enBas = cadre.scrollHeight - cadre.scrollTop - cadre.clientHeight < 120;

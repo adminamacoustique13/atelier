@@ -13,12 +13,14 @@ from atelier.guichet import (
     detail_pour,
     phrase_pour,
     regle_pour,
+    regles_chantier_pour,
 )
 
 GARDE_S = 5  # aucun fil de test ne doit attendre plus longtemps
 SANS_REPONSE = "Pas de réponse de la personne responsable."
 ARRETE = "Arrêté par la personne responsable."
 CAS_PAR_CAS = " Cette commande ne peut être autorisée qu'au cas par cas."
+POUR_CE_CHANTIER = " Cette commande peut être autorisée pour ce chantier, pas pour de bon."
 NPM = {"command": "npm install left-pad"}
 
 
@@ -317,7 +319,9 @@ def test_ouvertes_montre_la_phrase_la_regle_et_le_detail():
     assert fiches["D"]["phrase"].endswith("[...] ».")
     assert fiches["D"]["detail"] == longue
     assert fiches["E"]["phrase"] == ("E veut lancer la commande « npm install x && rm -rf / »."
-                                     " Cette commande ne peut être autorisée qu'au cas par cas.")
+                                     " Cette commande peut être autorisée pour ce chantier,"
+                                     " pas pour de bon.")
+    assert fiches["E"]["regles_chantier"] == ["Bash(npm install:*)", "Bash(rm -rf:*)"]
     assert fiches["E"]["regle"] == ""
     for agent in "ABCDE":
         guichet.annuler(agent)
@@ -419,7 +423,8 @@ def test_identifiants_uniques_et_ouvertes_pret_pour_du_json():
     assert len(set(ids)) == 5
     assert all(re.fullmatch(r"[A-Za-z0-9_-]+", i) for i in ids)
     assert json.loads(json.dumps(ouvertes)) == ouvertes
-    assert set(ouvertes[0]) == {"id", "agent", "outil", "phrase", "regle", "detail"}
+    assert set(ouvertes[0]) == {"id", "agent", "outil", "phrase", "regle", "detail",
+                                "regles_chantier"}
     for n in range(5):  # nettoyage : on libère tous les fils
         guichet.annuler(f"agent-{n}")
     for fil, _ in fils:
@@ -519,3 +524,79 @@ def test_la_fin_de_repetition_sans_plan_lisible():
     assert phrase_pour("A-ouvrier-2", "ExitPlanMode", None) == (
         "A-ouvrier-2 a fini sa répétition et demande à passer à l'exécution de son plan."
     )
+
+
+# --- « Toujours pendant ce chantier » : des règles plus larges, qui partent avec le chantier ----
+
+
+@pytest.mark.parametrize(
+    "commande, attendu",
+    [
+        ("sed -e 's/a/b/' f.txt", ["Bash(sed:*)"]),
+        ("cd src && make test", ["Bash(make test:*)"]),
+        ("pytest -q 2>&1 | tail -5", ["Bash(pytest -q:*)", "Bash(tail -5:*)"]),
+        ("curl https://example.com", ["Bash(curl:*)"]),
+        ("python3 -c 'print(1)'", ["Bash(python3:*)"]),
+        ("find . -name '*.py' -exec cat {} \\;", ["Bash(find:*)"]),
+        ("npm test; npm test", ["Bash(npm test:*)"]),
+    ],
+)
+def test_regles_de_chantier_pour_une_commande_sans_regle_de_projet(commande, attendu):
+    entree = {"command": commande}
+    assert regle_pour("Bash", entree) == ""
+    assert regles_chantier_pour("Bash", entree) == attendu
+
+
+@pytest.mark.parametrize(
+    "commande",
+    [
+        "bash -c 'ls'", "sh x.sh", "sudo make", "env X=1 make", "xargs rm", "eval ls",
+        "timeout 5 make", "FOO=1 make", "ls $(pwd)", "ls `pwd`", "diff <(ls) b", "git -c a=b log",
+        "make && bash -c x", "cat a\nrm b", "  ", "$CMD x",
+    ],
+)
+def test_aucune_regle_de_chantier_pour_un_lanceur_pur_ou_un_doute(commande):
+    assert regles_chantier_pour("Bash", {"command": commande}) == []
+
+
+def test_pas_de_regle_de_chantier_quand_la_regle_de_projet_existe_ou_hors_bash():
+    assert regles_chantier_pour("Bash", NPM) == []
+    assert regles_chantier_pour("WebFetch", {"url": "http://192.168.1.1/x"}) == []
+    assert regles_chantier_pour("ExitPlanMode", {"plan": "x"}) == []
+    assert regles_chantier_pour("Bash", None) == []
+    assert regles_chantier_pour(42, {"command": "sed -e x f"}) == []
+
+
+def test_aucune_regle_de_chantier_ne_contient_virgule_ni_parenthese_interieure():
+    for commande in ["sed -e 's/a,b/c/' f", "awk -F, '{print}' f", "grep -e 'a(b' x"]:
+        for regle in regles_chantier_pour("Bash", {"command": commande}):
+            assert re.fullmatch(r"Bash\([^(),]+\)", regle), regle
+
+
+def test_chantier_regle_la_demande_avec_ses_regles():
+    guichet = Guichet(delai_s=GARDE_S)
+    fil, resultat = lancer(guichet, "A", entree={"command": "sed -e x f"})
+    (fiche,) = attendre_ouvertes(guichet, 1)
+    assert fiche["regles_chantier"] == ["Bash(sed:*)"] and fiche["regle"] == ""
+    assert fiche["phrase"].endswith(POUR_CE_CHANTIER)
+    assert guichet.repondre(fiche["id"], "toujours") is False  # pas de règle de projet
+    assert guichet.repondre(fiche["id"], "chantier") is True
+    fil.join(GARDE_S)
+    assert resultat["reponse"] == Reponse("chantier", "", "", ("Bash(sed:*)",))
+
+
+def test_chantier_refuse_sans_regle_de_chantier():
+    guichet = Guichet(delai_s=GARDE_S)
+    fil, resultat = lancer(guichet, "A")  # npm install : une règle de projet existe
+    (fiche,) = attendre_ouvertes(guichet, 1)
+    assert fiche["regles_chantier"] == []
+    assert guichet.repondre(fiche["id"], "chantier") is False
+    assert guichet.repondre(fiche["id"], "non") is True
+    fil.join(GARDE_S)
+
+
+def test_le_guichet_simule_joue_chantier_avec_les_regles_du_vrai_guichet():
+    guichet = GuichetSimule(["chantier", "chantier"])
+    reponse = guichet.demander("A", "Bash", {"command": "sed -e x f"})
+    assert reponse == Reponse("chantier", "", "", ("Bash(sed:*)",))
+    assert guichet.demander("A", "Bash", {"command": "bash -c x"}) == Reponse("une_fois")

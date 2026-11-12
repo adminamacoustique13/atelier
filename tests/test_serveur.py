@@ -197,7 +197,7 @@ def test_la_demonstration_depose_une_demande_et_elle_se_regle_de_bout_en_bout(ta
     serveur, vus = demo_prete(tableau, tmp_path / "demo")
     etat = serveur.etat()
     (demande,) = etat["autorisations"]
-    assert set(demande) == {"id", "agent", "outil", "phrase", "regle", "detail"}
+    assert set(demande) == {"id", "agent", "outil", "phrase", "regle", "detail", "regles_chantier"}
     assert demande["outil"] == "Bash" and demande["regle"] == REGLE_SIMULEE
     assert demande["detail"] == "npm install left-pad"
     assert "npm install left-pad" in demande["phrase"]
@@ -337,7 +337,10 @@ def test_une_demande_ou_un_choix_inconnu_ne_regle_rien(tableau, tmp_path):
     _, reponse = serveur.appeler("/api/autorisation", {"id": demande["id"], "choix": "peut-être"})
     assert reponse["autorisation"] == {
         "reglee": False,
-        "phrase": "Ce choix n'existe pas : réponds « une fois », « toujours » ou « non ».",
+        "phrase": (
+            "Ce choix n'existe pas : réponds « une fois », « toujours », "
+            "« pendant ce chantier » ou « non »."
+        ),
     }
     assert len(atelier.guichet.ouvertes()) == 1 and reponses == []
 
@@ -1334,7 +1337,7 @@ def test_en_mode_auto_la_pause_de_l_arbitre_ramene_les_cartes(tableau, tmp_path)
     assert demande["detail"] == "curl https://example.com"
     assert demande["phrase"] == (
         "A-ouvrier-1 veut lancer la commande « curl https://example.com ». "
-        "Cette commande ne peut être autorisée qu'au cas par cas."
+        "Cette commande peut être autorisée pour ce chantier, pas pour de bon."
     )
     lignes = lignes_de_la_vue(serveur, "A-ouvrier-1")
     assert lignes.count(REFUS_LIGNE) == 3
@@ -2093,3 +2096,74 @@ def test_creer_un_projet_et_lire_l_accueil_par_le_tableau(tmp_path):
         assert vue["projet"] == "essai"  # le projet est ouvert quand même
     finally:
         tableau.fermer()
+
+
+# --- « Toujours pendant ce chantier » ------------------------------------------------------
+
+
+def test_pendant_ce_chantier_retient_les_regles_au_chantier_pas_au_profil(tableau, tmp_path):
+    atelier = atelier_simule(tmp_path, guichet=Guichet())
+    serveur = tableau(atelier)
+    reponses = demander_en_fil(atelier.guichet, entree={"command": "cd src && sed -e x f"})
+    (demande,) = serveur.etat()["autorisations"]
+    assert demande["regle"] == "" and demande["regles_chantier"] == ["Bash(sed:*)"]
+    _, reponse = serveur.appeler("/api/autorisation", {"id": demande["id"], "choix": "chantier"})
+    assert reponse["autorisation"] == {
+        "reglee": True,
+        "phrase": "Autorisé pendant ce chantier : Bash(sed:*). Ces règles s'effaceront quand le "
+        "chantier sera archivé ; le profil du projet n'est pas touché.",
+    }
+    assert attendre(lambda: reponses) and reponses[0].regles == ("Bash(sed:*)",)
+    assert atelier.moteur.chantier.autorisations_chantier == ["Bash(sed:*)"]
+    assert atelier.moteur.agent.regles_chantier() == ["Bash(sed:*)"]
+    assert not (tmp_path / "chantier" / "profil.json").exists()
+    etat = json.loads((tmp_path / ".atelier" / "etat.json").read_text("utf-8"))
+    assert etat["autorisations_chantier"] == ["Bash(sed:*)"]
+    textes = [e["texte"] for e in atelier.moteur.chantier.evenements]
+    assert "Autorisation retenue pendant ce chantier : Bash(sed:*)." in textes
+
+    # Une seconde fois : pas de doublon.
+    demander_en_fil(atelier.guichet, entree={"command": "sed -e y g"})
+    (demande,) = serveur.etat()["autorisations"]
+    serveur.appeler("/api/autorisation", {"id": demande["id"], "choix": "chantier"})
+    assert atelier.moteur.chantier.autorisations_chantier == ["Bash(sed:*)"]
+
+
+def test_pendant_ce_chantier_sans_regle_possible_laisse_la_demande_ouverte(tableau, tmp_path):
+    atelier = atelier_simule(tmp_path, guichet=Guichet())
+    serveur = tableau(atelier)
+    reponses = demander_en_fil(atelier.guichet, entree={"command": "bash -c 'rm x'"})
+    (demande,) = serveur.etat()["autorisations"]
+    assert demande["regles_chantier"] == []
+    _, reponse = serveur.appeler("/api/autorisation", {"id": demande["id"], "choix": "chantier"})
+    assert reponse["autorisation"] == {
+        "reglee": False,
+        "phrase": "Aucune règle n'est possible pour cette demande, même pour ce chantier : "
+        "autorise-la une fois, ou refuse-la.",
+    }
+    assert reponses == [] and atelier.moteur.chantier.autorisations_chantier == []
+
+
+def test_les_regles_du_chantier_partent_avec_lui_et_reviennent_au_redemarrage(tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")], guichet=Guichet())
+    demander_en_fil(atelier.guichet, entree={"command": "sed -e x f"})
+    (demande,) = atelier.guichet.ouvertes()
+    assert atelier.autoriser(demande["id"], "chantier")["reglee"] is True
+    # Au redémarrage, l'état relu garde les règles du chantier en cours.
+    relu = Chantier.charger(tmp_path / ".atelier" / "etat.json")
+    assert relu.autorisations_chantier == ["Bash(sed:*)"]
+    # Un nouveau chantier repart sans elles ; l'archive les garde dans son état.
+    atelier.message("Un objectif")
+    assert attendre(lambda: not atelier.occupe)
+    assert atelier.nouveau_chantier()["fait"] is True
+    assert atelier.moteur.chantier.autorisations_chantier == []
+    assert atelier.moteur.agent.regles_chantier() == []
+    (archive,) = (tmp_path / ".atelier" / "archives").iterdir()
+    ancien = json.loads((archive / "etat.json").read_text("utf-8"))
+    assert ancien["autorisations_chantier"] == ["Bash(sed:*)"]
+
+
+def test_un_etat_d_avant_se_relit_sans_regles_de_chantier(tmp_path):
+    donnees = chantier([]).en_dict()
+    del donnees["autorisations_chantier"]
+    assert Chantier.depuis_dict(donnees).autorisations_chantier == []
