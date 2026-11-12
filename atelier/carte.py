@@ -262,34 +262,48 @@ def _modules_python(fichiers) -> dict[str, str]:
     return index
 
 
-def _imports_python(chemin: str, texte: str, index: dict[str, str]) -> set[str]:
+def _imports_python(chemin: str, texte: str, index: dict[str, str]) -> dict[str, list[str]]:
+    """Les fichiers du projet que `chemin` importe, et pour chacun les noms qu'il y prend."""
     try:
         arbre = ast.parse(texte)
     except (SyntaxError, ValueError):
-        return set()
+        return {}
     paquet = (
         chemin[:-3].split("/")[:-1]
         if not chemin.endswith("__init__.py")
         else chemin.split("/")[:-1]
     )
-    cibles = set()
+    cibles: dict[str, list[str]] = {}
     for noeud in ast.walk(arbre):
-        candidats = []
-        if isinstance(noeud, ast.Import):
-            candidats = [a.name for a in noeud.names]
-        elif isinstance(noeud, ast.ImportFrom):
-            base = noeud.module or ""
-            if noeud.level:
-                parent = paquet[: len(paquet) - (noeud.level - 1)] if noeud.level > 1 else paquet
-                base = ".".join([*parent, *([base] if base else [])])
-            candidats = [f"{base}.{a.name}" if base else a.name for a in noeud.names] + [base]
-        for nom in candidats:
-            while nom:
-                if nom in index:
-                    cibles.add(index[nom])
-                    break
-                nom = nom.rpartition(".")[0]
+        for module, pris in _candidats_python(noeud, paquet):
+            cible = _resoudre_module(module, index)
+            if cible:
+                noms = cibles.setdefault(cible, [])
+                if pris and pris != "*" and pris not in noms:
+                    noms.append(pris)
     return cibles
+
+
+def _candidats_python(noeud, paquet: list[str]) -> list[tuple[str, str]]:
+    """Les modules qu'un import peut viser, et le nom pris dans chacun (vide pour le paquet)."""
+    if isinstance(noeud, ast.Import):
+        return [(a.name, a.name.rpartition(".")[2]) for a in noeud.names]
+    if not isinstance(noeud, ast.ImportFrom):
+        return []
+    base = noeud.module or ""
+    if noeud.level:
+        parent = paquet[: len(paquet) - (noeud.level - 1)] if noeud.level > 1 else paquet
+        base = ".".join([*parent, *([base] if base else [])])
+    return [(f"{base}.{a.name}" if base else a.name, a.name) for a in noeud.names] + [(base, "")]
+
+
+def _resoudre_module(nom: str, index: dict[str, str]) -> str | None:
+    """Le fichier d'un module « a.b.c », ou de son parent le plus proche qui existe."""
+    while nom:
+        if nom in index:
+            return index[nom]
+        nom = nom.rpartition(".")[0]
+    return None
 
 
 JS_IMPORTS = [
@@ -302,13 +316,30 @@ JS_IMPORTS = [
 ]
 
 
-def _imports_js(chemin: str, texte: str, fichiers) -> set[str]:
-    cibles = set()
+NOMS_JS = re.compile(r"(?:import|export)\s+(?:type\s+)?([\w$]+)?\s*,?\s*(?:\{([^}]*)\})?")
+
+
+def _noms_js(instruction: str) -> list[str]:
+    """Les noms pris dans « import a, { b, c as d } from '…' »."""
+    m = NOMS_JS.match(instruction)
+    if not m:
+        return []
+    noms = [m.group(1)] if m.group(1) and m.group(1) not in ("from", "type") else []
+    for morceau in (m.group(2) or "").split(","):
+        nom = morceau.strip().split(" as ")[0].replace("type ", "").strip()
+        if nom:
+            noms.append(nom)
+    return noms
+
+
+def _imports_js(chemin: str, texte: str, fichiers) -> dict[str, list[str]]:
+    cibles: dict[str, list[str]] = {}
     dossier = posixpath.dirname(chemin)
     for rang, motif in enumerate(JS_IMPORTS):
         # Dans une page ou une feuille de style, « app.js » est un chemin ; dans du code, un paquet.
         nu_permis = rang in (3, 4, 5)
-        for cible in motif.findall(texte):
+        for trouve in motif.finditer(texte):
+            cible = trouve.group(1)
             if "://" in cible or cible.startswith(("//", "data:")):
                 continue
             if not nu_permis and not cible.startswith((".", "/")):
@@ -318,7 +349,10 @@ def _imports_js(chemin: str, texte: str, fichiers) -> set[str]:
             )
             for essai in (base, *(base + e for e in JS_EXT), *(f"{base}/index{e}" for e in JS_EXT)):
                 if essai in fichiers:
-                    cibles.add(essai)
+                    noms = cibles.setdefault(essai, [])
+                    for nom in _noms_js(trouve.group(0)) if rang == 0 else []:
+                        if nom not in noms:
+                            noms.append(nom)
                     break
     return cibles
 
@@ -326,26 +360,38 @@ def _imports_js(chemin: str, texte: str, fichiers) -> set[str]:
 JS_EXT_LIENS = tuple(".js .ts .tsx .jsx .mjs .cjs .html .htm .css .vue .svelte .scss".split())
 
 
-def _cibles(chemin: str, texte: str, fichiers, index: dict[str, str]) -> set[str]:
-    """Les fichiers du projet dont `chemin` se sert, lus dans son texte."""
+def _cibles(chemin: str, texte: str, fichiers, index: dict[str, str]) -> dict[str, list[str]]:
+    """Les fichiers du projet dont `chemin` se sert, lus dans son texte, et ce qu'il y prend."""
     if chemin.endswith(".py"):
         cibles = _imports_python(chemin, texte, index)
     elif chemin.lower().endswith(JS_EXT_LIENS):
         cibles = _imports_js(chemin, texte, fichiers)
     else:
-        return set()
-    return {c for c in cibles if c != chemin}
+        return {}
+    return {c: noms for c, noms in cibles.items() if c != chemin}
+
+
+SEP = "\u0000"  # entre deux chemins, dans la clé d'un lien
+
+
+def liens_et_noms(depot: Path, fiches: dict) -> tuple[list[list[str]], dict[str, list[str]]]:
+    """Les liens « se sert de » entre fichiers, et pour chacun les noms pris (clé « a\0b »)."""
+    index = _modules_python(fiches)
+    paires, noms = set(), {}
+    for chemin in fiches:
+        texte = lire_texte(depot, chemin)
+        if texte is None:
+            continue
+        for cible, pris in _cibles(chemin, texte, fiches, index).items():
+            paires.add((chemin, cible))
+            if pris:
+                noms[chemin + SEP + cible] = pris[:12]
+    return sorted([a, b] for a, b in paires), noms
 
 
 def liens(depot: Path, fiches: dict) -> list[list[str]]:
     """Les liens « se sert de » entre fichiers du projet : [fichier, fichier dont il se sert]."""
-    index = _modules_python(fiches)
-    paires = set()
-    for chemin in fiches:
-        texte = lire_texte(depot, chemin)
-        if texte is not None:
-            paires.update((chemin, c) for c in _cibles(chemin, texte, fiches, index))
-    return sorted([a, b] for a, b in paires)
+    return liens_et_noms(depot, fiches)[0]
 
 
 BROUILLON_MAX = 40  # fichiers lus au plus dans la copie de travail d'une tâche
@@ -439,10 +485,13 @@ def relever(depot: Path, ancienne: dict | None = None) -> dict:
         "analyse_le": (ancienne or {}).get("analyse_le") or _maintenant(),
         "maj_le": _maintenant(),
         "fichiers": fiches,
-        "liens": liens(depot, fiches),
+        "liens": [],
+        "noms": {},
         "cout_usd": (ancienne or {}).get("cout_usd", 0.0),
         "changements": {"nouveaux": [], "modifies": [], "supprimes": [], "le": "", "depuis": ""},
     }
+    carte["liens"], carte["noms"] = liens_et_noms(depot, fiches)
+    carte["synthese"] = (ancienne or {}).get("synthese")  # le portrait et les dossiers, s'il y en a
     if ancienne:
         carte["changements"] = comparer(ancienne, carte)
     return carte
@@ -500,12 +549,16 @@ Pour chaque fichier ci-dessous, écris en français, au tutoiement :
 - "resume" : une phrase qui dit à quoi sert le fichier dans le projet (160 caractères au plus) ;
 - "detail" : deux à quatre phrases simples sur ce qu'il fait et avec quoi il travaille ;
 - "pieces" : pour chacune des parties nommées dans la liste « Parties » du fichier, une phrase
-  courte qui dit à quoi elle sert, sous la forme {{"nom": "...", "role": "..."}}.
+  courte qui dit à quoi elle sert, sous la forme {{"nom": "...", "role": "..."}} ;
+- "prudence" : zéro, une ou deux phrases sur ce qu'il faut savoir avant de modifier ce fichier,
+  seulement s'il y a un vrai piège lisible dans le code (un nom que d'autres fichiers appellent,
+  un ordre à respecter, un verrou, un format à garder) ; une liste vide sinon.
 
 Pas de jargon : si un mot technique est inévitable, explique-le dans la même phrase.
 Ne lis aucun autre fichier : tout ce qu'il te faut est ci-dessous.
 Réponds uniquement par un objet JSON de la forme
-{{"fichiers": [{{"chemin": "...", "resume": "...", "detail": "...", "pieces": [...]}}]}}
+{{"fichiers": [{{"chemin": "...", "resume": "...", "detail": "...", "pieces": [...],
+"prudence": [...]}}]}}
 
 {fichiers}"""
 
@@ -535,14 +588,117 @@ def appliquer(carte: dict, lot: list[tuple[str, str]], reponse: dict | None) -> 
             for p in recu.get("pieces") or []
             if isinstance(p, dict)
         }
+        prudence = recu.get("prudence") if isinstance(recu.get("prudence"), list) else []
         fiche["explication"] = {
             "sha": fiche["sha"],
             "resume": str(recu["resume"])[:300],
             "detail": str(recu.get("detail") or "")[:1500],
             "pieces": roles,
+            "prudence": [str(x)[:300] for x in prudence if str(x).strip()][:2],
         }
         retenues += 1
     return retenues
+
+
+# --- la synthèse : le portrait du projet et une phrase par dossier ------------------------------
+
+SYNTHESE_DOSSIERS_MAX = 60  # dossiers décrits au plus
+SYNTHESE_FICHIERS_PAR_DOSSIER = 6
+
+CONSIGNE_SYNTHESE = """Tu présentes un projet de code à une personne qui ne sait pas programmer.
+Elle dirige le projet. Voici ses dossiers, et pour chacun ce que font ses principaux fichiers.
+
+Écris en français, au tutoiement, sans jargon :
+- "portrait" : deux phrases au plus qui disent ce qu'est ce projet et ce qu'il fait ;
+- "dossiers" : pour chaque dossier de la liste, une phrase (180 caractères au plus) qui dit
+  à quoi il sert dans le projet, sous la forme {{"chemin": "...", "phrase": "..."}}.
+
+Ne lis aucun autre fichier : tout ce qu'il te faut est ci-dessous.
+Réponds uniquement par un objet JSON de la forme
+{{"portrait": "...", "dossiers": [{{"chemin": "...", "phrase": "..."}}]}}
+
+{lisezmoi}{dossiers}"""
+
+
+def dossiers_de(carte: dict) -> dict[str, list[str]]:
+    """Chaque dossier du projet (« app/ », « app/web/ »…) et les fichiers qu'il contient."""
+    dossiers: dict[str, list[str]] = {}
+    for chemin in carte["fichiers"]:
+        parties = chemin.split("/")[:-1]
+        for i in range(1, len(parties) + 1):
+            dossiers.setdefault("/".join(parties[:i]) + "/", []).append(chemin)
+    return dossiers
+
+
+def _resume_fiche(fiche: dict, chemin: str) -> str:
+    explication = fiche.get("explication") if a_jour(fiche) else None
+    return (explication or {}).get("resume") or fiche.get("doc") or phrase_generique(chemin, fiche)
+
+
+def empreinte_synthese(carte: dict) -> str:
+    """Change quand un dossier apparaît ou disparaît, ou qu'un fichier est réexpliqué."""
+    morceaux = sorted(
+        f"{c}:{(f.get('explication') or {}).get('sha', '')}" for c, f in carte["fichiers"].items()
+    )
+    return hashlib.sha1("\n".join(morceaux).encode("utf-8")).hexdigest()
+
+
+def synthese_a_faire(carte: dict) -> bool:
+    return (carte.get("synthese") or {}).get("empreinte") != empreinte_synthese(carte)
+
+
+def consigne_synthese(depot: Path, carte: dict) -> str:
+    """La consigne de synthèse : le début du LISEZMOI, puis chaque dossier et ses gros fichiers."""
+    blocs = []
+    dossiers = sorted(dossiers_de(carte).items(), key=lambda d: (d[0].count("/"), d[0]))
+    for dossier, chemins in dossiers[:SYNTHESE_DOSSIERS_MAX]:
+        directs = [c for c in chemins if posixpath.dirname(c) + "/" == dossier]
+        gros = sorted(directs or chemins, key=lambda c: -carte["fichiers"][c]["lignes"])
+        lignes = [
+            f"- {c[len(dossier):]} : {_resume_fiche(carte['fichiers'][c], c)}"
+            for c in gros[:SYNTHESE_FICHIERS_PAR_DOSSIER]
+        ]
+        blocs.append(f"=== Dossier : {dossier} ({len(chemins)} fichiers)\n" + "\n".join(lignes))
+    lisezmoi = premier_paragraphe(depot, carte)
+    tete = f"Début du LISEZMOI : {lisezmoi}\n\n" if lisezmoi else ""
+    racine = [c for c in carte["fichiers"] if "/" not in c]
+    if racine:
+        blocs.insert(0, "=== Fichiers à la racine : " + ", ".join(sorted(racine)[:30]))
+    return CONSIGNE_SYNTHESE.format(lisezmoi=tete, dossiers="\n\n".join(blocs))
+
+
+def appliquer_synthese(carte: dict, reponse: dict | None) -> bool:
+    """Range le portrait et les phrases des dossiers ; rend False si la réponse ne vaut rien."""
+    if not isinstance(reponse, dict) or not str(reponse.get("portrait") or "").strip():
+        return False
+    connus = dossiers_de(carte)
+    phrases = {
+        str(d.get("chemin")).rstrip("/") + "/": str(d.get("phrase") or "")[:300]
+        for d in reponse.get("dossiers") or []
+        if isinstance(d, dict) and str(d.get("chemin") or "").rstrip("/") + "/" in connus
+    }
+    carte["synthese"] = {
+        "empreinte": empreinte_synthese(carte),
+        "portrait": str(reponse["portrait"])[:600],
+        "dossiers": {c: p for c, p in phrases.items() if p.strip()},
+    }
+    return True
+
+
+LISEZMOIS = ("LISEZMOI.md", "README.md", "readme.md", "Readme.md", "README.rst", "README.txt")
+
+
+def premier_paragraphe(depot: Path, carte: dict) -> str:
+    """Le premier paragraphe du LISEZMOI, sans titre ni image : le portrait quand Claude se tait."""
+    for nom in LISEZMOIS:
+        if nom not in carte["fichiers"]:
+            continue
+        texte = lire_texte(depot, nom) or ""
+        for bloc in re.split(r"\n\s*\n", texte):
+            ligne = " ".join(bloc.split())
+            if ligne and not ligne.startswith(("#", "!", "<", "[!", "```", "---", "|", "=")):
+                return re.sub(r"[*_`]", "", ligne)[:400]
+    return ""
 
 
 def charger(depot: Path) -> dict | None:
@@ -563,8 +719,12 @@ def sauver(depot: Path, carte: dict) -> None:
 # --- ce que voit le tableau de bord -----------------------------------------------------------
 
 
-def vue(carte: dict, en_cours: dict[str, list[str]] | None = None) -> dict:
-    """La carte complète pour la page : fichiers expliqués, liens, changements, travail en cours."""
+def vue(carte: dict, en_cours: dict[str, list[str]] | None = None, depot=None) -> dict:
+    """La carte complète pour la page : fichiers expliqués, liens, changements, travail en cours.
+
+    S'y ajoutent ce qui passe sur chaque lien (`noms`), le portrait du projet et une phrase par
+    dossier : ceux de Claude, ou bien le début du LISEZMOI et rien pour les dossiers.
+    """
     en_cours = en_cours or {}
     nouveaux, modifies = (
         set(carte["changements"]["nouveaux"]),
@@ -600,12 +760,21 @@ def vue(carte: dict, en_cours: dict[str, list[str]] | None = None) -> dict:
                     for p in f["pieces"]
                 ],
                 "en_cours": en_cours.get(chemin, []),
+                "prudence": (explication or {}).get("prudence", []),
             }
         )
+    synthese = carte.get("synthese") or {}
+    a_jour_synthese = not synthese_a_faire(carte)
     return {
         "version": carte["version"],
         "fichiers": fichiers,
         "liens": carte["liens"],
+        "noms": carte.get("noms", {}),
+        "portrait": synthese.get("portrait", "") if synthese else "",
+        "portrait_claude": bool(synthese.get("portrait")),
+        "portrait_a_jour": a_jour_synthese,
+        "lisezmoi": premier_paragraphe(depot, carte) if depot else "",
+        "dossiers": synthese.get("dossiers", {}),
         "supprimes": carte["changements"]["supprimes"],
         "nouveaux_absents": sorted(c for c in en_cours if c not in carte["fichiers"]),
     }
@@ -714,6 +883,8 @@ class SuiviCarte:
         carte = relever(self.depot, self.carte)
         restants = a_expliquer(carte)
         appels = len(lots(self.depot, restants)) if self.explicateur.reel else 0
+        if self.explicateur.reel and (restants or synthese_a_faire(carte)):
+            appels += 1  # la synthèse : le portrait du projet et une phrase par dossier
         return {"fichiers": len(carte["fichiers"]), "a_expliquer": len(restants), "appels": appels}
 
     def analyser(self) -> bool:
@@ -763,6 +934,26 @@ class SuiviCarte:
                 self.carte["version"] += 1
                 self.restants = max(0, self.restants - len(lot))
                 sauver(self.depot, self.carte)
+        self._synthetiser()
+
+    def _synthetiser(self) -> None:
+        """Après les fichiers, le portrait du projet et une phrase par dossier, si quelque chose
+        a changé depuis la dernière synthèse. Un seul appel, sans outil."""
+        if not self.explicateur.reel or self._fin.is_set():
+            return
+        with self.verrou:
+            if not synthese_a_faire(self.carte):
+                return
+            texte = consigne_synthese(self.depot, self.carte)
+        reponse, cout = self.explicateur.expliquer(texte)
+        with self.verrou:
+            if not appliquer_synthese(self.carte, reponse):
+                self.probleme = self.probleme or (
+                    "Claude n'a pas pu écrire le portrait du projet : réessaie plus tard."
+                )
+            self.carte["cout_usd"] = round(self.carte.get("cout_usd", 0.0) + cout, 4)
+            self.carte["version"] += 1
+            sauver(self.depot, self.carte)
 
     # la veille : une nouvelle version du code, et la carte suit
 
@@ -858,7 +1049,7 @@ class SuiviCarte:
 
     def vue(self, en_cours=None) -> dict | None:
         with self.verrou:
-            return vue(self.carte, en_cours) if self.carte else None
+            return vue(self.carte, en_cours, self.depot) if self.carte else None
 
 
 def _liste_en_cours(en_cours) -> list[dict]:

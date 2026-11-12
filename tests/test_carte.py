@@ -215,6 +215,9 @@ class FauxExplicateur:
 
     def expliquer(self, texte):
         self.consignes.append(texte)
+        if "=== Dossier" in texte:  # la synthèse : le portrait et les dossiers
+            dossiers = [{"chemin": "app", "phrase": "Le calcul."}]
+            return {"portrait": "Un projet d'essai.", "dossiers": dossiers}, 0.01
         chemins = [
             ligne.split(": ", 1)[1]
             for ligne in texte.splitlines()
@@ -239,13 +242,15 @@ def test_le_suivi_analyse_explique_puis_ne_reexplique_que_le_fichier_change(tmp_
     assert suivi.resume()["etat"] == "absente"
     estimation = suivi.estimer()
     assert (
-        estimation["fichiers"] == 9 and estimation["a_expliquer"] == 7 and estimation["appels"] == 1
+        estimation["fichiers"] == 9 and estimation["a_expliquer"] == 7 and estimation["appels"] == 2
     )
     assert suivi.analyser() is True
     assert attendre(lambda: not suivi.occupe())
     resume = suivi.resume()
     assert resume["etat"] == "prete" and resume["expliques"] == 7 and resume["a_expliquer"] == 0
-    assert resume["cout"] == "0,01 $" and resume["changements"] == ""
+    assert resume["cout"] == "0,02 $" and resume["changements"] == ""  # un lot et la synthèse
+    v = suivi.vue()
+    assert v["portrait"] == "Un projet d'essai." and v["dossiers"] == {"app/": "Le calcul."}
     assert json.loads((d / ".atelier" / "carte.json").read_text("utf-8"))["commit"]
     # Rien n'a changé : la veille ne fait rien.
     assert suivi.verifier() is False
@@ -254,8 +259,9 @@ def test_le_suivi_analyse_explique_puis_ne_reexplique_que_le_fichier_change(tmp_
     git(d, "commit", "-q", "-am", "produit")
     assert suivi.verifier() is True
     assert attendre(lambda: not suivi.occupe())
-    assert "=== Fichier : app/outils.py" in faux.consignes[-1]
-    assert faux.consignes[-1].count("=== Fichier") == 1
+    (lot,) = [c for c in faux.consignes[2:] if "=== Fichier :" in c]
+    assert "=== Fichier : app/outils.py" in lot and lot.count("=== Fichier") == 1
+    assert "=== Dossier : app/" in faux.consignes[-1]  # une explication a changé : synthèse refaite
     resume = suivi.resume({"app/outils.py": ["B-ouvrier-1"]})
     assert resume["changements"] == "1 fichier : 1 modifié" and resume["expliques"] == 7
     assert resume["en_cours"] == [{"chemin": "app/outils.py", "agents": ["B-ouvrier-1"]}]
@@ -333,3 +339,50 @@ def test_provisoire_lit_la_copie_de_travail_sans_rien_ecrire(tmp_path):
     assert provisoire(None, [brouillon]) == {"fichiers": [], "liens": []}
     assert provisoire(carte, []) == {"fichiers": [], "liens": []}
     assert sorted(p.name for p in tmp_path.iterdir()) == ["web"]
+
+
+def test_chaque_lien_dit_ce_qu_il_prend(tmp_path):
+    k = carte.relever(depot(tmp_path, PROJET))
+    assert k["noms"]["app/calcul.py\u0000app/outils.py"] == ["outils"]
+    assert k["noms"]["tests/test_calcul.py\u0000app/calcul.py"] == ["total"]
+    assert k["noms"]["web/app.js\u0000web/aide.js"] == ["aide"]
+    assert "web/index.html\u0000web/app.js" not in k["noms"]  # une balise <script> : rien de nommé
+    assert carte.vue(k)["noms"] == k["noms"]
+
+
+def test_les_noms_js_d_un_import():
+    assert carte._noms_js("import Vue, { ref, computed as c, type Truc } from './x'") == [
+        "Vue", "ref", "computed", "Truc",
+    ]  # fmt: skip
+    assert carte._noms_js("export * from './y'") == []
+
+
+def test_la_prudence_de_claude_est_gardee_et_bornee(tmp_path):
+    k = carte.relever(depot(tmp_path, PROJET))
+    lot = [("app/calcul.py", "")]
+    prudence = ["Garde le nom total.", " ", "a", "b"]
+    recu = {"chemin": "app/calcul.py", "resume": "Calcule.", "prudence": prudence}
+    carte.appliquer(k, lot, {"fichiers": [recu]})
+    fiches = {f["chemin"]: f for f in carte.vue(k)["fichiers"]}
+    assert fiches["app/calcul.py"]["prudence"] == ["Garde le nom total.", "a"]
+    assert fiches["app/outils.py"]["prudence"] == []
+
+
+def test_la_synthese_part_du_lisezmoi_et_ne_garde_que_les_dossiers_connus(tmp_path):
+    d = depot(tmp_path, PROJET)
+    k = carte.relever(d)
+    texte = carte.consigne_synthese(d, k)
+    assert "Début du LISEZMOI : Un projet d'essai pour la carte." in texte
+    assert "=== Dossier : app/ (3 fichiers)" in texte
+    assert "- calcul.py : Le calcul de la norme." in texte
+    assert carte.synthese_a_faire(k)
+    v = carte.vue(k, depot=d)
+    assert v["portrait"] == "" and v["lisezmoi"] == "Un projet d'essai pour la carte."
+    assert not carte.appliquer_synthese(k, {"portrait": "  "})
+    reponse = {"portrait": "Un essai.", "dossiers": [{"chemin": "web/", "phrase": "La page."},
+                                                      {"chemin": "nulle/", "phrase": "Inventé."}]}
+    assert carte.appliquer_synthese(k, reponse)
+    assert k["synthese"]["dossiers"] == {"web/": "La page."} and not carte.synthese_a_faire(k)
+    autre = {"fichiers": [{"chemin": "app/calcul.py", "resume": "Autre."}]}
+    carte.appliquer(k, [("app/calcul.py", "")], autre)
+    assert carte.synthese_a_faire(k)  # une explication a changé : le portrait est à refaire
