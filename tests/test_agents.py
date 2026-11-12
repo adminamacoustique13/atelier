@@ -28,10 +28,11 @@ from atelier.agents import (  # noqa: E402
 )
 from atelier.consignes import ROLE_ORCHESTRATEUR  # noqa: E402
 from atelier.controles import ControlesSimules  # noqa: E402
-from atelier.guichet import Guichet, GuichetSimule  # noqa: E402
+from atelier.guichet import Guichet  # noqa: E402
 from atelier.modele import Chantier, Contrat, Tache  # noqa: E402
 from atelier.moteur import Moteur  # noqa: E402
 from atelier.sdk import SessionSDK  # noqa: E402
+from tests.doubles import GuichetSimule  # noqa: E402
 from tests.test_sdk import (  # noqa: E402
     BLOQUE,
     UUID,

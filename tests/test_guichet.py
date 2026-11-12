@@ -8,13 +8,13 @@ import pytest
 
 from atelier.guichet import (
     Guichet,
-    GuichetSimule,
     Reponse,
     detail_pour,
     phrase_pour,
     regle_pour,
     regles_chantier_pour,
 )
+from tests.doubles import GuichetSimule
 
 GARDE_S = 5  # aucun fil de test ne doit attendre plus longtemps
 SANS_REPONSE = "Pas de réponse de la personne responsable."
