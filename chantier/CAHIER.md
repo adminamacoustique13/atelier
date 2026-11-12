@@ -4,7 +4,7 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| F1. Fichiers partagés et leur fusion | revenue vers la personne responsable : seconde vérification refusée pour un point (une montée à tort après un arrêt puis « Relancer au même niveau »), enveloppe de deux passages atteinte | Opus | complète, Opus : refusé deux fois | 1 + 1 reprise | suite 1 697 dans sa copie, 25 tests de fusion |
+| F1. Fichiers partagés et leur fusion | troisième passage autorisé par la personne responsable (correction E8), sur la branche réunie avec F4 | Opus | complète, Opus : refusé deux fois | 1 + 2 reprises | réunie à la branche et à F4 : 1 761 tests |
 | F2. V3f : six places, vérificateur hors place, réveil, régulateur | vérifié | Opus | complète, Opus : refusé une fois, puis accepté sous réserve d'un test qu'il a écrit | 1 + 1 reprise | 26 cas dans test_moteur_places.py, plus le test du vérificateur (il échoue quand on retire la condition de suspension) ; 26 mutations sur 30 attrapées ; réunie à F3 et F3.1 : 1 732 tests, 8 essais verts | suite 1 686 dans sa copie (2 tests de mesure réécrits et 1 retiré-remplacé, à juger par le vérificateur), 8 essais verts |
 | F3.1. Un outil refusé ne bloque que si un contrôle du projet en a besoin ; même règle pour le vérificateur | vérifié | Opus | bornée, Opus : accepté | 1 + 1 retouche de mots | 16 tests nouveaux qui échouaient sur F3 ; 3 tests de F3 réécrits (critères changés) ; suite 1 707 |
 | F5. Un plan trop étroit est élargi avant d'être proposé (la forme du plan, écrite en V1, n'était branchée nulle part) | reportée à un prochain chantier (arrêtée sur décision de la personne responsable) | Opus | | | |
