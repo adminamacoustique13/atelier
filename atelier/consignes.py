@@ -31,19 +31,24 @@ la ferait attendre."""
 MARQUE_EMPECHE = "EMPÊCHÉ :"
 
 # Comment écrire ce signe : l'ouvrier et les trois vérifications reçoivent la même phrase.
-_LIGNE_EMPECHE = f"""une ligne qui commence par « {MARQUE_EMPECHE} », au tout début de la \
-ligne, sans tiret ni puce devant, suivie de la commande et du message reçu, tel quel. Par exemple :
+_LIGNE_EMPECHE = f"""Cette ligne commence par « {MARQUE_EMPECHE} », au tout début de la ligne, \
+sans tiret ni puce devant, suivie de la commande et du message reçu, tel quel. Par exemple :
 {MARQUE_EMPECHE} uv run pytest -q — (le message reçu)"""
 
-# Un refus dont la tâche n'a pas besoin ne doit pas la bloquer (cahier, « V3b ») : l'ouvrier lit
-# cette règle dans sa consigne et dans chaque reprise (`consigne_reprise`), dans les mêmes mots.
-EMPECHE_SI_INDISPENSABLE = f"""N'écris la ligne « {MARQUE_EMPECHE} » pour ce qui t'est refusé \
-que si la tâche ne peut pas se faire sans ; sinon fais sans, et dis-le dans ta fiche de relais."""
+
+def _si_empeche(ou: str, but: str = "d'aller au bout de la tâche") -> str:
+    """Quand écrire le signe d'empêchement, dans les mêmes mots pour l'ouvrier, sa reprise et le
+    vérificateur : un refus dont le travail n'a pas besoin ne doit pas bloquer la tâche (cahier,
+    « V3b »). `ou` : où l'agent l'écrit ; `but` : ce que le refus empêcherait."""
+    return (
+        "Si une commande refusée ou un outil qui manque (commande non permise, programme absent, "
+        f"réseau coupé) t'empêche {but}, écris-le dans {ou} par une ligne « {MARQUE_EMPECHE} » ; "
+        "sinon fais sans, et dis-le au même endroit, sans cette ligne."
+    )
+
 
 EMPECHE_OUVRIER = f"""## Si tu es empêché
-Si une commande t'est refusée ou qu'un outil te manque (commande non permise, programme absent, \
-réseau coupé), écris dans ton compte rendu final {_LIGNE_EMPECHE}
-{EMPECHE_SI_INDISPENSABLE}
+{_si_empeche("ton compte rendu final (rubrique Doutes et demandes)")} {_LIGNE_EMPECHE}
 L'Atelier lit ces lignes : il demande alors à la personne le bon réglage (permettre la commande, \
 installer l'outil) au lieu de relancer ta tâche à l'aveugle, ce qui buterait au même endroit. \
 Une autre commande permise qui fait le même travail reste bienvenue ; mais ne fais pas passer la \
@@ -52,12 +57,10 @@ commandes permises est un choix de la personne.
 """
 
 EMPECHE_VERIFICATEUR = f"""## Si tu es empêché
-Si une commande t'est refusée ou qu'un outil te manque (commande non permise, programme absent, \
-réseau coupé), écris dans ton verdict {_LIGNE_EMPECHE}
-Reporte la même chose dans le champ "empeche" du JSON, même si tu as pu conclure par un autre \
-moyen. Sans ce signe, l'Atelier prendrait ton refus pour un défaut du livrable et relancerait \
-l'agent pour rien : la vérification suivante buterait au même endroit. Avec lui, il demande à \
-la personne le bon réglage."""
+{_si_empeche("ton verdict", "de vérifier un critère")} {_LIGNE_EMPECHE}
+Reporte aussi ce que dit cette ligne dans le champ "empeche" du JSON. Sans ce signe, l'Atelier \
+prendrait ton refus pour un défaut du livrable et relancerait l'agent pour rien : la vérification \
+suivante buterait au même endroit. Avec lui, il demande à la personne le bon réglage."""
 
 
 def _liste(elements: list[str]) -> str:
@@ -219,7 +222,7 @@ vérifier de nouveau et pourrait casser ce qui passait.
 {controles}
 
 {outils}Si tu tiens une fiche de relais (`chantier/relais/{tache.id}.md`), mets-la à jour pour \
-qu'elle décrive ton travail après correction. {EMPECHE_SI_INDISPENSABLE}
+qu'elle décrive ton travail après correction. {_si_empeche("ton compte rendu")}
 
 Termine par un compte rendu court : ce que tu as corrigé, point par point, et ce qui reste.
 """

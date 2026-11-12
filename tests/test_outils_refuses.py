@@ -2,8 +2,11 @@
 
 Un outil refusé à l'ouvrier sans rapport avec la tâche (`git push`) ne doit pas priver un vrai
 défaut de sa reprise à chaud : il est cité à l'ouvrier repris. Seul un outil qui lance le premier
-mot d'une commande de contrôle du profil bloque tout de suite, comme ce qu'un agent signale.
+mot d'une commande d'un contrôle du profil, quand ce contrôle n'est pas permis aux agents, bloque
+tout de suite, comme ce qu'un agent signale.
 """
+
+import json
 
 import pytest
 
@@ -22,7 +25,8 @@ from tests.test_moteur import (
 from tests.test_serveur import attendre, bloque_avec_reglage
 
 GIT_PUSH = "Bash(git push)"
-PROFIL_UV = {"commandes": ["uv run pytest -q", "ruff check ."]}
+PROFIL_UV = {"commandes": ["uv run pytest -q", "ruff check ."]}  # ruff est permis, uv non
+SOUS = {"commandes": ["cd sous && uv run pytest -q"]}  # un `cd` n'est jamais permis d'avance
 REFUSEE_PUIS_ACCEPTEE = {("A", "verificateur"): ["bacle", "ok"]}
 
 
@@ -46,9 +50,9 @@ class AgentRefuse(AgentParRang):
         return resultat
 
 
-def moteur_refuse(refuses, issues=None, profil=None, lignes=()):
+def moteur_refuse(refuses, issues=None, profil=None, lignes=(), textes=None):
     c = chantier([tache("A")])
-    agent = AgentRefuse(refuses, lignes, issues=issues or REFUSEE_PUIS_ACCEPTEE,
+    agent = AgentRefuse(refuses, lignes, issues=issues or REFUSEE_PUIS_ACCEPTEE, textes=textes,
                         perimetres={"A": ["a.py"]})  # fmt: skip
     return c, Moteur(c, agent, ControlesComptes(), profil), agent
 
@@ -72,15 +76,26 @@ def test_un_outil_refuse_sans_rapport_laisse_partir_la_reprise_a_chaud_qui_le_ci
     ("refuse", "profil", "bloquee"),
     [
         ("Bash(uv sync)", PROFIL_UV, True),  # le cas `uv` : le contrôle `uv run pytest -q`
-        ("Bash(ruff format .)", PROFIL_UV, True),
         ("Bash(uv)", PROFIL_UV, True),
+        ("Bash(ruff format .)", PROFIL_UV, False),  # `ruff check .` est permis aux agents
         ("Bash(uvx ruff check .)", PROFIL_UV, False),  # un autre premier mot
         (GIT_PUSH, PROFIL_UV, False),
         ("Bash(uv sync)", {}, False),  # sans commande de contrôle dans le profil
         ("Edit(uv)", PROFIL_UV, False),  # un autre outil que Bash
+        # Un contrôle permis aux agents : l'ouvrier lance les tests lui-même.
+        ("Bash(python script.py)", {"commandes": ["python -m pytest -q"]}, False),
+        ("Bash(uv sync)", {**PROFIL_UV, "commandes_permises": ["uv"]}, False),
+        # Chaque commande de la chaîne du contrôle compte, sans `cd …` ni variable devant.
+        ("Bash(cd /tmp && ls)", SOUS, False),
+        ("Bash(uv sync)", SOUS, True),
+        ("Bash(uv sync)", {"commandes": ["FOO=1 uv run pytest"]}, True),
+        ("Bash(uv sync)", {"commandes": ["ruff check . ; uv run pytest -q"]}, True),
+        # L'outil refusé se lit de même : l'ouvrier a lancé le contrôle tel qu'il est écrit.
+        ("Bash(cd sous && uv run pytest -q)", SOUS, True),
+        ("Bash(FOO=1 uv sync)", PROFIL_UV, True),
     ],
 )
-def test_un_outil_refuse_bloque_tout_de_suite_seulement_sur_le_premier_mot_d_un_controle(
+def test_un_outil_refuse_ne_bloque_que_s_il_lance_un_controle_non_permis_aux_agents(
     refuse, profil, bloquee
 ):
     c, m, agent = moteur_refuse([[refuse]], profil=profil)
@@ -106,6 +121,28 @@ def test_un_outil_refuse_que_l_ouvrier_signale_aussi_mot_pour_mot_bloque_comme_s
     assert demande["empechements"] == [GIT_PUSH]
 
 
+@pytest.mark.parametrize("par", ["ligne", "champ"])
+def test_un_outil_refuse_que_le_verificateur_signale_mot_pour_mot_bloque(par):
+    verdict = {"valide": False, "motif": "bacle", "resume": "Les tests n'ont pas été lancés."}
+    texte = json.dumps({**verdict, "empeche": [GIT_PUSH]} if par == "champ" else verdict)
+    if par == "ligne":
+        texte = f"EMPÊCHÉ : {GIT_PUSH}\n{texte}"
+    c, m, agent = moteur_refuse([[GIT_PUSH]], textes={"A": [texte]})
+    m.executer()
+    assert agent.reprises == [] and c.tache("A").etat == "revenu"
+    (demande,) = blocages(c)
+    assert demande["empechements"] == [GIT_PUSH]
+
+
+def test_une_chaine_se_lit_commande_par_commande_sans_cd_ni_variable_devant():
+    from atelier.moteur import _formes_lancees
+
+    assert _formes_lancees("cd sous && FOO=1 BAR= uv run pytest -q | tee x ; ruff check .") == [
+        "Bash(uv run pytest -q)", "Bash(tee x)", "Bash(ruff check .)",
+    ]  # fmt: skip
+    assert _formes_lancees("cd sous") == [] and _formes_lancees("") == []
+
+
 def test_seuls_les_outils_refuses_de_la_passe_reprise_sont_cites():
     # Deux outils refusés au départ ; la reprise refusée n'en a aucun : rien ne bloque.
     issues = {("A", "verificateur"): ["bacle", "bacle", "ok"]}
@@ -117,15 +154,33 @@ def test_seuls_les_outils_refuses_de_la_passe_reprise_sont_cites():
     assert blocages(c) == [] and c.tache("A").etat == "verifie"
 
 
-def test_un_livrable_accepte_malgre_un_outil_refuse_nomme_l_outil_sans_parler_d_empechement():
-    c, m, _ = moteur_refuse([[GIT_PUSH]], issues={("A", "verificateur"): ["ok"]})
+WEBFETCH = "WebFetch(https://x.y)"
+
+
+@pytest.mark.parametrize(
+    ("refuses", "constat", "fin"),
+    [
+        ([GIT_PUSH], "Un outil a été refusé", "Si cette commande doit servir aux agents, tu peux "
+         "la leur permettre dans les outils du projet."),
+        ([GIT_PUSH, "Bash(curl x.y)"], "Des outils ont été refusés", "Si ces commandes doivent "
+         "servir aux agents, tu peux les leur permettre dans les outils du projet."),
+        ([WEBFETCH], "Un outil a été refusé", "Si cet outil doit servir aux agents, tu peux le "
+         "leur permettre."),
+        ([GIT_PUSH, WEBFETCH], "Des outils ont été refusés", "Si ces outils doivent servir aux "
+         "agents, tu peux les leur permettre."),
+    ],
+)  # fmt: skip
+def test_un_livrable_accepte_malgre_des_outils_refuses_les_nomme_sans_parler_d_empechement(
+    refuses, constat, fin
+):
+    c, m, _ = moteur_refuse([refuses], issues={("A", "verificateur"): ["ok"]})
     m.executer()
     assert c.tache("A").etat == "verifie" and blocages(c) == []
     fil = textes_du_fil(c)
+    liste = " ; ".join(f"« {r} »" for r in refuses)
     assert fil[fil.index("Vérifiée et enregistrée.") + 1] == (
-        f"Des outils ont été refusés à l'ouvrier pendant cette tâche : « {GIT_PUSH} ». Le "
-        "livrable a quand même été accepté et enregistré. Si cette commande doit servir aux "
-        "agents, tu peux la leur permettre dans les outils du projet."
+        f"{constat} à l'ouvrier pendant cette tâche : {liste}. Le livrable a quand même été "
+        f"accepté et enregistré. {fin}"
     )
     assert not any("signalé un empêchement" in texte for texte in fil)
 

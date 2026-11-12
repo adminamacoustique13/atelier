@@ -9,15 +9,17 @@ qui se répète) et la rend à la personne avec une demande claire. Aucun modèl
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from contextlib import suppress
 from dataclasses import dataclass, replace
+from itertools import dropwhile
 
 from atelier import dosage, refus
-from atelier.agents import REPRISE_IMPOSSIBLE, forme_courte
+from atelier.agents import FORME_COURTE, REPRISE_IMPOSSIBLE, commande_permise, forme_courte
 from atelier.consignes import (
     PREUVE_MAX_CARACTERES,
     PREUVES_MAX,
@@ -30,7 +32,7 @@ from atelier.consignes import (
     lire_verdict,
 )
 from atelier.controles import hors_perimetre, se_chevauchent
-from atelier.guichet import ARRETE
+from atelier.guichet import ARRETE, CHAINE
 from atelier.modele import Chantier, Tache
 
 ACTIFS = ("en_cours", "en_verification")
@@ -81,6 +83,17 @@ SANS_CRAN = "sans_cran"  # un refus identique au précédent, et plus aucun cran
 REPETE = "repete"  # trois refus de même forme de suite, même si un cran reste
 NOMBRES = ("une", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix")
 DETAIL_CITE = 300  # les derniers caractères d'un détail cité dans la question
+AFFECTATION = re.compile(r"[A-Za-z_]\w*=\S*")  # une variable posée devant une commande
+# La fin de la note d'un livrable accepté malgré des outils refusés à l'ouvrier, selon qu'il y en a
+# un seul ou plusieurs, et que ce sont tous des commandes (à permettre dans les outils du projet).
+FINS_D_OUTILS_REFUSES = {
+    (True, True): "Si cette commande doit servir aux agents, tu peux la leur permettre dans les "
+    "outils du projet.",
+    (False, True): "Si ces commandes doivent servir aux agents, tu peux les leur permettre dans "
+    "les outils du projet.",
+    (True, False): "Si cet outil doit servir aux agents, tu peux le leur permettre.",
+    (False, False): "Si ces outils doivent servir aux agents, tu peux les leur permettre.",
+}
 NON_REFUS = ("valide", ARRETEE, PANNE)  # les issues d'historique qui ne sont pas des refus
 
 
@@ -93,9 +106,9 @@ class Jugement:
     cette passe (ses `VERDICT_GARDE` derniers caractères), s'il a fini son tour. `reprenable` dit
     si l'ouvrier peut reprendre la main ; `reprise`, si la passe jugée était une reprise.
     `empechements` : ce que l'ouvrier ou le vérificateur ont signalé comme les empêchant de
-    travailler, et les outils refusés à l'ouvrier (`refus.empechements`) ; `refuses` : parmi
-    eux, les outils refusés qu'aucun agent ne signale aussi, que la reprise cite à l'ouvrier ;
-    `blocage` : la cause qui bloque la tâche, "" sinon.
+    travailler, et les outils refusés à l'ouvrier (`refus.empechements`) ; `refuses_seuls` :
+    parmi eux, les outils refusés qu'aucun agent ne signale aussi, que la reprise cite à
+    l'ouvrier ; `blocage` : la cause qui bloque la tâche, "" sinon.
     """
 
     motif: str | None
@@ -107,12 +120,12 @@ class Jugement:
     reprise: bool = False
     empechements: tuple[str, ...] = ()
     blocage: str = ""
-    refuses: tuple[str, ...] = ()
+    refuses_seuls: tuple[str, ...] = ()
 
     @property
     def signales(self) -> tuple[str, ...]:
         """Ce que les agents ont signalé eux-mêmes : les empêchements, hors outils refusés seuls."""
-        return tuple(e for e in self.empechements if e not in self.refuses)
+        return tuple(e for e in self.empechements if e not in self.refuses_seuls)
 
     def pour_la_suite(self) -> str:
         """Ce que reçoit le départ neuf qui suit : le verdict entier s'il y en a un, sinon le
@@ -144,6 +157,40 @@ def _preuve(entree: dict) -> str:
     if len(detail) > PREUVE_MAX_CARACTERES:
         detail = "[…] " + detail[-PREUVE_MAX_CARACTERES:]
     return f"{tete}, {origine} : {detail}"
+
+
+def _formes_lancees(commande: str) -> list[str]:
+    """Les commandes que lance une chaîne Bash, chacune sous sa forme courte (`forme_courte`).
+
+    La chaîne est coupée comme au guichet (`guichet.CHAINE` : &&, ||, ;, |, &) ; chaque commande
+    perd les variables posées devant elle (`FOO=1 uv run pytest`), et un `cd …` ne lance rien.
+    """
+    formes = []
+    for morceau in CHAINE.split(commande):
+        mots = list(dropwhile(AFFECTATION.fullmatch, morceau.split()))
+        if mots and mots[0] != "cd":
+            formes.append(forme_courte({"name": "Bash", "input": {"command": " ".join(mots)}}))
+    return formes
+
+
+def _commande_bash(forme: str) -> str:
+    """La commande d'un outil Bash, lue dans sa forme courte (« uv sync » pour « Bash(uv sync) »,
+    `agents.FORME_COURTE`) ; "" pour un autre outil."""
+    trouve = FORME_COURTE.fullmatch(forme)
+    return trouve[1] if trouve and forme.startswith("Bash(") else ""
+
+
+def _note_d_outils_refuses(refuses: tuple[str, ...]) -> str:
+    """La note au fil d'un livrable accepté malgré des outils refusés à l'ouvrier, accordée à
+    leur nombre ; elle ne parle de commande que si tous en sont (`FINS_D_OUTILS_REFUSES`)."""
+    liste = " ; ".join(f"« {_court(r, DETAIL_CITE)} »" for r in refuses)
+    seul = len(refuses) == 1
+    constat = "Un outil a été refusé" if seul else "Des outils ont été refusés"
+    commandes = all(_commande_bash(r) for r in refuses)
+    return (
+        f"{constat} à l'ouvrier pendant cette tâche : {liste}. Le livrable a quand même été "
+        f"accepté et enregistré. {FINS_D_OUTILS_REFUSES[seul, commandes]}"
+    )
 
 
 def _refus_compares(fenetre: list[dict], cause: str) -> list[dict]:
@@ -607,19 +654,16 @@ class Moteur:
         with self.verrou:
             tache.etat = "verifie"
         self._noter("Vérifiée et enregistrée.", tache)
-        if jugement.empechements:
+        if jugement.signales:
             liste = " ; ".join(f"« {_court(e, DETAIL_CITE)} »" for e in jugement.empechements)
-            constat = (
-                "Un agent a signalé un empêchement pendant cette tâche"
-                if jugement.signales
-                else "Des outils ont été refusés à l'ouvrier pendant cette tâche"
-            )
             self._noter(
-                f"{constat} : {liste}. Le livrable a quand même été accepté et enregistré. Si "
-                "cette commande doit servir aux agents, tu peux la leur permettre dans les outils "
-                "du projet.",
+                f"Un agent a signalé un empêchement pendant cette tâche : {liste}. Le livrable a "
+                "quand même été accepté et enregistré. Si cette commande doit servir aux agents, "
+                "tu peux la leur permettre dans les outils du projet.",
                 tache,
             )
+        elif jugement.refuses_seuls:
+            self._noter(_note_d_outils_refuses(jugement.refuses_seuls), tache)
 
     def _suite(self, tache: Tache, jugement: Jugement) -> bool:
         """Décide de la suite d'un départ refusé ; rend False si la tâche s'arrête là.
@@ -666,13 +710,13 @@ class Moteur:
         que le pont lui a refusés, devant ce que le vérificateur a signalé.
 
         Les outils refusés qu'aucun agent ne signale aussi, mot pour mot, vont de plus dans
-        `refuses` : seuls, ils ne bloquent pas toujours la tâche (`_empeche`).
+        `refuses_seuls` : seuls, ils ne bloquent pas toujours la tâche (`_empeche`).
         """
-        signales = refus.empechements(getattr(resultat, "texte", ""), None, None)
+        lignes = refus.empechements(getattr(resultat, "texte", ""), None, None)
         outils = refus.empechements("", getattr(resultat, "refuses", None), None)
-        tous = tuple(dict.fromkeys([*signales, *outils, *jugement.empechements]))
-        seuls = [o for o in outils if o not in signales and o not in jugement.empechements]
-        return replace(jugement, empechements=tous, refuses=tuple(seuls))
+        tous = tuple(dict.fromkeys([*lignes, *outils, *jugement.empechements]))
+        seuls = [o for o in outils if o not in lignes and o not in jugement.empechements]
+        return replace(jugement, empechements=tous, refuses_seuls=tuple(seuls))
 
     def _enregistrer(self, tache: Tache, dossier, jugement: Jugement) -> Jugement:
         """Fait entrer le livrable accepté dans la branche principale ; rend le jugement final."""
@@ -724,7 +768,7 @@ class Moteur:
             return replace(refus, reprenable=False)
         return self._passe(tache, dossier, resultat, precedent=refus)
 
-    def _lancer_reprise(self, tache: Tache, dossier, session: str, refus: Jugement):
+    def _lancer_reprise(self, tache: Tache, dossier, session: str, jugement: Jugement):
         """Relance l'ouvrier dans sa session, sur sa copie, avec le refus ; rend son résultat.
 
         None si l'arrêt a été demandé avant : l'agent n'est pas lancé. La reprise compte parmi
@@ -738,7 +782,9 @@ class Moteur:
         self._prendre_agent()
         self._phase(tache, PHASES["reprise"].format(tache.tentatives))
         resultat = self.agent.executer(
-            consigne_reprise(tache, refus.origine, refus.complet, self.profil, refus.refuses),
+            consigne_reprise(
+                tache, jugement.origine, jugement.complet, self.profil, jugement.refuses_seuls
+            ),
             tache.modele,
             tache.effort,
             dossier,
@@ -1080,20 +1126,27 @@ class Moteur:
         """Dit si un agent est empêché de travailler : relancer la tâche buterait au même endroit.
 
         Ce qu'un agent signale (une ligne « EMPÊCHÉ : », le champ `empeche` du verdict) l'est
-        toujours. Un outil refusé à l'ouvrier, seulement s'il lance le premier mot d'une commande
-        de contrôle du profil : sans lui, l'ouvrier ne peut pas rejouer les contrôles. Un autre
-        outil refusé, seul, ne bloque pas : la reprise le cite à l'ouvrier.
+        toujours. Un outil refusé à l'ouvrier, seulement s'il lance le premier mot d'une des
+        commandes d'un contrôle du profil que les agents n'ont pas le droit de lancer
+        (`agents.commande_permise`) : sans lui, l'ouvrier ne peut pas rejouer ce contrôle. Un
+        contrôle permis, l'ouvrier le lance lui-même : le refus est sans rapport. Contrôle et outil
+        refusé se comparent commande par commande (`_formes_lancees`). Un autre outil refusé, seul,
+        ne bloque pas : la reprise le cite à l'ouvrier.
         """
         if jugement.signales:
             return True
         commandes = self.profil.get("commandes")
         commandes = commandes if isinstance(commandes, list) else []
         controles = [
-            forme_courte({"name": "Bash", "input": {"command": c}})
+            forme
             for c in commandes
-            if isinstance(c, str) and c.strip()
+            if isinstance(c, str) and not commande_permise(self.profil, c)
+            for forme in _formes_lancees(c)
         ]
-        return bool(refus.outils_de_controle(list(jugement.refuses), controles))
+        lancees = [
+            forme for r in jugement.refuses_seuls for forme in _formes_lancees(_commande_bash(r))
+        ]
+        return bool(refus.outils_de_controle(lancees, controles))
 
     def _cran_disponible(self, tache: Tache, jugement: Jugement) -> bool:
         """Sous le verrou : dit si l'escalade pourrait encore monter d'un cran après ce refus.

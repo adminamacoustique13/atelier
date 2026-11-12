@@ -964,6 +964,9 @@ class Atelier:
             if blocage is None:
                 self._dire(f"{debut} Je ne relance rien : le blocage n'attend plus ta réponse.")
                 return False
+            # `_blocage_lie` seul sait que ce réglage est né de ce blocage, et il doit conclure
+            # avant cette phrase, que le fil montre avant la décision. Sous le même verrou, le
+            # blocage qu'il rend attend sa réponse : la relance part, son booléen n'apprend rien.
             self._dire(f"{debut} Je relance seul la tâche {blocage['tache']}, au même niveau.")
             self.moteur.relancer_au_meme_niveau(blocage["id"])
         return True

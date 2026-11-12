@@ -201,21 +201,42 @@ def test_l_ouvrier_sait_signaler_un_empechement_et_pourquoi():
     assert lignes_qui_commencent_par_la_marque(texte)  # l'exemple, écrit tel qu'attendu
 
 
+# Le début de la règle du signe d'empêchement : chez l'ouvrier, sa reprise et le vérificateur.
+SI_EMPECHE = (
+    "Si une commande refusée ou un outil qui manque (commande non permise, programme absent, "
+    "réseau coupé) t'empêche "
+)
+
+
 def test_l_ouvrier_ne_signale_un_refus_que_si_la_tache_ne_peut_pas_se_faire_sans():
     ouvrier = consigne_ouvrier(tache(), CONTRAT, PROFIL)
     assert (
-        f"N'écris la ligne « {MARQUE_EMPECHE} » pour ce qui t'est refusé que si la tâche ne peut "
-        "pas se faire sans ; sinon fais sans, et dis-le dans ta fiche de relais."
+        f"{SI_EMPECHE}d'aller au bout de la tâche, écris-le dans ton compte rendu final (rubrique "
+        f"Doutes et demandes) par une ligne « {MARQUE_EMPECHE} » ; sinon fais sans, et dis-le au "
+        "même endroit, sans cette ligne."
     ) in ouvrier
-    assert "Signale le refus dans les deux cas" not in ouvrier
-    # La même phrase, une seule fois, dans la consigne et dans chaque reprise.
-    from atelier.consignes import EMPECHE_SI_INDISPENSABLE
-
-    assert ouvrier.count(EMPECHE_SI_INDISPENSABLE) == 1
-    for refuses in ((), ("Bash(git push)",)):
+    # Une seule règle, conditionnelle dès son premier mot, qui n'oblige pas à créer une fiche.
+    section = ouvrier.split("## Si tu es empêché\n", 1)[1].split("\n## ", 1)[0]
+    assert section.startswith(SI_EMPECHE) and section.count(SI_EMPECHE) == 1
+    assert "fiche de relais" not in section and "dans les deux cas" not in section
+    for refuses in ((), ("Bash(git push)",)):  # la même règle, une fois, dans chaque reprise
         reprise = consigne_reprise(tache(), "verdict", "Refusé.", PROFIL, refuses)
-        assert reprise.count(EMPECHE_SI_INDISPENSABLE) == 1, refuses
-        assert "comme le dit ta consigne" not in reprise
+        assert reprise.count(SI_EMPECHE) == 1, refuses
+        assert (
+            f"{SI_EMPECHE}d'aller au bout de la tâche, écris-le dans ton compte rendu par une "
+            f"ligne « {MARQUE_EMPECHE} » ; sinon fais sans"
+        ) in reprise
+
+
+@pytest.mark.parametrize("copie_jetable", [True, False])
+def test_le_verificateur_ne_signale_un_refus_que_s_il_n_a_pas_pu_conclure_sans(copie_jetable):
+    for nom, texte in verifications(copie_jetable).items():
+        assert (
+            f"{SI_EMPECHE}de vérifier un critère, écris-le dans ton verdict par une ligne "
+            f"« {MARQUE_EMPECHE} » ; sinon fais sans, et dis-le au même endroit, sans cette ligne."
+        ) in texte, nom
+        assert texte.count(SI_EMPECHE) == 1, nom
+        assert "même si tu as pu conclure par un autre moyen" not in texte, nom
 
 
 @pytest.mark.parametrize("copie_jetable", [True, False])
