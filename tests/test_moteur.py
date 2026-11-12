@@ -131,13 +131,17 @@ def test_une_consigne_mal_posee_revient_tout_de_suite():
     assert c.tache("A").tentatives == 1
 
 
-def test_l_enveloppe_d_agents_arrete_le_chantier():
-    c = chantier([tache("A"), tache("B", depend_de=["A"])], max_agents=3)
+def test_les_agents_ne_sont_pas_plafonnes_mais_comptes():
+    c = chantier([tache(x) for x in "ABCDEFGH"])
     m, _ = moteur(c)
     m.executer()
-    assert c.tache("A").etat == "verifie"
-    assert c.tache("B").etat == "revenu"
-    assert c.agents_lances == 3
+    assert all(t.etat == "verifie" for t in c.taches)
+    assert c.agents_lances == 16  # un ouvrier et un vérificateur par tâche
+    # Un état sauvé avant le retrait du plafond se relit : l'ancien réglage est oublié.
+    ancien = c.en_dict()
+    ancien["contrat"]["max_agents"] = 12
+    relu = Chantier.depuis_dict(ancien)
+    assert relu.agents_lances == 16 and "max_agents" not in relu.en_dict()["contrat"]
 
 
 def test_deux_taches_au_meme_perimetre_ne_tournent_jamais_ensemble():

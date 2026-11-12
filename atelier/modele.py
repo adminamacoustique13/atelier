@@ -63,7 +63,6 @@ class Contrat:
 
     objectif: str
     hors_perimetre: str = ""
-    max_agents: int = 12
     max_tentatives: int = 3
     max_montees: int = 2
     plafond_modele: str = "opus"
@@ -112,7 +111,9 @@ class Chantier:
         """Reconstruit un chantier à partir d'un dictionnaire."""
         donnees = dict(donnees)
         donnees.setdefault("ouvert_le", "")  # un état d'avant cette date : inconnue
-        contrat = Contrat(**donnees.pop("contrat"))
+        reglages = dict(donnees.pop("contrat"))
+        reglages.pop("max_agents", None)  # l'ancien plafond d'agents, retiré le 12 novembre 2026
+        contrat = Contrat(**reglages)
         taches = [Tache(**t) for t in donnees.pop("taches", [])]
         return cls(contrat=contrat, taches=taches, **donnees)
 
@@ -130,7 +131,7 @@ def ecrire_cahier(chantier: Chantier, chemin: Path) -> None:
         "",
         f"Objectif : {c.objectif}",
         "",
-        f"Agents lancés : {chantier.agents_lances} / {c.max_agents} · "
+        f"Agents lancés : {chantier.agents_lances} · "
         f"Montées en gamme : {chantier.montees} / {c.max_montees}",
         "",
     ]

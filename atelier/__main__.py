@@ -114,7 +114,7 @@ def commande_planifier(arguments) -> None:
         raise SystemExit("Le découpage n'a rendu aucune tâche. Rien n'a été écrit.")
     chantier = Chantier(
         projet=profil.get("nom", depot.name),
-        contrat=Contrat(objectif=arguments.objectif, max_agents=3 * len(taches)),
+        contrat=Contrat(objectif=arguments.objectif),
         taches=taches,
     )
     chantier.sauver(depot / ".atelier" / "etat.json")

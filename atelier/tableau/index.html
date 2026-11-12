@@ -934,7 +934,7 @@ function contratHtml(vue) {
     <div class="large"><span>Objectif</span>${propre(c.objectif)}</div>
     <div class="large"><span>Hors périmètre</span>${propre(c.hors_perimetre || "Non précisé")}</div>
     <div class="large"><span>Découpage</span>${propre(resumeTaches(vue))}</div>
-    <div><span>Enveloppe</span>${c.max_agents} agents, ${c.max_tentatives} tentatives par tâche</div>
+    <div><span>Enveloppe</span>${c.max_tentatives} tentatives par tâche, ${c.max_montees} montées en gamme ; agents sans plafond</div>
     <div><span>Plafond d'escalade</span>${propre(c.plafond_fr)}</div>
     <div class="large"><span>Zones rouges</span>${c.zones_rouges.length} actions interdites sans toi</div>
   </div>`;
@@ -1009,6 +1009,10 @@ function anneauPoints(faites, total, attente, taille = 132) {
 }
 /* Une jauge en points : la rangée s'allonge avec la carte, la part allumée suit la valeur. */
 const rangPoints = (valeur, maximum) => `<div class="rang-points" aria-hidden="true"><i style="--part: ${maximum ? Math.min(100, (100 * valeur) / maximum) : 0}%"></i></div>`;
+/* Un compte sans plafond : le nombre d'agents lancés, pour le bilan. */
+function compte(titre, valeur) {
+  return `<div class="jauge"><div class="ligne"><span>${titre}</span><b>${valeur}</b></div></div>`;
+}
 function jauge(titre, valeur, maximum) {
   return `<div class="jauge"><div class="ligne"><span>${titre}</span><b>${valeur} / ${maximum}</b></div>
     <div role="img" aria-label="${titre} : ${valeur} sur ${maximum}">${rangPoints(valeur, maximum)}</div></div>`;
@@ -1104,7 +1108,7 @@ function afficherConversation(vue) {
   document.getElementById("rail-point").textContent = vue.point_d_etape;
   poser("rail-anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue), 74) : "");
   poser("rail-jauges", vue.taches.length
-    ? jauge("Agents lancés", vue.agents_lances, c.max_agents) + jauge("Montées en gamme", vue.montees, c.max_montees)
+    ? compte("Agents lancés", vue.agents_lances) + jauge("Montées en gamme", vue.montees, c.max_montees)
     : `<p class="calme">Pas encore de contrat.</p>`);
   const attend = attendDe(vue);
   poser("rail-taches", vue.taches.map((t) => `<li><span class="puce">${propre(t.id)}</span>
@@ -1299,7 +1303,7 @@ function afficherChantier(vue) {
   afficherMode(vue);
   afficherArchives(vue);
   poser("tuiles", dosageHtml(vue));
-  poser("jauges", jauge("Agents lancés", vue.agents_lances, c.max_agents)
+  poser("jauges", compte("Agents lancés", vue.agents_lances)
     + jauge("Montées en gamme", vue.montees, c.max_montees)
     + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${euros(vue.cout_usd).replace(" $", "$")}</b></div>
        <div><span>Tokens</span><b>${vue.tokens >= 1e6 ? (vue.tokens / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + "M" : vue.tokens >= 1e3 ? Math.round(vue.tokens / 1e3) + "k" : nombre(vue.tokens)}</b></div></div>`);
@@ -1582,7 +1586,7 @@ function afficherSalle(vue) {
     ${c.objectif ? `<p class="calme">${propre(c.objectif)}</p>` : ""}
     <div class="boutons"><button type="button" data-action="vers-conversation">Écrire à l'orchestrateur</button><button type="button" data-action="voir-plan">Plan</button></div>`);
   const millions = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}<small> M</small>` : n >= 1e3 ? `${Math.round(n / 1e3)}<small> k</small>` : nombre(n));
-  poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}<small> / ${c.max_agents}</small></b></div>
+  poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}</b></div>
     <div><span>Montées</span><b>${vue.montees}<small> / ${c.max_montees}</small></b></div>
     <div><span>Coût équiv.</span><b>${Number(vue.cout_usd || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small> $</small></b></div>
     <div><span>Tokens</span><b>${millions(vue.tokens || 0)}</b></div>` : "");

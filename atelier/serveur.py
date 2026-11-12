@@ -1119,7 +1119,6 @@ class Atelier:
             chantier.contrat = Contrat(
                 objectif=str(plan.get("objectif") or demande),
                 hors_perimetre=str(plan.get("hors_perimetre") or ""),
-                max_agents=3 * len(taches) + 2,
             )
             chantier.noter(f"Plan reçu : {len(taches)} tâches. Le contrat attend ta validation.")
         if hasattr(agent, "perimetres"):

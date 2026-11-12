@@ -97,13 +97,10 @@ class Moteur:
             self.chantier.noter(texte, tache.id if tache else "")
         self.sur_changement()
 
-    def _prendre_agent(self) -> bool:
-        """Compte un lancement d'agent. Refuse si l'enveloppe du contrat est épuisée."""
+    def _prendre_agent(self) -> None:
+        """Compte un lancement d'agent. Il n'y a pas de plafond : le compte sert au bilan."""
         with self.verrou:
-            if self.chantier.agents_lances >= self.chantier.contrat.max_agents:
-                return False
             self.chantier.agents_lances += 1
-            return True
 
     def _compter(self, tache: Tache, resultat) -> None:
         with self.verrou:
@@ -220,8 +217,7 @@ class Moteur:
         while True:
             if self._arretee(tache):  # arrêt demandé avant le départ de l'ouvrier
                 return self._arret_avant_depart(tache)
-            if not self._prendre_agent():
-                return self._rendre(tache, "l'enveloppe d'agents du contrat est épuisée.")
+            self._prendre_agent()
             dossier, resultat = self._lancer_ouvrier(tache, remarques)
             if resultat is None:  # arrêt demandé pendant la préparation : l'ouvrier n'est pas parti
                 self.controles.annuler(tache, dossier)
@@ -257,7 +253,7 @@ class Moteur:
         """Prépare le travail et lance l'ouvrier ; rend (dossier, résultat).
 
         Le résultat est None si l'arrêt a été demandé pendant la préparation : l'agent n'est
-        alors pas lancé, et ni l'enveloppe ni le compte des tentatives ne le gardent.
+        alors pas lancé, et ni le compte des agents ni celui des tentatives ne le gardent.
         """
         with self.verrou:
             tache.tentatives += 1
@@ -312,8 +308,7 @@ class Moteur:
             return "ne_sait_pas", "Les contrôles automatiques échouent :\n" + sortie[-1500:]
         if self._arretee(tache):  # aucun agent n'est en marche : le vérificateur ne part pas
             return ARRETEE, DETAIL_ARRET
-        if not self._prendre_agent():
-            return "enveloppe", "L'enveloppe d'agents est épuisée avant la vérification."
+        self._prendre_agent()
         avis = self._lancer_verificateur(tache, dossier)
         if avis is None or self._arretee(tache, avis):
             return ARRETEE, DETAIL_ARRET
@@ -327,7 +322,7 @@ class Moteur:
     def _lancer_verificateur(self, tache: Tache, dossier):
         """Lance le vérificateur ; rend son avis, ou None si l'arrêt a été demandé avant son départ.
 
-        Dans ce cas l'agent n'est pas lancé et ne compte pas dans l'enveloppe.
+        Dans ce cas l'agent n'est pas lancé et ne compte pas parmi les agents lancés.
         """
         with self.verrou:
             tache.etat = "en_verification"
@@ -353,9 +348,6 @@ class Moteur:
         contrat = self.chantier.contrat
         if motif == ARRETEE:  # ni seconde chance ni montée : la personne reprend la main
             self._rendre(tache, MOTIF_ARRET)
-            return False
-        if motif == "enveloppe":
-            self._rendre(tache, "l'enveloppe d'agents du contrat est épuisée.")
             return False
         if motif == "consigne":
             self._rendre(tache, f"le vérificateur juge la consigne mal posée. {detail}")
@@ -397,7 +389,6 @@ class Moteur:
                     tache.modele, tache.effort = suivant
                 tache.rallonge = tache.tentatives
                 tache.etat = "a_lancer"
-                self.chantier.contrat.max_agents += 2
             else:
                 tache.etat = "abandonnee"
         self._noter(f"Décision reçue : {choix.lower()}.", tache)
