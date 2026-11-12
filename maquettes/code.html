@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Atelier · Code</title>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@900&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="systeme.css">
+<style>
+.vue{position:absolute;top:84px;left:26px;right:26px;bottom:22px;display:grid;grid-template-columns:330px 1fr 320px;gap:12px}
+.panneau{padding:16px 18px;overflow:hidden;position:relative}
+.arbre{display:flex;flex-direction:column;margin-top:12px}
+.ligne{display:grid;grid-template-columns:14px 1fr 52px;gap:6px;align-items:center;height:27px;font:400 12px var(--mono);color:var(--discret);border-radius:7px;padding:0 6px}
+.ligne.dossier{color:var(--texte)}.ligne .tri{color:var(--faible);font-size:9px}
+.ligne.choisie{background:rgba(255,255,255,.07);color:var(--texte)}
+.ligne .nb{display:flex;justify-content:flex-end}
+.ligne .agent{font:500 9.5px var(--mono);letter-spacing:.05em;color:var(--en-cours);margin-left:8px}
+.seg{display:inline-flex;gap:2px;padding:3px;border-radius:9px;border:1px solid var(--bord)}
+.seg span{font:500 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faible);padding:6px 11px;border-radius:6px}
+.seg span.on{background:rgba(255,255,255,.08);color:var(--texte)}
+.centre{display:flex;flex-direction:column}
+.centre::before{content:"";position:absolute;inset:60px 0 0 0;background-image:radial-gradient(rgba(255,255,255,.06) 1px,transparent 1.2px);background-size:22px 22px;mask:radial-gradient(80% 80% at 50% 55%,#000 40%,transparent 100%)}
+svg#fils{position:absolute;inset:0}
+.f{position:absolute;width:172px;border-radius:11px;background:linear-gradient(180deg,var(--surface-haut),#10141f);border:1px solid var(--bord);padding:10px 12px;box-shadow:0 14px 26px -16px rgba(0,0,0,.9)}
+.f .n{font:500 12px var(--mono);color:var(--texte);display:flex;justify-content:space-between}
+.f .r{font-size:11.5px;color:var(--discret);margin-top:4px;line-height:1.35;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.f.lui{width:210px;border-color:var(--blanc);box-shadow:0 0 0 1px rgba(255,255,255,.2),0 0 40px -10px rgba(255,255,255,.25)}
+.f.touche{border-color:rgba(130,151,196,.6)}
+.col-titre{position:absolute;font:500 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faible)}
+.fiche{display:flex;flex-direction:column;gap:18px}
+.fiche h3{font:500 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faible);margin-bottom:8px}
+.piece{display:grid;grid-template-columns:118px 1fr;gap:10px;font-size:12px;padding:4px 0;color:var(--discret)}
+.piece code{background:none;padding:0;color:var(--texte);font-size:11.5px}
+</style></head><body>
+<header class="tete"><span class="mot">ATELIER</span><span class="projet">Moteur de calcul ▾</span><nav><a href="conversation.html">Conversation<span class="p"></span></a><a href="chantier.html">Chantier</a><a href="salle.html">Salle</a><a href="plan.html">Plan<span class="n">6</span></a><a href="code.html" class="on">Code</a></nav><span class="pousse"></span><span class="vif"><i></i>3 agents au travail</span><span class="demo">Démonstration</span></header>
+<main class="vue">
+ <aside class="panneau">
+  <div style="display:flex;justify-content:space-between;align-items:center"><span class="lab">Fichiers · 60</span><span class="btn" style="height:26px;padding:0 9px;font-size:10px">Réanalyser</span></div>
+  <p class="mono" style="font-size:10.5px;color:var(--faible);margin-top:6px">Analysé le 12 nov. à 6 h 11</p>
+  <div class="arbre" id="arbre"></div>
+ </aside>
+ <section class="panneau centre">
+  <div style="display:flex;align-items:center;gap:16px;position:relative;z-index:2"><div class="seg"><span>Plan</span><span class="on">Fichier</span></div>
+   <p style="font-size:12.5px;color:var(--discret)">Si tu modifies <span class="mono" style="color:var(--texte)">serveur.py</span>, 5 fichiers s'en servent directement.</p></div>
+  <svg id="fils"></svg><div id="graphe"></div>
+ </section>
+ <aside class="panneau fiche">
+  <div><p style="font:500 16px var(--mono)">serveur.py</p><p class="mono" style="font-size:11px;color:var(--faible);margin-top:4px">atelier/serveur.py · code · 1231 lignes</p>
+   <svg id="taille" width="100%" height="8" style="margin-top:10px"></svg></div>
+  <div style="border:1px solid rgba(130,151,196,.35);background:rgba(130,151,196,.07);border-radius:11px;padding:10px 12px;font-size:12px;display:flex;gap:10px;align-items:center"><span style="width:7px;height:7px;border-radius:50%;background:var(--en-cours);box-shadow:0 0 8px var(--en-cours)"></span><span><b class="mono" style="font-weight:500">B</b> modifie ce fichier en ce moment</span></div>
+  <section><h3>À quoi il sert</h3><p style="font-size:13.5px;line-height:1.5">Le serveur local : il fait tourner le moteur et alimente le tableau de bord.</p></section>
+  <section><h3>Ses parties</h3>
+   <div class="piece"><code>libelle_mode</code><span>Le libellé français d'un mode.</span></div>
+   <div class="piece"><code>phrase_mode_reel</code><span>La phrase du fil quand le mode appliqué diffère.</span></div>
+   <div class="piece"><code>cle_api_presente</code><span>Dit si ANTHROPIC_API_KEY existe.</span></div>
+   <div class="piece"><code>annonce_de_depart</code><span>La phrase du fil au démarrage.</span></div>
+   <div class="piece"><code>point_d_etape</code><span>Où en est le chantier, en deux phrases.</span></div>
+   <div class="piece"><code>Activite</code><span>Les dernières lignes de chaque agent.</span></div>
+  </section>
+ </aside>
+</main>
+<script>
+const NS="http://www.w3.org/2000/svg";const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+const dots=(n,max=10)=>{let s="";for(let i=0;i<max;i++)s+=`<i style="display:inline-block;width:3px;height:3px;border-radius:50%;margin-left:2px;background:${i<n?"rgba(220,220,220,.7)":"rgba(220,220,220,.12)"}"></i>`;return s};
+const A=[["d","▾","atelier","16"],["f","","__main__.py",3],["f","","agents.py",6],["f","","archives.py",3],["f","","carte.py",7,""],["f","","consignes.py",3],["f","","controles.py",3],["f","","modele.py",2],["f","","moteur.py",5,"A"],["f","","projets.py",3],["f","","sdk.py",6],["f","","serveur.py",10,"B",1],["d","▸","tableau","1"],["d","▾","chantier","24"],["f","","CAHIER.md",4],["f","","CONTRAT.md",1],["f","","DOSAGE.md",1],["d","▸","outils","2"],["d","▸","tests","12"]];
+document.getElementById("arbre").innerHTML=A.map(([t,tri,n,v,ag,ch])=>t=="d"?`<div class="ligne dossier"><span class="tri">${tri}</span><span>${n}</span><span class="nb mono" style="font-size:10.5px;color:var(--faible)">${v}</span></div>`:`<div class="ligne${ch?" choisie":""}" style="padding-left:22px;grid-template-columns:1fr 52px"><span>${n}${ag?`<span class="agent">● ${ag}</span>`:""}</span><span class="nb">${dots(v)}</span></div>`).join("");
+const sv=document.getElementById("taille");const w=sv.getBoundingClientRect().width;for(let i=0;i<Math.floor(w/6);i++)sv.append(el("circle",{cx:3+i*6,cy:4,r:1.8,fill:i<Math.floor(w/6)*.92?"rgba(220,220,220,.7)":"rgba(220,220,220,.12)"}));
+// graphe de voisinage, en coordonnées du panneau central
+const G=document.getElementById("graphe"),F=document.getElementById("fils");const box=document.querySelector(".centre").getBoundingClientRect();F.setAttribute("width",box.width);F.setAttribute("height",box.height);
+const N=[["g1",16,110,"__main__.py","Les commandes : demo, planifier, servir."],["g2",16,214,"projets.py","Plusieurs projets dans le même atelier."],["g3",16,318,"test_serveur.py","Autorisations, activité et arrêt simulé."],["g4",16,422,"test_demarrage.py","Le message de démarrage."],["g5",16,526,"test_moteur.py","Les tests du moteur."],
+["lui",248,300,"serveur.py","Le serveur local : il fait tourner le moteur et alimente le tableau de bord."],
+["d1",516,90,"agents.py","Les agents pilotés par l'Agent SDK."],["d2",516,194,"archives.py","Les chantiers archivés d'un projet."],["d3",516,298,"carte.py","La carte du code d'un projet."],["d4",516,402,"moteur.py","Le moteur : lance, contrôle, vérifie."],["d5",516,506,"consignes.py","Le seul canal vers un agent."]];
+const P={};N.forEach(([id,x,y,n,r])=>{P[id]=[x,y];G.insertAdjacentHTML("beforeend",`<div class="f${id=="lui"?" lui":""}${id=="d4"?" touche":""}" style="left:${x}px;top:${y}px"><div class="n"><span>${n}</span>${id=="d4"?'<span style="color:var(--en-cours);font-size:10px">● A</span>':id=="lui"?'<span style="color:var(--en-cours);font-size:10px">● B</span>':""}</div><div class="r">${r}</div></div>`)});
+G.insertAdjacentHTML("beforeend",`<span class="col-titre" style="left:16px;top:84px">Ils se servent de lui</span><span class="col-titre" style="left:248px;top:274px">Le fichier</span><span class="col-titre" style="left:516px;top:64px">Il se sert de</span>`);
+function courbe(a,b,c,actif){const d=`M${a[0]},${a[1]} C${a[0]+60},${a[1]} ${b[0]-60},${b[1]} ${b[0]},${b[1]}`;if(actif)F.append(el("path",{d,stroke:c,"stroke-width":3,fill:"none",opacity:.35,filter:"url(#l)"}));F.append(el("path",{d,stroke:c,"stroke-width":actif?1.6:1,fill:"none",opacity:actif?1:.35}));F.append(el("circle",{cx:b[0],cy:b[1],r:2.5,fill:c,opacity:actif?1:.6}))}
+F.innerHTML='<defs><filter id="l" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="3"/></filter></defs>';
+["g1","g2","g3","g4","g5"].forEach((k,i)=>courbe([P[k][0]+172,P[k][1]+30],[248,335+i*6],"#dcdcdc",false));
+["d1","d2","d3","d4","d5"].forEach((k,i)=>courbe([458,320+i*8],[P[k][0],P[k][1]+30],k=="d4"?"#8297c4":"#dcdcdc",k=="d4"));
+</script></body></html>
