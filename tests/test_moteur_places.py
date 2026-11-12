@@ -18,7 +18,7 @@ from atelier.controles import ControlesSimules
 from atelier.modele import Chantier
 from atelier.moteur import MOTIF_ARRET, PHASES, RELANCER_TEL, Moteur
 from atelier.places import PAUSE_SURCHARGE_S, heure_dite
-from tests.test_moteur import chantier, tache, traces
+from tests.test_moteur import Horloge, chantier, tache, traces
 from tests.test_serveur import atelier_simule
 
 T0 = 1_800_000_000.0  # une fausse heure Unix
@@ -167,12 +167,13 @@ def test_une_limite_suspend_les_departs_puis_la_tache_repart_seule_sans_tentativ
     reprise = T0 + QUART
     phrase = f"plus aucun lancement, ils reprennent {heure_dite(reprise, T0)}."
     assert attendre_que(lambda: any(phrase in t for t in fil_de(m)))
+    pause = PHASES["pause"].format(heure_dite(reprise, T0))
+    assert attendre_que(lambda: (m.phase("A") or {}).get("texte") == pause)
     time.sleep(0.05)  # une vingtaine de réveils : rien ne doit partir
     with m.verrou:
         assert [(a["tache"], a["role"]) for a in agent.appels] == [("A", "ouvrier")]
         assert (c.tache("A").tentatives, c.agents_lances) == (0, 0)
         assert c.debit["reprise"] == reprise and c.tache("A").historique == []
-        assert m.phase("A")["texte"] == PHASES["pause"].format(heure_dite(reprise, T0))
     heure.t = reprise
     fil.join(5)
     assert not fil.is_alive()
@@ -403,21 +404,25 @@ def test_une_surcharge_arrete_les_autres_departs_deux_minutes():
 
 def test_un_verificateur_sans_agent_libre_dit_qu_il_attend_et_le_temps_est_mesure():
     c = chantier([tache("A"), tache("B"), tache("C")])
-    heure = Heure()
+    heure, horloge = Heure(), Horloge()  # le temps des mesures n'avance que sur ordre du test
     reglages = {"limites": {"A": ["", "refus"]}, "type_limite": "seven_day_opus"}
     agent = guette(c, {("B", "ouvrier"), ("C", "ouvrier")}, delai_limite_s=None, **reglages)
-    m = Moteur(c, agent, ControlesSimules(), {"paralleles": 2, "agents_max": 2}, heure=heure)
+    profil = {"paralleles": 2, "agents_max": 2}
+    m = Moteur(c, agent, ControlesSimules(), profil, horloge=horloge, heure=heure)
     fil = en_fond(m)
-    # Le vérificateur de A, refusé (Opus), attend ; B et C écrivent et tiennent les deux jetons.
+    # Le vérificateur de A, refusé (Opus), attend la reprise ; B et C écrivent, deux jetons.
+    pause = PHASES["pause"].format(heure_dite(T0 + QUART, T0))
+    assert attendre_que(lambda: (m.phase("A") or {}).get("texte") == pause)
     assert agent.debuts[("C", "ouvrier")].wait(5)
+    horloge.t += 7
     heure.t += QUART  # la suspension prend fin : il ne manque plus qu'un agent libre
     assert attendre_que(lambda: (m.phase("A") or {}).get("texte") == PHASES["jeton"])
     assert c.tache("A").etat == "en_verification"
-    time.sleep(0.02)
+    horloge.t += 11
     finir(m, agent, fil)
     (entree,) = c.tache("A").historique
-    assert entree["issue"] == "valide" and entree["durees"]["jeton"] > 0
-    assert entree["durees"]["pause"] > 0
+    assert entree["issue"] == "valide"
+    assert (entree["durees"]["pause"], entree["durees"]["jeton"]) == (7, 11)
 
 
 def test_un_ouvrier_qui_a_une_place_mais_pas_d_agent_libre_le_dit():
