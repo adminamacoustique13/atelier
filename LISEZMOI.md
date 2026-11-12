@@ -99,6 +99,13 @@ La clé peut aussi venir d'un réglage de Claude Code (un bloc `env` ou un `apiK
 
 ## Les autorisations
 
+Pour que l'Atelier tourne sans toi, les commandes courantes du travail sont permises d'avance, quel que soit le profil du projet :
+
+- **à tous les agents**, orchestrateur compris : des commandes qui lisent sans rien changer (`ls`, `cat`, `head`, `tail`, `wc`, `grep`, `diff`, `tree`, `jq`...), git en lecture, et la recherche sur le web (`WebSearch`) ;
+- **aux ouvriers et aux vérificateurs**, en plus : les outils de développement (`python`, `pip`, `pytest`, `ruff`, `mypy`, `black`, `node`, `tsc`, `pnpm`, `yarn`, `make`, `go`, `rustc`, `mkdir`, `touch`), qui s'ajoutent aux commandes permises du profil (`uv`, `python3`, `cargo`, `npm`, `npx` par défaut).
+
+Ce qui reste hors de cette liste, exprès : `sed`, `awk`, `find`, `xargs`, `sort` et `rg`, qui savent lancer une autre commande ; `rm`, `mv`, `cp`, que le mode « Accepter les modifications » laisse déjà passer dans la copie de travail, et seulement là ; `curl`, `wget` et la lecture d'une page web (`WebFetch`), par où des données pourraient sortir. La liste est dans `atelier/agents.py` (`LECTURE_SHELL`, `COMMANDES_DEV`, `WEB_LECTURE`).
+
 Quand un agent veut lancer une commande ou un outil que rien ne permet encore, il s'arrête et une carte d'autorisation apparaît dans le tableau de bord. Elle a jusqu'à trois boutons :
 
 - **Autoriser une fois** : l'agent poursuit, mais la question reviendra la prochaine fois ;
@@ -121,9 +128,9 @@ La clé `commandes_permises` reste lue comme avant. En lecture seule (l'orchestr
 
 Dans l'onglet Chantier, la carte « Mode des ouvriers » te laisse choisir, en cinq boutons, ce que les ouvriers (les agents qui écrivent le code d'une tâche) font sans te demander. Le bouton en vigueur est en blanc, avec son explication dessous ; pour lire celle d'un autre, passe la souris dessus ou atteins-le à la touche Tab. Un clic envoie le choix : l'Atelier l'inscrit dans `chantier/profil.json` (clé `mode_ouvriers`), l'applique tout de suite aux ouvriers en marche, et affiche la phrase qu'il renvoie. Le bouton en vigueur ne change que lorsque l'Atelier confirme le choix. Si un ouvrier travaille en fait dans un autre mode que celui choisi (Claude Code a refusé le changement, ou l'ouvrier a fini sa répétition), une ligne ambre sous les boutons donne son nom et le mode réellement appliqué.
 
-Un ouvrier a toujours, permis d'avance : la lecture, les modifications de fichiers de sa copie de travail, les commandes permises du profil, et git en lecture. C'est un choix fait pour ne pas multiplier les cartes. Il vaut dans tous les modes : même en « Me demander », un ouvrier modifie les fichiers de sa copie sans carte. Les modes ne portent donc que sur le reste, les commandes surtout.
+Un ouvrier a toujours, permis d'avance : la lecture, les modifications de fichiers de sa copie de travail, les commandes courantes décrites plus haut, les commandes permises du profil, et git en lecture. C'est un choix fait pour ne pas multiplier les cartes. Il vaut dans tous les modes : même en « Me demander », un ouvrier modifie les fichiers de sa copie sans carte. Les modes ne portent donc que sur le reste, les commandes surtout.
 
-- **Me demander** : ce qui est permis d'avance passe sans carte, tout le reste demande une carte. Créer, déplacer ou supprimer des fichiers par une commande (`mkdir`, `rm`, `mv`) demande donc une carte.
+- **Me demander** : ce qui est permis d'avance passe sans carte, tout le reste demande une carte. Déplacer ou supprimer des fichiers par une commande (`rm`, `mv`) demande donc une carte ; `mkdir` et `touch`, permis d'avance, n'en demandent pas.
 - **Accepter les modifications** : le mode par défaut, le comportement d'avant ce menu. Il se distingue du précédent par les fichiers que l'ouvrier crée, range ou supprime par une commande : cela passe sans carte.
 - **Répétition** : les modifications de fichiers demandent une carte, mais les commandes permises d'avance par le profil (`python3`, `npm`, `npx`, `uv`...) tournent sans carte et peuvent écrire. Ce n'est donc pas une garantie que rien ne sera modifié. L'ouvrier prépare son plan, puis une dernière carte te demande s'il peut passer à l'exécution ; une fois accordée, il quitte ce mode. Tant que cette carte n'est pas accordée, la tâche ne produit rien, et le vérificateur la refusera.
 - **Refuser sans demander** : comme « Me demander », mais ce qui aurait demandé une carte est refusé sans rien te demander, et ces refus n'apparaissent nulle part dans l'activité. L'ouvrier fait avec ce qui lui reste.
