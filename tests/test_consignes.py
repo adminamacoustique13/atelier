@@ -110,6 +110,19 @@ def test_la_reprise_sans_commande_de_controle_ne_liste_pas_un_vide():
     assert "(aucune)" not in texte and "Relance ensuite les tests" in texte
 
 
+def test_la_reprise_cite_les_outils_refuses_a_l_ouvrier():
+    refuses = ("Bash(git push)", "WebFetch(https://exemple.org)")
+    texte = consigne_reprise(tache(), "verdict", "Refusé.", PROFIL, refuses)
+    assert "- `Bash(git push)`\n- `WebFetch(https://exemple.org)`\n" in texte
+    assert "Ces outils t'ont été refusés pendant ton travail : tu ne peux pas t'en servir" in texte
+    # Avant la fiche de relais, qui reste à sa place ; sans outil refusé, rien n'en est dit.
+    assert texte.index("- `WebFetch") < texte.index("Si tu tiens une fiche de relais")
+    sans = consigne_reprise(tache(), "verdict", "Refusé.", PROFIL)
+    assert "t'ont été refusés" not in sans and sans == texte.replace(
+        texte[texte.index("Ces outils") : texte.index("Si tu tiens")], ""
+    )
+
+
 # --- la seconde vérification, après une reprise ----------------------------------------------
 
 
@@ -186,6 +199,23 @@ def test_l_ouvrier_sait_signaler_un_empechement_et_pourquoi():
     assert f"« {MARQUE_EMPECHE} », au tout début de la ligne" in texte
     assert "compte rendu final" in texte and "à l'aveugle" in texte
     assert lignes_qui_commencent_par_la_marque(texte)  # l'exemple, écrit tel qu'attendu
+
+
+def test_l_ouvrier_ne_signale_un_refus_que_si_la_tache_ne_peut_pas_se_faire_sans():
+    ouvrier = consigne_ouvrier(tache(), CONTRAT, PROFIL)
+    assert (
+        f"N'écris la ligne « {MARQUE_EMPECHE} » pour ce qui t'est refusé que si la tâche ne peut "
+        "pas se faire sans ; sinon fais sans, et dis-le dans ta fiche de relais."
+    ) in ouvrier
+    assert "Signale le refus dans les deux cas" not in ouvrier
+    # La même phrase, une seule fois, dans la consigne et dans chaque reprise.
+    from atelier.consignes import EMPECHE_SI_INDISPENSABLE
+
+    assert ouvrier.count(EMPECHE_SI_INDISPENSABLE) == 1
+    for refuses in ((), ("Bash(git push)",)):
+        reprise = consigne_reprise(tache(), "verdict", "Refusé.", PROFIL, refuses)
+        assert reprise.count(EMPECHE_SI_INDISPENSABLE) == 1, refuses
+        assert "comme le dit ta consigne" not in reprise
 
 
 @pytest.mark.parametrize("copie_jetable", [True, False])

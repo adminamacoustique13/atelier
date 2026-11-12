@@ -281,3 +281,25 @@ def test_une_erreur_d_agent_se_compare_par_sa_seule_forme():
     assert meme_refus(erreur(SURCHARGE, "verdict"), erreur(LIMITE_ATTEINTE, "verdict"))  # mots
     delai = "Claude Code n'a pas répondu dans le délai de {} s."
     assert meme_refus(erreur(delai.format(3600)), erreur(delai.format(1800)))
+
+
+# --- les outils refusés qui lancent une commande de contrôle (V3b.1) -------------------------
+
+CONTROLES_UV = ["Bash(uv run pytest -q)", "Bash(ruff check .)"]
+
+
+def test_un_outil_refuse_est_un_controle_s_il_en_a_le_nom_et_le_premier_mot():
+    refuses = ["Bash(uv sync)", "Bash(git push)", "Bash(uv)", "Bash(uvx ruff)", "Bash(ruff format)"]
+    assert refus.outils_de_controle(refuses, CONTROLES_UV) == [
+        "Bash(uv sync)", "Bash(uv)", "Bash(ruff format)",
+    ]  # fmt: skip
+    # Un autre outil, même nommé comme la commande, n'en lance aucune.
+    assert refus.outils_de_controle(["Edit(uv sync)", "Read(uv)", "WebFetch"], CONTROLES_UV) == []
+
+
+def test_sans_controle_ni_objet_aucun_outil_refuse_n_est_un_controle():
+    assert refus.outils_de_controle(["Bash(uv sync)"], []) == []
+    assert refus.outils_de_controle(["Bash", "Bash(uv sync)"], ["Bash", ""]) == []
+    assert refus.outils_de_controle([None, 3, "Bash(uv sync)"], [None, *CONTROLES_UV]) == [
+        "Bash(uv sync)"
+    ]

@@ -35,14 +35,20 @@ _LIGNE_EMPECHE = f"""une ligne qui commence par « {MARQUE_EMPECHE} », au tout 
 ligne, sans tiret ni puce devant, suivie de la commande et du message reçu, tel quel. Par exemple :
 {MARQUE_EMPECHE} uv run pytest -q — (le message reçu)"""
 
+# Un refus dont la tâche n'a pas besoin ne doit pas la bloquer (cahier, « V3b ») : l'ouvrier lit
+# cette règle dans sa consigne et dans chaque reprise (`consigne_reprise`), dans les mêmes mots.
+EMPECHE_SI_INDISPENSABLE = f"""N'écris la ligne « {MARQUE_EMPECHE} » pour ce qui t'est refusé \
+que si la tâche ne peut pas se faire sans ; sinon fais sans, et dis-le dans ta fiche de relais."""
+
 EMPECHE_OUVRIER = f"""## Si tu es empêché
 Si une commande t'est refusée ou qu'un outil te manque (commande non permise, programme absent, \
 réseau coupé), écris dans ton compte rendu final {_LIGNE_EMPECHE}
+{EMPECHE_SI_INDISPENSABLE}
 L'Atelier lit ces lignes : il demande alors à la personne le bon réglage (permettre la commande, \
 installer l'outil) au lieu de relancer ta tâche à l'aveugle, ce qui buterait au même endroit. \
 Une autre commande permise qui fait le même travail reste bienvenue ; mais ne fais pas passer la \
 commande refusée sous une autre forme (un autre shell, un script qui la lance) : la liste des \
-commandes permises est un choix de la personne. Signale le refus dans les deux cas.
+commandes permises est un choix de la personne.
 """
 
 EMPECHE_VERIFICATEUR = f"""## Si tu es empêché
@@ -161,13 +167,20 @@ REPRISES = {
 }
 
 
-def consigne_reprise(tache: Tache, origine: str, complet: str | list[str], profil: dict) -> str:
+def consigne_reprise(
+    tache: Tache,
+    origine: str,
+    complet: str | list[str],
+    profil: dict,
+    refuses: tuple[str, ...] = (),
+) -> str:
     """Le message donné à l'ouvrier repris dans sa propre session après un refus.
 
     Il a déjà sa consigne d'origine : ce message ne dit que ce qui a été refusé et ce qu'il faut
     corriger. `origine` vaut "verdict", "perimetre" ou "controles" (sinon `ValueError`) ;
     `complet` est le verdict entier, les fichiers hors périmètre (une liste ou un texte) ou la
-    fin de la sortie des contrôles, rendu tel quel.
+    fin de la sortie des contrôles, rendu tel quel. `refuses` : les outils refusés à l'ouvrier
+    pendant la passe refusée (sous leur forme courte, « Bash(git push) »), que le message cite.
     """
     if origine not in REPRISES:
         raise ValueError(f"Origine de reprise inconnue : {origine!r}")
@@ -183,6 +196,14 @@ def consigne_reprise(tache: Tache, origine: str, complet: str | list[str], profi
         )
     else:
         controles = "Relance ensuite les tests qui portent sur ce que tu as corrigé."
+    outils = ""  # ce qui lui a été refusé : il ne bute pas une seconde fois dessus
+    if refuses:
+        outils = (
+            "Ces outils t'ont été refusés pendant ton travail : tu ne peux pas t'en servir, ni "
+            "les faire passer sous une autre forme.\n"
+            + "\n".join(f"- `{r}`" for r in refuses)
+            + "\n\n"
+        )
     return f"""## Reprise de la tâche {tache.id} après un refus
 {constat} :
 [début]
@@ -197,9 +218,8 @@ vérifier de nouveau et pourrait casser ce qui passait.
 
 {controles}
 
-Si tu tiens une fiche de relais (`chantier/relais/{tache.id}.md`), mets-la à jour pour qu'elle \
-décrive ton travail après correction. Si une commande t'est refusée, écris la ligne \
-« {MARQUE_EMPECHE} » comme le dit ta consigne.
+{outils}Si tu tiens une fiche de relais (`chantier/relais/{tache.id}.md`), mets-la à jour pour \
+qu'elle décrive ton travail après correction. {EMPECHE_SI_INDISPENSABLE}
 
 Termine par un compte rendu court : ce que tu as corrigé, point par point, et ce qui reste.
 """

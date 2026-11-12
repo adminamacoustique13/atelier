@@ -1,8 +1,9 @@
 """Reconnaître un refus qui se répète et un agent empêché, sans appel à un modèle.
 
 Module pur : aucun effet de bord, aucun import d'un autre module d'Atelier. Le moteur s'en sert
-pour ne pas relancer une tâche refusée plusieurs fois pour la même raison, et pour lire ce que
-les agents disent de ce qui les empêche de travailler (une commande interdite, par exemple).
+pour ne pas relancer une tâche refusée plusieurs fois pour la même raison, pour lire ce que
+les agents disent de ce qui les empêche de travailler (une commande interdite, par exemple), et
+pour reconnaître parmi les outils refusés ceux qui lancent une commande de contrôle.
 
 Deux degrés de ressemblance, mesurés sur de vrais refus (voir le cahier, « V3-refus ») :
 `meme_refus` accepte aussi deux détails qui partagent assez de mots, ce qui reconnaît un refus
@@ -228,6 +229,26 @@ def _champ_empeche(verdict: object) -> list[str]:
     valeur = verdict.get("empeche")
     elements = valeur if isinstance(valeur, list) else [valeur]
     return [e.strip() for e in elements if isinstance(e, str)]
+
+
+def _tete(forme: str) -> str:
+    """Le nom d'un outil et le premier mot de son objet, pris dans sa forme courte : « Bash(uv »
+    pour « Bash(uv sync) » comme pour « Bash(uv) » ; "" pour un outil sans objet."""
+    mots = forme.split()
+    tete = mots[0].removesuffix(")") if mots else ""
+    return tete if "(" in tete else ""
+
+
+def outils_de_controle(refuses: list[str], controles: list[str]) -> list[str]:
+    """Les outils refusés qui lancent le premier mot d'une commande de contrôle, dans l'ordre.
+
+    Les deux listes sont des formes courtes d'outils (`agents.forme_courte`, comme
+    « Bash(uv sync) ») : un outil refusé en est s'il a le même nom et le même premier mot que
+    l'un des contrôles (« Bash(uv sync) » pour « Bash(uv run pytest) », pas « Bash(uvx ruff) »).
+    Une entrée qui n'est pas un texte est ignorée.
+    """
+    tetes = {_tete(c) for c in controles if isinstance(c, str)} - {""}
+    return [r for r in refuses if isinstance(r, str) and _tete(r) in tetes]
 
 
 def empechements(compte_rendu: str, refuses: list[str] | None, verdict: dict | None) -> list[str]:

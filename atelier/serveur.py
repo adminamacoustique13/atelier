@@ -950,8 +950,7 @@ class Atelier:
     def _annoncer_reglage(self, demande: dict, fichier: dict) -> bool:
         """Dit au fil que le réglage est appliqué. S'il lève un blocage qui l'a fait naître et
         attend encore, relance la tâche au même niveau, comme le bouton « Relancer au même
-        niveau » ; rend alors True (le moteur est à lancer). Ce choix est lu dans les options de
-        la demande de blocage, que le moteur écrit toujours dans le même ordre (`_rendre`)."""
+        niveau » (`Moteur.relancer_au_meme_niveau`) ; rend alors True (le moteur est à lancer)."""
         debut = (
             "Outils réglés. Commandes permises aux agents : "
             + ", ".join(fichier["commandes_permises"])
@@ -966,8 +965,7 @@ class Atelier:
                 self._dire(f"{debut} Je ne relance rien : le blocage n'attend plus ta réponse.")
                 return False
             self._dire(f"{debut} Je relance seul la tâche {blocage['tache']}, au même niveau.")
-            relancer_tel = blocage["options"][0]  # « Relancer au même niveau », toujours en tête
-            self.moteur.repondre(blocage["id"], relancer_tel)
+            self.moteur.relancer_au_meme_niveau(blocage["id"])
         return True
 
     def _blocage_lie(self, demande: dict) -> dict | None:

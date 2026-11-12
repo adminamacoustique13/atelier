@@ -17,7 +17,7 @@ from contextlib import suppress
 from dataclasses import dataclass, replace
 
 from atelier import dosage, refus
-from atelier.agents import REPRISE_IMPOSSIBLE
+from atelier.agents import REPRISE_IMPOSSIBLE, forme_courte
 from atelier.consignes import (
     PREUVE_MAX_CARACTERES,
     PREUVES_MAX,
@@ -73,13 +73,13 @@ ORIGINES_FR = {
 }
 # Le blocage : une tâche que relancer ne ferait pas avancer revient à la personne avec une
 # demande de nature « blocage » (voir `_bloquer`), et les autres tâches continuent. Trois
-# causes, selon la règle d'usage du cahier (« V3-refus »), chacune avec le nombre de refus que
-# la demande cite pour que la personne voie s'ils disent vraiment la même chose.
+# causes, selon la règle d'usage du cahier (« V3-refus ») ; la demande cite les refus comparés
+# (`_refus_compares`) pour que la personne voie s'ils disent vraiment la même chose.
 NATURE_BLOCAGE = "blocage"
-EMPECHE = "empeche"  # un agent signale ce qui l'empêche de travailler
+EMPECHE = "empeche"  # un agent empêché de travailler (voir `Moteur._empeche`)
 SANS_CRAN = "sans_cran"  # un refus identique au précédent, et plus aucun cran pour monter
 REPETE = "repete"  # trois refus de même forme de suite, même si un cran reste
-REFUS_CITES = {EMPECHE: 1, SANS_CRAN: 2, REPETE: 3}
+NOMBRES = ("une", "deux", "trois", "quatre", "cinq", "six", "sept", "huit", "neuf", "dix")
 DETAIL_CITE = 300  # les derniers caractères d'un détail cité dans la question
 NON_REFUS = ("valide", ARRETEE, PANNE)  # les issues d'historique qui ne sont pas des refus
 
@@ -93,7 +93,9 @@ class Jugement:
     cette passe (ses `VERDICT_GARDE` derniers caractères), s'il a fini son tour. `reprenable` dit
     si l'ouvrier peut reprendre la main ; `reprise`, si la passe jugée était une reprise.
     `empechements` : ce que l'ouvrier ou le vérificateur ont signalé comme les empêchant de
-    travailler (`refus.empechements`) ; `blocage` : la cause qui bloque la tâche, "" sinon.
+    travailler, et les outils refusés à l'ouvrier (`refus.empechements`) ; `refuses` : parmi
+    eux, les outils refusés qu'aucun agent ne signale aussi, que la reprise cite à l'ouvrier ;
+    `blocage` : la cause qui bloque la tâche, "" sinon.
     """
 
     motif: str | None
@@ -105,6 +107,12 @@ class Jugement:
     reprise: bool = False
     empechements: tuple[str, ...] = ()
     blocage: str = ""
+    refuses: tuple[str, ...] = ()
+
+    @property
+    def signales(self) -> tuple[str, ...]:
+        """Ce que les agents ont signalé eux-mêmes : les empêchements, hors outils refusés seuls."""
+        return tuple(e for e in self.empechements if e not in self.refuses)
 
     def pour_la_suite(self) -> str:
         """Ce que reçoit le départ neuf qui suit : le verdict entier s'il y en a un, sinon le
@@ -138,9 +146,29 @@ def _preuve(entree: dict) -> str:
     return f"{tete}, {origine} : {detail}"
 
 
+def _refus_compares(fenetre: list[dict], cause: str) -> list[dict]:
+    """Les refus que cite la question d'un blocage, pris à la fin de la fenêtre : le dernier
+    pour un empêchement ; sinon toute la suite sur laquelle la règle a conclu, de refus de même
+    forme (`REPETE`) ou identiques (`SANS_CRAN`), pour que la question en dise le vrai nombre."""
+    if cause == EMPECHE:
+        nombre = 1
+    elif cause == REPETE:
+        nombre = refus.refus_de_meme_forme_de_suite(fenetre)
+    else:
+        nombre = refus.refus_identiques_de_suite(fenetre)
+    return fenetre[len(fenetre) - nombre :]
+
+
+def _fois(nombre: int) -> str:
+    """« deux fois », « trois fois »… : le nombre en lettres jusqu'à dix, en chiffres au-delà."""
+    lettres = NOMBRES[nombre - 1] if 1 <= nombre <= len(NOMBRES) else str(nombre)
+    return f"{lettres} fois"
+
+
 def _raison_de_blocage(jugement: Jugement, cites: list[dict]) -> str:
     """La raison écrite dans la question d'une demande de blocage : la cause en une phrase, puis
-    les détails des refus comparés, pour que la personne voie une éventuelle confusion."""
+    les détails des refus comparés (`_refus_compares`), pour que la personne voie une éventuelle
+    confusion."""
     details = [f"« {_court(e.get('detail'), DETAIL_CITE)} »" for e in cites] or ["« »"]
     if jugement.blocage == EMPECHE:
         empeches = jugement.empechements[:PREUVES_MAX]
@@ -150,20 +178,21 @@ def _raison_de_blocage(jugement: Jugement, cites: list[dict]) -> str:
             "relancer telle quelle buterait au même endroit tant que la cause reste là. Le "
             f"refus : {details[-1]}."
         )
+    fois = _fois(len(cites))
     if jugement.blocage == REPETE:
         cause = (
-            "parce qu'elle a été refusée trois fois de suite pour la même raison : la relancer, "
+            f"parce qu'elle a été refusée {fois} de suite pour la même raison : la relancer, "
             "même un cran plus haut, a peu de chances d'y changer quelque chose."
         )
     elif jugement.origine == "agent":
         cause = (
-            "parce que les agents se sont arrêtés deux fois de suite sur la même erreur, et "
+            f"parce que les agents se sont arrêtés {fois} de suite sur la même erreur, et "
             "qu'une erreur d'agent ne fait pas monter d'un cran : la relancer telle quelle ne "
             "changerait rien."
         )
     else:
         cause = (
-            "parce qu'elle a été refusée deux fois de suite pour la même raison, et que le "
+            f"parce qu'elle a été refusée {fois} de suite pour la même raison, et que le "
             "contrat ne permet plus de monter d'un cran : la relancer telle quelle ne changerait "
             "rien."
         )
@@ -573,16 +602,22 @@ class Moteur:
                 return None
 
     def _verifiee(self, tache: Tache, jugement: Jugement) -> None:
-        """La tâche est vérifiée ; un empêchement signalé en chemin est seulement noté au fil."""
+        """La tâche est vérifiée ; un empêchement signalé en chemin, ou un outil refusé à
+        l'ouvrier, est seulement noté au fil."""
         with self.verrou:
             tache.etat = "verifie"
         self._noter("Vérifiée et enregistrée.", tache)
         if jugement.empechements:
             liste = " ; ".join(f"« {_court(e, DETAIL_CITE)} »" for e in jugement.empechements)
+            constat = (
+                "Un agent a signalé un empêchement pendant cette tâche"
+                if jugement.signales
+                else "Des outils ont été refusés à l'ouvrier pendant cette tâche"
+            )
             self._noter(
-                f"Un agent a signalé un empêchement pendant cette tâche : {liste}. Le livrable a "
-                "quand même été accepté et enregistré. Si cette commande doit servir aux agents, "
-                "tu peux la leur permettre dans les outils du projet.",
+                f"{constat} : {liste}. Le livrable a quand même été accepté et enregistré. Si "
+                "cette commande doit servir aux agents, tu peux la leur permettre dans les outils "
+                "du projet.",
                 tache,
             )
 
@@ -628,11 +663,16 @@ class Moteur:
     @staticmethod
     def _avec_empechements(jugement: Jugement, resultat) -> Jugement:
         """Ajoute au jugement ce que l'ouvrier signale : ses lignes « EMPÊCHÉ : » et les outils
-        que le pont lui a refusés, devant ce que le vérificateur a signalé."""
-        refuses = getattr(resultat, "refuses", None)
-        ouvrier = refus.empechements(getattr(resultat, "texte", ""), refuses, None)
-        tous = tuple(dict.fromkeys([*ouvrier, *jugement.empechements]))
-        return replace(jugement, empechements=tous)
+        que le pont lui a refusés, devant ce que le vérificateur a signalé.
+
+        Les outils refusés qu'aucun agent ne signale aussi, mot pour mot, vont de plus dans
+        `refuses` : seuls, ils ne bloquent pas toujours la tâche (`_empeche`).
+        """
+        signales = refus.empechements(getattr(resultat, "texte", ""), None, None)
+        outils = refus.empechements("", getattr(resultat, "refuses", None), None)
+        tous = tuple(dict.fromkeys([*signales, *outils, *jugement.empechements]))
+        seuls = [o for o in outils if o not in signales and o not in jugement.empechements]
+        return replace(jugement, empechements=tous, refuses=tuple(seuls))
 
     def _enregistrer(self, tache: Tache, dossier, jugement: Jugement) -> Jugement:
         """Fait entrer le livrable accepté dans la branche principale ; rend le jugement final."""
@@ -698,7 +738,7 @@ class Moteur:
         self._prendre_agent()
         self._phase(tache, PHASES["reprise"].format(tache.tentatives))
         resultat = self.agent.executer(
-            consigne_reprise(tache, refus.origine, refus.complet, self.profil),
+            consigne_reprise(tache, refus.origine, refus.complet, self.profil, refus.refuses),
             tache.modele,
             tache.effort,
             dossier,
@@ -1019,14 +1059,14 @@ class Moteur:
     def _cause_de_blocage(self, tache: Tache, jugement: Jugement) -> str:
         """Sous le verrou, la passe tracée : la cause qui bloque la tâche, ou "".
 
-        La règle d'usage du cahier (« V3-refus ») : un agent qui signale un empêchement bloque
-        tout de suite ; un refus identique au précédent bloque quand plus aucun cran ne reste ;
-        trois refus de même forme de suite bloquent même si un cran reste (la seule
+        La règle d'usage du cahier (« V3-refus », « V3b ») : un agent empêché bloque tout de
+        suite (`_empeche`) ; un refus identique au précédent bloque quand plus aucun cran ne
+        reste ; trois refus de même forme de suite bloquent même si un cran reste (la seule
         ressemblance de mots n'y suffit pas).
         """
         if jugement.motif in (None, ARRETEE):
             return ""
-        if jugement.empechements:
+        if self._empeche(jugement):
             return EMPECHE
         fenetre = self._fenetre(tache)
         identique = len(fenetre) >= 2 and refus.meme_refus(fenetre[-2], fenetre[-1])
@@ -1035,6 +1075,25 @@ class Moteur:
         if refus.refus_de_meme_forme_de_suite(fenetre) >= 3:
             return REPETE
         return ""
+
+    def _empeche(self, jugement: Jugement) -> bool:
+        """Dit si un agent est empêché de travailler : relancer la tâche buterait au même endroit.
+
+        Ce qu'un agent signale (une ligne « EMPÊCHÉ : », le champ `empeche` du verdict) l'est
+        toujours. Un outil refusé à l'ouvrier, seulement s'il lance le premier mot d'une commande
+        de contrôle du profil : sans lui, l'ouvrier ne peut pas rejouer les contrôles. Un autre
+        outil refusé, seul, ne bloque pas : la reprise le cite à l'ouvrier.
+        """
+        if jugement.signales:
+            return True
+        commandes = self.profil.get("commandes")
+        commandes = commandes if isinstance(commandes, list) else []
+        controles = [
+            forme_courte({"name": "Bash", "input": {"command": c}})
+            for c in commandes
+            if isinstance(c, str) and c.strip()
+        ]
+        return bool(refus.outils_de_controle(list(jugement.refuses), controles))
 
     def _cran_disponible(self, tache: Tache, jugement: Jugement) -> bool:
         """Sous le verrou : dit si l'escalade pourrait encore monter d'un cran après ce refus.
@@ -1058,7 +1117,7 @@ class Moteur:
         des derniers refus, `PREUVES_MAX` au plus, bornés) et `empechements`.
         """
         with self.verrou:
-            cites = self._fenetre(tache)[-REFUS_CITES[jugement.blocage] :]
+            cites = _refus_compares(self._fenetre(tache), jugement.blocage)
             passes = [e for e in tache.historique if e.get("issue") not in NON_REFUS]
             preuves = [_preuve(e) for e in passes[-PREUVES_MAX:]]
         demande = self._rendre(
@@ -1157,3 +1216,19 @@ class Moteur:
             else:
                 tache.etat = "abandonnee"
         self._noter(f"Décision reçue : {choix.lower()}.", tache)
+
+    def relancer_au_meme_niveau(self, demande_id: str) -> bool:
+        """Répond à une demande de blocage par la relance au même niveau, comme son bouton.
+
+        Le choix est désigné par son sens (`RELANCER_TEL`), jamais par sa place dans les options
+        de la demande. Rend False, sans rien changer, si la demande n'existe pas, n'est pas un
+        blocage ou n'attend plus de réponse ; le contrôle et la réponse se font sous le verrou.
+        """
+        with self.verrou:
+            demande = next((d for d in self.chantier.demandes if d.get("id") == demande_id), None)
+            if demande is None or demande.get("nature") != NATURE_BLOCAGE:
+                return False
+            if demande.get("reponse") is not None:
+                return False
+            self.repondre(demande_id, RELANCER_TEL)
+        return True
