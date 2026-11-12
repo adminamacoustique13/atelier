@@ -21,6 +21,11 @@ python3 -m atelier servir --depot /chemin/du/projet
 ```
 Ouvre le tableau de bord sur le vrai dépôt. Le chantier ne démarre que lorsque tu valides le contrat.
 
+```
+python3 -m atelier essai
+```
+L'essai réel : un petit chantier joué de bout en bout avec de vrais agents, sur un dépôt jetable (voir « L'essai réel » plus bas). Appel réel, quelques minutes, de l'ordre de 0,40 $ en coût équivalent.
+
 ## Le profil du projet
 
 Un fichier `chantier/profil.json` dans chaque dépôt :
@@ -123,7 +128,7 @@ Tu peux aussi écrire des règles à l'avance dans `chantier/profil.json`, avec 
 }
 ```
 
-La clé `commandes_permises` reste lue comme avant. En lecture seule (l'orchestrateur, les vérificateurs), les règles qui visent des outils d'écriture sont ignorées.
+La clé `commandes_permises` reste lue comme avant. Pour l'orchestrateur, en lecture seule, les règles qui visent des outils d'écriture sont ignorées.
 
 ## Le mode des ouvriers
 
@@ -137,7 +142,7 @@ Un ouvrier a toujours, permis d'avance : la lecture, les modifications de fichie
 - **Refuser sans demander** : comme « Me demander », mais ce qui aurait demandé une carte est refusé sans rien te demander, et ces refus n'apparaissent nulle part dans l'activité. L'ouvrier fait avec ce qui lui reste.
 - **Laisser un arbitre décider** : un modèle, l'arbitre, approuve ou refuse à ta place ce qui aurait demandé une carte. Ce qui est permis d'avance passe sans lui, sauf les commandes qui exécutent du code (`python3`, `npm`, `uv`...), que Claude Code lui renvoie dans ce mode. Ses refus s'affichent dans l'activité de l'agent, avec la règle qui a joué. Après trois refus de suite ou vingt au total, il se met en pause et les demandes reviennent en cartes. Il n'est pas disponible pour tous les modèles : le fil dit alors quel mode est réellement appliqué.
 
-Ce qui ne change jamais : le vérificateur et l'orchestrateur restent en lecture seule, quel que soit le choix. Le mode qui supprime tout garde-fou de Claude Code (`bypassPermissions`) n'est pas proposé ; s'il est écrit dans le profil, l'Atelier le refuse et travaille en « Accepter les modifications », en le disant dans le fil.
+Ce qui ne change jamais : l'orchestrateur reste en lecture seule, et le vérificateur ne peut rien changer au travail de l'ouvrier (il fait ses essais dans une copie jetable, voir « Comment une tâche se déroule »), quel que soit le choix. Le mode qui supprime tout garde-fou de Claude Code (`bypassPermissions`) n'est pas proposé ; s'il est écrit dans le profil, l'Atelier le refuse et travaille en « Accepter les modifications », en le disant dans le fil.
 
 Rien de tout cela n'a été essayé avec un vrai compte : ces modes n'ont tourné que sur des faux clients et sur la démonstration. Le premier essai à faire sur ton Mac est de changer de mode pendant qu'un ouvrier travaille, sur un dépôt sans importance.
 
@@ -222,6 +227,18 @@ Le tableau de bord n'a que cinq couleurs : noir et bleu nuit pour le fond, gris 
 
 Chaque poste de la salle du Chantier porte une courbe en points : une colonne par tranche de 15 secondes, sur les 5 dernières minutes, d'autant plus haute que l'agent a agi pendant ces 15 secondes (un outil lancé compte pour un, du texte écrit pour un par 120 caractères). Tant qu'une demande attend ta réponse, les dernières colonnes passent en ambre, à plat : tu vois depuis combien de temps l'agent est bloqué. Quand la tâche est finie, sa courbe résume toute la marche de son ouvrier. Dans la démonstration, où un agent simulé ne travaille que quelques secondes, une colonne vaut une demi-seconde.
 
+### Où en est un agent
+
+Sous la salle du Chantier, chaque agent en marche a sa ligne : sa tâche, son rôle, et ce qu'il vient de faire, en clair (« Modifie calcul.py », « Lit tests/test_calcul.py », ou la description que Claude Code donne d'une commande, suivie de la commande). Juste dessous :
+
+- **la phase** de la tâche, tenue par l'Atelier, et depuis combien de temps elle dure : « Préparation de sa copie de travail », « L'ouvrier travaille (tentative 2) », « Contrôle du périmètre », « Contrôles automatiques : » suivi des commandes, « Le vérificateur relit », « Enregistrement et fusion » ;
+- **l'étape** que l'agent annonce lui-même (« Étape 2/4 · écrire les tests ») : sa consigne lui demande d'écrire une telle ligne avant chaque étape. Le total est son estimation, il peut l'ajuster en route ;
+- « **dernière action il y a …** » quand l'agent n'a rien fait depuis plus de 20 secondes (il réfléchit, ou il piétine), et « **t'attend depuis …** », en ambre, quand il attend ta réponse à une carte.
+
+Une tâche active sans agent en marche (l'Atelier prépare sa copie, lance les contrôles ou fusionne) a aussi sa ligne, marquée « atelier ». La phase apparaît encore sous l'état de la tâche dans le détail des tâches (06), et sur son poste dans la salle.
+
+Les agents de Claude Code, lancés par la bibliothèque, n'ont pas d'outil de liste de tâches qu'on pourrait lire : l'étape annoncée est ce qui s'en rapproche le plus.
+
 ## La carte du code
 
 L'onglet Code montre le code du projet comme un livre à étages. À gauche, l'explorateur : les dossiers et les fichiers, avec dix points pour la taille de chacun. Au milieu, la page de ce que tu as choisi : le projet (étage 0), un dossier, ou un fichier. Le fil d'Ariane et les ronds « Étage » remontent ; la recherche, en haut à droite, trouve un fichier, une fonction ou un mot, et y mène.
@@ -246,7 +263,7 @@ Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqu�
 1. L'atelier crée une copie de travail du dépôt réservée à la tâche.
 2. L'ouvrier travaille dans cette copie, avec son modèle et son effort.
 3. L'atelier contrôle le périmètre en lisant git, puis lance les commandes du profil.
-4. Un vérificateur, un modèle au-dessus de l'ouvrier, juge le livrable sans pouvoir écrire.
+4. Un vérificateur, un modèle au-dessus de l'ouvrier, juge le livrable dans une copie jetable : l'atelier recopie le livrable à côté, le vérificateur y fait ses essais sans te demander (modifier un fichier pour voir si un test échoue, écrire un script d'essai), puis la copie est jetée. Il ne touche jamais la copie de l'ouvrier, et ce qui est enregistré est le travail de l'ouvrier, pas le sien. Les dépendances installées par l'ouvrier (`node_modules`, `.venv`...) sont reliées dans la copie, pas recopiées. Sa consigne lui fait modifier les fichiers avec l'outil d'édition, écrire ses scripts d'essai dans un fichier et lancer une commande simple à la fois : Claude Code demande toujours une autorisation pour une commande enchaînée sur plusieurs lignes, un heredoc, une variable du shell (`$?`) ou une écriture hors de la copie (un dossier dans `/tmp`). S'il s'y prend autrement, une carte peut donc encore apparaître ; l'essai réel (`python3 -m atelier essai`) le signale.
 5. Accepté : avant d'entrer dans la branche principale, le travail est rejoué sur elle. Si d'autres tâches y sont entrées depuis le départ de l'ouvrier, l'atelier fusionne la branche principale dans la copie de la tâche et relance les commandes du profil sur ce mélange. Tout passe : le travail entre dans la branche principale, et elle ne contient jamais que du code contrôlé tel quel. Un conflit ou un contrôle rouge : rien n'entre, et la tâche est traitée comme refusée, avec la sortie des contrôles dans les remarques de la tentative suivante.
 6. Refusé : le travail est jeté, et la tâche a une seconde chance, puis monte d'un cran. Une tâche à bout de tentatives est relancée seule une fois de plus, un cran plus haut, si le plafond d'escalade du contrat le permet. Ensuite seulement, elle te revient.
 
@@ -254,11 +271,25 @@ Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqu�
 
 Ce qui te revient encore : une tâche arrêtée par toi, une consigne que le vérificateur juge mal posée, une tâche au plafond d'escalade après sa relance seule, et les cartes d'autorisation.
 
+## L'essai réel
+
+`python3 -m atelier essai` (ou `uv run python -m atelier essai` dans le dossier de l'Atelier) vérifie, sur la machine où l'Atelier est installé, ce que les tests ne peuvent pas montrer. Il crée un dépôt jetable dans un dossier temporaire (ou celui de `--dossier`), sans toucher à tes projets, puis :
+
+1. vérifie que la bibliothèque se charge, dans la version testée ;
+2. écrit un message à l'orchestrateur et attend sa réponse, puis dit ce qui est facturé selon le SDK (abonnement ou clé API) ;
+3. lance un chantier de deux tâches, sur Sonnet en effort faible : A (une fonction `moyenne`) doit traverser tout le chantier, ouvrier, contrôles, vérificateur, fusion ; B est arrêtée par le bouton « Arrêter » dès que son ouvrier travaille (`--sans-arret` pour s'en passer) ;
+4. accepte une fois chaque carte d'autorisation, et les liste ;
+5. vérifie que le vérificateur a fait ses essais sans demander de carte, que le travail de A est dans `main`, sans fichier en trop, qu'il marche, et qu'aucun programme Claude ne reste après la fin.
+
+Chaque étape s'affiche « ok », « ÉCHEC » ou « info », et le tout est écrit dans `ESSAI.md`, dans le dossier de l'essai. La commande sort en erreur si une étape a échoué. Compte trois à cinq minutes.
+
 ## Ce qui est testé et ce qui ne l'est pas
 
 Testé (`python3 -m pytest -q`) : le pont vers `claude-agent-sdk` sur un faux client, les cartes d'autorisation, l'arrêt d'un agent, l'annonce de la source de connexion, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, la relance seule, la réparation de la branche principale, et le cycle git complet sur un vrai dépôt, dont l'intégration contrôlée de deux tâches qui ne passent pas ensemble et un conflit.
 
-Pas encore essayé avec de vrais agents : aucune machine du chantier n'était connectée à un compte Claude. Le pont (`atelier/sdk.py`) et les agents (`atelier/agents.py`, classe `AgentClaude`) n'ont tourné que sur des faux clients, jamais sur le vrai Claude Code embarqué : ni les ouvriers, ni les vérificateurs, ni la conversation, ni les cartes d'autorisation, ni l'annonce de la source de connexion. C'est le premier essai à faire sur ton Mac, sur un dépôt sans importance.
+Essayé avec de vrais agents le 2026-11-12, sur une machine Linux du cloud (pas encore sur un Mac), par `python3 -m atelier essai` et par un chantier piloté depuis le tableau de bord : la conversation de l'orchestrateur, le plan, les ouvriers, les contrôles, le vérificateur, la fusion, les cartes d'autorisation (« une fois »), l'arrêt d'un ouvrier, l'annonce de la source de connexion (abonnement). Ce premier essai a trouvé deux défauts, corrigés depuis : un réglage d'outils rendu avec le plan était perdu, et les fichiers `__pycache__` créés en lançant les tests faisaient refuser la tâche ou entraient dans `main`.
+
+Pas encore essayé avec de vrais agents : l'installation et le redémarrage sur Mac, le bouton « Mettre à jour », les modes des ouvriers autres que « Accepter les modifications », « Toujours pour ce projet », la reprise après une réponse arrêtée de l'orchestrateur. Sur ton Mac, commence par `python3 -m atelier essai` : il couvre en quelques minutes ce qui a été essayé dans le cloud.
 
 ## Les fichiers
 
@@ -276,4 +307,5 @@ Pas encore essayé avec de vrais agents : aucune machine du chantier n'était co
 | `atelier/projets.py` | Les projets ouverts : création, reprise d'un dépôt existant, liaison à un dépôt en ligne |
 | `atelier/mise_a_jour.py` | La mise à jour de l'Atelier lui-même : vérification en ligne et `git pull` |
 | `atelier/serveur.py` | Le serveur local du tableau de bord |
+| `atelier/essai.py` | L'essai réel de bout en bout, avec de vrais agents (`python3 -m atelier essai`) |
 | `atelier/tableau/index.html` | Le tableau de bord |

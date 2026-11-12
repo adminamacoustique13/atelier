@@ -287,7 +287,7 @@ def test_un_outil_non_permis_passe_par_le_guichet(contexte):
     assert resultat.ok
     assert guichet.demandes == [(nom, "WebFetch", entree)]
     assert fabrique.clients[0].decisions == [PermissionResultAllow()]
-    assert du_type(evenements, "attente") == ["WebFetch"]
+    assert du_type(evenements, "attente") == ["Lit la page https://example.com/doc"]
 
 
 # --- Critère 4 : vérificateur et conversation sans outil d'écriture -------------------------
@@ -304,6 +304,20 @@ def test_le_verificateur_n_a_aucun_outil_d_ecriture():
     assert not [o for o in options.allowed_tools if o.split("(")[0].strip().lower() in ecriture]
     assert set(options.disallowed_tools) >= ECRITURE
     assert options.permission_mode == "default"
+
+
+def test_dans_sa_copie_jetable_le_verificateur_essaie_sans_carte():
+    """Ses essais (un fichier modifié pour voir un test échouer) passent sans demander, puisque
+    l'atelier jette la copie ; il ne suit pas pour autant le mode choisi pour les ouvriers."""
+    agent, fabrique = claude([fin()], profil={"autorisations": ["Write", "Bash(npm test:*)"]})
+    agent.changer_mode("default")
+    agent.executer("Consigne.", "opus", "high", None, True, VERIFICATEUR, copie_jetable=True)
+    options = fabrique.clients[0].options
+    assert options.allowed_tools == agent._outils(False) + ["Write", "Bash(npm test:*)"]
+    assert {"Edit", "Write"} <= set(options.allowed_tools)
+    assert options.disallowed_tools == []
+    assert options.permission_mode == "acceptEdits"
+    assert agent.modes_appliques() == {}  # aucun poste d'ouvrier n'a été occupé
 
 
 def test_une_regle_retenue_entre_deux_messages_vaut_des_le_suivant():
@@ -887,6 +901,26 @@ def test_l_agent_simule_suit_un_changement_de_mode_en_marche():
 def test_lire_mode(valeur, attendu):
     assert agents.lire_mode(valeur) == attendu
     assert agents.mode_valide(valeur) is (valeur == attendu)
+
+
+def test_les_gestes_disent_quel_fichier_et_quelle_commande():
+    """Constaté au premier essai réel : l'activité n'affichait que « Write », « Write »."""
+    from atelier.agents import decrire_outil
+
+    racine = "/projets/p/.atelier/arbres/A"
+    ecrit = {"name": "Write", "input": {"file_path": f"{racine}/coeur/calcul.py", "content": "x"}}
+    assert decrire_outil(ecrit, racine) == "Écrit coeur/calcul.py"
+    assert decrire_outil(ecrit) == f"Écrit {racine}/coeur/calcul.py"
+    modifie = {"name": "Edit", "input": {"file_path": "/ailleurs/a.py"}}
+    assert decrire_outil(modifie, racine) == "Modifie /ailleurs/a.py"
+    commande = {"command": "python3 -m pytest -q\ngit status", "description": "Lancer les tests"}
+    assert decrire_outil({"name": "Bash", "input": commande}) == (
+        "Lancer les tests — python3 -m pytest -q ; git status"
+    )
+    assert decrire_outil({"name": "Bash", "input": {"command": "ls"}}) == "Lance ls"
+    sous_agent = {"name": "Task", "input": {"description": "Lire les tests"}}
+    assert decrire_outil(sous_agent) == "Confie à un sous-agent : Lire les tests"
+    assert decrire_outil({"name": "Inconnu", "input": None}) == "Inconnu"
 
 
 # --- Le socle permis d'avance : de quoi travailler sans carte ------------------------------

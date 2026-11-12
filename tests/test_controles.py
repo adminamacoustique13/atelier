@@ -110,6 +110,91 @@ def test_preparer_remplace_un_ancien_arbre_sans_garder_le_verrou(tmp_path):
     assert not controles.verrou_fusion.locked()
 
 
+def test_les_fichiers_fabriques_par_les_tests_ne_sortent_pas_du_perimetre(tmp_path):
+    """Constaté au premier essai réel : pytest créait un __pycache__, compté hors périmètre,
+    puis enregistré avec la tâche quand c'est le vérificateur qui l'avait créé."""
+    from atelier.controles import hors_perimetre
+    from atelier.projets import exclure_etat
+
+    depot_d_essai(tmp_path)
+    (tmp_path / ".git" / "info" / "exclude").write_text("# mes réglages\n*.log\n", "utf-8")
+    exclure_etat(tmp_path)
+    exclure_etat(tmp_path)  # une seconde ouverture n'ajoute rien
+    exclusions = (tmp_path / ".git" / "info" / "exclude").read_text("utf-8")
+    assert exclusions.startswith("# mes réglages\n*.log\n")
+    assert exclusions.count("__pycache__/") == 1
+
+    controles = ControlesGit(tmp_path)
+    tache = SimpleNamespace(id="A", titre="Calcul")
+    dossier = controles.preparer(tache)
+    (dossier / "calcul.py").write_text("x = 1\n", "utf-8")
+    fabriques = ("__pycache__/calcul.cpython-313.pyc", ".pytest_cache/v/x", "node_modules/a.js")
+    for fabrique in fabriques:
+        (dossier / fabrique).parent.mkdir(parents=True, exist_ok=True)
+        (dossier / fabrique).write_text("fabriqué", "utf-8")
+    modifies = controles.fichiers_modifies(tache, dossier, None)
+    assert modifies == ["calcul.py"] and hors_perimetre(modifies, ["calcul.py"]) == []
+
+    controles.enregistrer(tache, dossier)
+    suivis = subprocess.run(["git", "ls-files"], cwd=tmp_path, capture_output=True, text=True)
+    assert suivis.stdout.split() == ["LISEZMOI.md", "calcul.py"]
+
+
+def test_la_copie_du_verificateur_montre_le_livrable_et_n_atteint_rien(tmp_path):
+    from atelier.projets import exclure_etat
+
+    def git(dossier, *arguments):
+        return subprocess.run(["git", *arguments], cwd=dossier, capture_output=True,
+                              text=True, check=True).stdout  # fmt: skip
+
+    depot_d_essai(tmp_path)
+    (tmp_path / "ancien.py").write_text("a = 1\n", "utf-8")
+    (tmp_path / ".gitignore").write_text("node_modules/\n.env\n", "utf-8")
+    git(tmp_path, "add", "-A")
+    git(tmp_path, "commit", "-q", "-m", "base")
+    exclure_etat(tmp_path)
+    controles = ControlesGit(tmp_path)
+    tache = SimpleNamespace(id="A", titre="Calcul")
+    dossier = controles.preparer(tache)
+    (dossier / "LISEZMOI.md").write_text("socle modifié\n", "utf-8")
+    (dossier / "src").mkdir()
+    (dossier / "src" / "nouveau.py").write_text("b = 2\n", "utf-8")
+    (dossier / "ancien.py").unlink()
+    (dossier / "node_modules" / "lib").mkdir(parents=True)
+    (dossier / "node_modules" / "lib" / "index.js").write_text("x", "utf-8")
+    (dossier / ".env").write_text("CLE=1\n", "utf-8")
+    (dossier / "__pycache__").mkdir()
+    (dossier / "__pycache__" / "a.pyc").write_text("x", "utf-8")
+
+    copie = controles.copie_de_verification(tache, dossier)
+    assert copie != dossier and copie.is_dir()
+    # Le même livrable, vu de la même façon par git.
+    assert git(copie, "status", "--porcelain") == git(dossier, "status", "--porcelain")
+    assert git(copie, "diff") == git(dossier, "diff")
+    # Les dépendances installées sont reliées, les caches non.
+    assert (copie / "node_modules" / "lib").is_symlink() and (copie / ".env").is_symlink()
+    assert (copie / "node_modules" / "lib" / "index.js").read_text() == "x"
+    assert not (copie / "__pycache__").exists()
+
+    # Ses essais n'atteignent pas la copie de l'ouvrier, ni ce qui est enregistré.
+    (copie / "src" / "nouveau.py").write_text("b = 'muté'\n", "utf-8")
+    (copie / "essai.py").write_text("print(1)\n", "utf-8")
+    controles.jeter_copie(copie)
+    assert not copie.exists() and str(copie) not in git(tmp_path, "worktree", "list")
+    assert (dossier / "src" / "nouveau.py").read_text() == "b = 2\n"
+    controles.enregistrer(tache, dossier)
+    assert "essai.py" not in git(tmp_path, "ls-files").split()
+    assert (tmp_path / "src" / "nouveau.py").read_text() == "b = 2\n"
+
+    # Une copie laissée par un arrêt brutal est remplacée à la vérification suivante.
+    dossier = controles.preparer(SimpleNamespace(id="B"))
+    premiere = controles.copie_de_verification(SimpleNamespace(id="B"), dossier)
+    (premiere / "reste.txt").write_text("x", "utf-8")
+    seconde = controles.copie_de_verification(SimpleNamespace(id="B"), dossier)
+    assert seconde == premiere and not (seconde / "reste.txt").exists()
+    controles.jeter_copie(seconde)
+
+
 # --- l'intégration contrôlée avant d'entrer dans la branche principale ---------------------
 
 
