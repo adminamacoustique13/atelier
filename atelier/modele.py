@@ -49,6 +49,7 @@ class Tache:
     effort: str = ""
     tentatives: int = 0
     rallonge: int = 0
+    relances_auto: int = 0  # relances faites seules, sans la personne responsable
     montees: int = 0
     ajoutee: bool = False
     verdict: str = ""

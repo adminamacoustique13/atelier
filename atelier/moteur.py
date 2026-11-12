@@ -30,6 +30,11 @@ RELANCER_TEL = "Relancer au même niveau"
 ARRETEE = "arretee"
 MOTIF_ARRET = "arrêtée par toi."
 DETAIL_ARRET = "Arrêtée par la personne responsable."
+# Sans intervention : une tâche épuisée est relancée seule, un cran plus haut, autant de fois ;
+# des contrôles rouges sur la branche principale lancent seuls une tâche de réparation.
+RELANCES_AUTO = 1
+MAX_REPARATIONS = 2
+PREFIXE_REPARATION = "REPARATION-"
 
 
 class ContratNonValide(Exception):
@@ -86,6 +91,7 @@ class Moteur:
         self.verrou = threading.RLock()
         self._arretees: set[str] = set()  # les tâches dont l'arrêt est demandé, pas encore pris
         self._enregistrement: set[str] = set()  # acceptées : l'arrêt vient trop tard
+        self._principale_rouge = False  # les réparations n'ont pas suffi : chantier pas fini
         for tache in chantier.taches:
             if not tache.modele:
                 tache.modele, tache.effort = dosage.depart(tache.type, self.profil.get("dosage"))
@@ -185,8 +191,10 @@ class Moteur:
                     while len(en_vol) < paralleles and (tache := self._prochaine()):
                         tache.etat = "en_cours"
                         en_vol.add(bassin.submit(self._traiter, tache))
-                if not en_vol:
+                if not en_vol and not self._reparer_si_besoin():
                     break
+                if not en_vol:
+                    continue  # une réparation vient d'être ajoutée : elle part au tour suivant
                 finis, en_vol = wait(en_vol, return_when=FIRST_COMPLETED)
                 for fini in finis:
                     fini.result()
@@ -195,7 +203,8 @@ class Moteur:
     def _conclure(self) -> None:
         taches = self.chantier.taches
         with self.verrou:
-            self.chantier.termine = all(t.etat in ("verifie", "abandonnee") for t in taches)
+            fini = all(t.etat in ("verifie", "abandonnee") for t in taches)
+            self.chantier.termine = fini and not self._principale_rouge
         verifiees = sum(t.etat == "verifie" for t in taches)
         if self.chantier.termine:
             self._noter(f"Chantier terminé : {verifiees} tâches vérifiées sur {len(taches)}.")
@@ -229,6 +238,12 @@ class Moteur:
                         motif, detail = ARRETEE, DETAIL_ARRET
                     else:
                         self._enregistrement.add(tache.id)
+            if motif is None:
+                probleme = self.controles.enregistrer(tache, dossier)
+                if probleme:  # conflit, ou contrôles rouges une fois mêlé à la branche principale
+                    with self.verrou:
+                        self._enregistrement.discard(tache.id)
+                    motif, detail = "ne_sait_pas", probleme
             with self.verrou:
                 tache.historique.append(
                     {
@@ -240,7 +255,6 @@ class Moteur:
                     }
                 )
             if motif is None:
-                self.controles.enregistrer(tache, dossier)
                 with self.verrou:
                     tache.etat = "verifie"
                 return self._noter("Vérifiée et enregistrée.", tache)
@@ -353,6 +367,8 @@ class Moteur:
             self._rendre(tache, f"le vérificateur juge la consigne mal posée. {detail}")
             return False
         if tache.tentatives >= contrat.max_tentatives + tache.rallonge:
+            if self._relancer_seul(tache, motif, detail):
+                return True
             self._rendre(tache, f"{tache.tentatives} tentatives sans succès. {detail}")
             return False
         if tache.tentatives - tache.rallonge == 1:
@@ -371,6 +387,86 @@ class Moteur:
             self.chantier.montees += 1
         self._noter(f"Refusée. {detail} Je monte d'un cran : {dosage.libelle(*suivant)}.", tache)
         return True
+
+    def _relancer_seul(self, tache: Tache, motif: str, detail: str) -> bool:
+        """Relance une tâche épuisée un cran plus haut, sans attendre la personne responsable.
+
+        Seulement RELANCES_AUTO fois par tâche, et sous le plafond d'escalade du contrat : au-delà,
+        la tâche revient vers la personne responsable, comme avant.
+        """
+        contrat = self.chantier.contrat
+        suivant = dosage.monter(tache.modele, tache.effort, motif)
+        plafond = (contrat.plafond_modele, contrat.plafond_effort)
+        with self.verrou:
+            if tache.relances_auto >= RELANCES_AUTO:
+                return False
+            if suivant is None or not dosage.dans_plafond(*suivant, plafond):
+                return False
+            tache.relances_auto += 1
+            tache.modele, tache.effort = suivant
+            tache.rallonge = tache.tentatives
+        self._noter(
+            f"{tache.tentatives} tentatives sans succès. {detail} Je relance seul un cran plus "
+            f"haut : {dosage.libelle(*suivant)}.",
+            tache,
+        )
+        return True
+
+    # --- la branche principale, contrôlée en fin de chantier ---------------------------------
+
+    def _reparer_si_besoin(self) -> bool:
+        """Contrôle la branche principale quand tout est vérifié ; rouge, lance une réparation.
+
+        Rend True si une tâche de réparation a été ajoutée. Au plus MAX_REPARATIONS par chantier :
+        au-delà, le chantier s'arrête et le fil dit que les contrôles restent rouges.
+        """
+        self._principale_rouge = False
+        controler = getattr(self.controles, "controler_principale", None)
+        with self.verrou:
+            taches = self.chantier.taches
+            if controler is None or not taches or any(t.etat != "verifie" for t in taches):
+                return False
+            faites = sum(t.id.startswith(PREFIXE_REPARATION) for t in taches)
+        passe, sortie = controler()
+        if passe:
+            return False
+        if faites >= MAX_REPARATIONS:
+            self._principale_rouge = True
+            self._noter(
+                f"Les contrôles échouent encore sur la branche principale après {faites} "
+                "réparations : je m'arrête là.\n" + sortie[-1500:]
+            )
+            return False
+        tache = self._tache_de_reparation(faites + 1, sortie)
+        with self.verrou:
+            self.chantier.taches.append(tache)
+        self._noter(
+            f"Les contrôles échouent sur la branche principale : je lance seul la tâche "
+            f"{tache.id} pour les réparer.",
+            tache,
+        )
+        return True
+
+    def _tache_de_reparation(self, rang: int, sortie: str) -> Tache:
+        """Une tâche qui fait repasser les contrôles du projet, avec ce qu'ils ont affiché."""
+        tache = Tache(
+            id=f"{PREFIXE_REPARATION}{rang}",
+            titre="Réparer les contrôles de la branche principale",
+            type="courante",
+            pourquoi=(
+                "Toutes les tâches sont vérifiées, mais les commandes de contrôle du projet "
+                "échouent sur la branche principale. Voici leur sortie :\n" + sortie[-1500:]
+            ),
+            criteres=[
+                "Les commandes de contrôle du projet passent toutes.",
+                "La correction porte sur la cause, pas sur les tests : aucun test n'est retiré, "
+                "affaibli ni sauté.",
+            ],
+            perimetre=["*"],
+            ajoutee=True,
+        )
+        tache.modele, tache.effort = dosage.depart(tache.type, self.profil.get("dosage"))
+        return tache
 
     # --- la réponse de la personne responsable ----------------------------------------------
 
