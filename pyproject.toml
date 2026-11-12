@@ -11,6 +11,7 @@ pythonpath = ["."]
 
 [tool.ruff]
 line-length = 100
+extend-exclude = ["maquettes"]  # des scripts jetables qui fabriquent les maquettes, pas le produit
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "C90"]
