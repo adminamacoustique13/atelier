@@ -2365,7 +2365,7 @@ function niveauCode(pref) {
 }
 /* Range les blocs reliés en rangées : en haut ce qui se sert des autres. Ceux dont presque tout le monde se sert
    forment le socle ; au-delà de douze blocs, les moins reliés restent dans l'explorateur. */
-function disposerCode(blocs, aretes, parRangee) {
+function disposerCode(blocs, aretes, parRangee, enCours = new Map()) {
   const entrant = new Map(), sortant = new Map(), relies = new Set();
   for (const { de, vers } of aretes.values()) {
     relies.add(de); relies.add(vers);
@@ -2375,7 +2375,8 @@ function disposerCode(blocs, aretes, parRangee) {
   const deg = (b, m) => (m.get(b) || new Set()).size, n = relies.size;
   const socle = [...relies].filter((b) => deg(b, entrant) >= Math.max(3, Math.ceil(0.3 * n)) && deg(b, sortant) <= 1).sort();
   let garde = [...relies].filter((b) => !socle.includes(b)).sort();
-  garde.sort((a, b) => (deg(b, entrant) + deg(b, sortant)) - (deg(a, entrant) + deg(a, sortant)) || a.localeCompare(b));
+  const vif = (b) => [...enCours.keys()].some((c) => (b.endsWith("/") ? c.startsWith(b) : c === b));
+  garde.sort((a, b) => vif(b) - vif(a) || (deg(b, entrant) + deg(b, sortant)) - (deg(a, entrant) + deg(a, sortant)) || a.localeCompare(b));
   const autres = garde.slice(12);
   garde = new Set(garde.slice(0, 12));
   const rang = new Map();
@@ -2528,7 +2529,7 @@ function pageDossierHtml(pref, enCours) {
   } else if ((carteComplete.dossiers || {})[pref]) { portrait = carteComplete.dossiers[pref]; source = "Écrit par Claude d'après le code"; }
   const depart = niveauDepart(pref), { blocs, aretes } = niveauCode(depart);
   const largeur = largeurChaine(), parRangee = Math.max(2, Math.min(4, Math.floor((largeur + 26) / 240)));
-  const { rangs, socle, autres, isoles } = disposerCode(blocs, aretes, parRangee);
+  const { rangs, socle, autres, isoles } = disposerCode(blocs, aretes, parRangee, enCours);
   const garder = new Set(rangs.flat());
   const chaine = rangs.length
     ? chaineHtml(rangs, socle, liensDirects(aretes, garder), blocs, enCours, { largeur })
@@ -2539,7 +2540,7 @@ function pageDossierHtml(pref, enCours) {
     return `<p class="cd-note">On part de <code>${propre(depart)}</code> : c'est là que vit ${Math.round((100 * code(depart)) / Math.max(1, code(pref)))} % du code${pref ? " de ce dossier" : ""}.</p>`;
   })();
   const reste = [];
-  if (autres.length) reste.push(`${pluriel(autres.length, "autre élément")} moins relié${autres.length > 1 ? "s" : ""}, dans l'explorateur`);
+  if (autres.length) reste.push(`${autres.length > 1 ? `${autres.length} autres éléments` : "1 autre élément"} moins relié${autres.length > 1 ? "s" : ""}, dans l'explorateur`);
   if (isoles.length) reste.push(`${isoles.length > 1 ? `${isoles.length} éléments sans lien` : "1 élément sans lien"} avec les autres (${isoles.slice(0, 4).map((i) => propre(nomCourt(i))).join(", ")}${isoles.length > 4 ? "…" : ""})`);
   const titre = pref ? nomCourt(pref) : (derniere && derniere.projet) || "Projet";
   return `<h1 class="cd-titre">${propre(titre)}${pref ? "/" : ""}</h1>

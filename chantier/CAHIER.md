@@ -93,6 +93,10 @@ Ordre : V3a (reprise à chaud), V3b (refus répété et erreur d'environnement),
 ### V5 : recalé une fois, seconde passe en cours
 Deux défauts : le dépassement payant de l'abonnement (statut « rejected » mais requêtes acceptées) était lu comme un refus, ce qui aurait suspendu les lancements pour rien ; une reprise demandée avec une session vide repartait dans une session neuve sans le dire. Relevé pour le lot du pont de la vague 2 (pas dans la seconde passe) : Claude Code marque aussi « rate_limit » une surcharge du serveur qui n'est pas la limite de l'abonnement ; le moteur devra la traiter comme une pause courte, pas comme une suspension de 15 minutes.
 
+### CC et V1b, entrées avec une vérification mécanique
+- CC (onglet Code) : correction de trois lignes, prouvée par l'essai CODE-carte, qui échouait 10 fois sur 10 et passe 36 sur 36 (dix passages chez l'ouvrier, trois chez l'orchestrateur). Reste en option : rendre déterministe, dans la démonstration, la tâche qui attend une autorisation.
+- V1b (phrase du plan) : vagues recomparées au vrai moteur avec l'outil du vérificateur de V1 ; reste le cas de deux tâches de même identifiant, où `possible` vaut faux alors que la phrase dit que le plan peut aller au bout (un test existant exige ce faux).
+
 ### Restes relevés par les vérificateurs de V0, V1 et M8
 - V0 : le temps passé derrière une dépendance n'est pas mesuré ; le total des attentes est cumulé sur les tâches (à dire ainsi) ; « 25 h 00 min » au-delà d'un jour.
 - V1 : la consigne ne dit pas quoi faire d'un fichier que chaque tâche doit toucher (le journal d'un projet) ; la phrase de `plan.py` devient illisible quand beaucoup de tâches partagent un fichier ; aucun test ne garde les consignes ; accords (« toutes deux », « A et A ») ; récursion sur une chaîne de 1 000 tâches.
