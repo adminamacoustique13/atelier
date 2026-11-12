@@ -11,7 +11,7 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
 | M1. Python : code mort et commentaires faux | vérifié | Sonnet | bornée, Opus : accepté | 1 | 758 tests et contrôle de forme verts ; recherches refaites par le vérificateur |
-| M2. Page : code mort et commentaires faux | en cours | Sonnet | bornée, Opus | 1 | |
+| M2. Page : code mort et commentaires faux | vérifié | Sonnet | bornée, Opus : accepté | 1 | 758 tests, contrôle de forme et 365 vérifications dans le navigateur verts ; chaque retrait recherché à nouveau par le vérificateur |
 | M3. Python : petits doublons | à lancer | Sonnet | bornée, Opus | | |
 | M4. Serveur : une seule écriture du profil | à lancer | Opus | complète, Fable | | |
 | M5. Une seule fonction pour appeler git | à lancer, attend une décision | Opus | complète, Fable | | |
@@ -21,6 +21,10 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 ### Restes mineurs relevés par le vérificateur de M1, non corrigés
 - `atelier/guichet.py:20`, `SCENARIO_EPUISE` : le texte parle encore du « scénario de démonstration ». C'est une chaîne du code d'un garde-fou, hors du périmètre de M1.
 - La docstring de `_Marche` (`atelier/agents.py`) ne décrit pas `reveil`, `fin_emise` ni `couper`.
+
+### Restes mineurs relevés par le vérificateur de M2, non corrigés
+- L'en-tête des styles parle encore de « bleu nuit » alors que la variable `--nuit` a disparu ; la phrase reste juste comme description de la palette.
+- Relevés par l'ouvrier : dans `stationsDe`, le commentaire « Coordonnées écran » précède `parallele` alors qu'il décrit `sol` et `lieu` ; la ligne de tête sur le refus (« jamais par une couleur de plus ») est en tension avec `.mode-refus`, en ambre.
 
 ## Contrôles communs
 

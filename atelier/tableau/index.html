@@ -13,7 +13,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <style>
 /* Atelier : noir, bleu nuit, ambre, gris clair, blanc.
-   Ambre = ce qui t'attend, et rien d'autre. Blanc = vérifié. Bleu acier (le bleu nuit éclairci) = en cours.
+   Ambre = ce qui t'attend, et ce qui demande ton attention : une alerte, un dépôt en ligne en échec,
+   un bouton qui confirme, un mode refusé ou appliqué autrement que choisi. Blanc = vérifié. Bleu acier (le bleu nuit éclairci) = en cours.
    Un refus se dit par des points creux, jamais par une couleur de plus.
    Trois polices livrées avec l'Atelier : Geist pour lire, Geist Mono pour les étiquettes et les chiffres,
    Doto (des points lumineux) pour le nom ATELIER et les grands nombres. */
@@ -22,13 +23,11 @@
 @font-face { font-family: "Doto"; src: url("/polices/doto.woff") format("woff"); font-weight: 900; font-display: swap; }
 :root {
   color-scheme: dark;
-  --noir: #000000; --nuit: #141a2c; --ambre: #e8953a; --gris: #dcdcdc; --blanc: #ffffff;
+  --noir: #000000; --ambre: #e8953a; --gris: #dcdcdc; --blanc: #ffffff;
   --fond: var(--noir); --surface: #0e1220; --surface-haut: #151b2d; --creux: rgba(0, 0, 0, 0.32);
   --bord: rgba(220, 220, 220, 0.09); --bord-fort: rgba(220, 220, 220, 0.17); --trait: rgba(220, 220, 220, 0.08);
   --texte: var(--blanc); --discret: rgba(220, 220, 220, 0.74); --faible: rgba(220, 220, 220, 0.52); --eteint: rgba(220, 220, 220, 0.12);
   --attend: var(--ambre); --verifie: var(--blanc); --en-cours: #8297c4;
-  /* Les anciens noms, gardés pour les morceaux qui les lisent encore */
-  --reussite: var(--verifie); --refus: var(--attend); --change: var(--gris); --fragile: var(--blanc); --plein: var(--blanc); --sur-plein: var(--noir);
   --ombre: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 0 rgba(0, 0, 0, 0.6), 0 24px 40px -24px rgba(0, 0, 0, 0.85);
   --rayon: 18px;
   --sans: "Geist", -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
@@ -210,7 +209,7 @@ textarea::placeholder { color: var(--faible); }
 .pages { width: 100%; max-width: 1440px; margin: 0 auto; padding: 0 0 6px; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; height: max-content; }
 .pages > * { grid-column: 1 / -1; }
 .pages .m4 { grid-column: span 4; } .pages .m5 { grid-column: span 5; } .pages .m3 { grid-column: span 3; }
-.pages .m7 { grid-column: span 7; } .pages .m8 { grid-column: span 8; } .pages .m9 { grid-column: span 9; }
+.pages .m7 { grid-column: span 7; } .pages .m9 { grid-column: span 9; }
 .carte { border-radius: var(--rayon); padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .carte.attend { background: linear-gradient(180deg, #221a14, #121624); }
 .carte.attend h2 .note { color: var(--attend); }
@@ -331,7 +330,6 @@ td.droite, th.droite { text-align: right; }
 .noeud.choisie { outline: 1.5px solid var(--gris); outline-offset: 3px; }
 .noeud.fixe { cursor: default; }
 .noeud .port { position: absolute; top: 29px; width: 7px; height: 7px; border-radius: 50%; background: var(--fond); border: 1.5px solid rgba(220, 220, 220, 0.35); }
-.noeud .port.g { left: -4px; } .noeud .port.d { right: -4px; }
 .noeud .port.h, .noeud .port.b { left: calc(50% - 3.5px); } .noeud .port.h { top: -4px; } .noeud .port.b { top: auto; bottom: -4px; }
 .etage-titre.vertical { width: 84px; line-height: 1.5; white-space: normal; }
 .etat-mot.verifie { color: var(--verifie); } .etat-mot.attend { color: var(--attend); } .etat-mot.en_cours, .etat-mot.en_verification { color: var(--en-cours); }
@@ -678,18 +676,16 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
 /* ---------- Écrans étroits ---------- */
 @media (max-width: 1100px) {
   .pages .m3, .pages .m4, .pages .m5 { grid-column: span 6; }
-  .pages .m7, .pages .m8, .pages .m9 { grid-column: 1 / -1; }
+  .pages .m7, .pages .m9 { grid-column: 1 / -1; }
   .salle-attente { width: 320px; }
   .explorateur-cadre { flex-basis: 270px; }
 }
 @media (max-width: 900px) {
   .app { padding: 0 10px 10px; }
-  .pages > *, .pages .m3, .pages .m4, .pages .m5, .pages .m7, .pages .m8, .pages .m9 { grid-column: 1 / -1; }
+  .pages > *, .pages .m3, .pages .m4, .pages .m5, .pages .m7, .pages .m9 { grid-column: 1 / -1; }
   #vue-code.active { flex-direction: column; overflow-y: auto; }
   .explorateur-cadre { flex: none; height: 50vh; }
   .code-cadre { flex: none; min-height: 70vh; }
-  .voisins-toile { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .voisins-toile svg.fleches { display: none; }
   .journal { padding-left: 0; }
   .agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
   .agent-ligne .role { display: none; }
@@ -730,7 +726,7 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
     </nav>
     <div class="pousse"></div>
     <button type="button" class="discret" id="maj" data-action="maj" hidden>Mettre à jour</button>
-    <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="pastille-cout"></span><span id="mode"></span></div>
+    <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="mode"></span></div>
   </header>
   <p class="maj-phrase" id="maj-phrase" role="status" hidden></p>
 
@@ -1094,7 +1090,8 @@ const doseCourte = (t) => `${String(t.modele || "").charAt(0).toUpperCase()}${St
 const motEtat = (t, etat) => (etat === "attend" ? "t'attend" : libelleEtat(t).toLowerCase());
 /* La courbe d'un poste : une colonne par tranche, sa hauteur dit combien l'agent a agi.
    En direct : bleu acier, et les dernières colonnes en ambre tant qu'une demande attend ta réponse.
-   Tâche finie : le résumé de toute la marche de son ouvrier, en blanc. */
+   Tâche finie : le résumé de toute la marche de son ouvrier, en blanc pour une tâche vérifiée,
+   en gris pour une tâche revenue. */
 function rythmeDe(vue, t) {
   const r = vue.rythmes || {}, direct = Object.values(r.en_direct || {}).filter((c) => c.tache === t.id && c.role === "ouvrier").pop();
   if (direct) return { colonnes: direct.colonnes, attente: direct.attente, vivant: true };
@@ -1394,7 +1391,7 @@ function afficherChantier(vue) {
 }
 
 /* ---------- Plan : le câblage des tâches ----------
-   À gauche l'orchestrateur, puis une colonne par étape (ce qui peut partir ensemble), à droite la livraison.
+   Le Plan se lit de haut en bas : l'orchestrateur en tête, puis les étapes (ce qui peut partir ensemble) rangée après rangée, et la livraison au bout.
    La couleur d'un fil dit l'état de ce qui le parcourt : blanc vérifié, bleu acier en cours, ambre t'attend,
    pointillé à venir. Une tâche qui t'attend tire un fil ambre jusqu'au nœud « Toi ». */
 function disposer(taches) {
@@ -1641,10 +1638,10 @@ function solHtml(vue, largeur, hauteur) {
   // L'échelle : tout le chantier tient dans la zone libre, entre les panneaux, étiquettes comprises.
   const us = stations.map((s) => s.x - s.y), vs = stations.map((s) => s.x + s.y), hMax = Math.max(...stations.map((s) => s.h));
   // À droite, le panneau « Ce qui t'attend » prend sa place quand il est ouvert.
-  // Sous les panneaux du haut ; un peu à gauche quand « Ce qui t'attend » est ouvert à droite.
   const panneau = ilFautRepondre(vue) && largeur > 900 ? 380 : 0;
   // Sur un petit écran, les panneaux passent dessous : le sol a toute sa boîte.
   const large = largeur > 900;
+  // Sous les panneaux du haut ; un peu à gauche quand « Ce qui t'attend » est ouvert à droite.
   const zone = large ? { x: 40, y: largeur > 1100 ? 230 : 150, l: largeur - 80 - panneau, h: hauteur - (largeur > 1100 ? 300 : 210) }
     : { x: 10, y: 40, l: largeur - 20, h: hauteur - 80 };
   const etendueU = Math.max(...us) - Math.min(...us), etendueV = Math.max(...vs) - Math.min(...vs);
@@ -1742,7 +1739,7 @@ function afficherSalle(vue) {
 new ResizeObserver(() => { if (derniere && location.hash === "#salle") afficherSalle(derniere); }).observe(document.getElementById("vue-salle"));
 
 /* ---------- Ensemble ---------- */
-function afficherSansProjet(vue) {
+function afficherSansProjet() {
   const choix = document.getElementById("projet");
   choix.innerHTML = "<option>Aucun projet</option>";
   choix.dataset.empreinte = "";
@@ -1756,8 +1753,8 @@ function afficher(vue) {
   derniere = vue;
   afficherMaj(vue);
   document.querySelector(".app").classList.toggle("sans-projet", Boolean(vue.aucun_projet));
-  if (vue.aucun_projet) return afficherSansProjet(vue);
-  const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  if (vue.aucun_projet) return afficherSansProjet();
+  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
   const choix = document.getElementById("projet"), liste = vue.projets || [{ id: "", nom: vue.projet, courant: true }];
   const empreinte = liste.map((p) => `${p.id}/${p.nom}/${p.courant}`).join("|");
   if (choix.dataset.empreinte !== empreinte) {
@@ -1775,7 +1772,6 @@ function afficher(vue) {
   }
   document.getElementById("mode").textContent = rejoue ? "Démonstration rejouée" : vue.mode === "réel" ? "" : "Démonstration";
   document.getElementById("pastille-agents").textContent = agentsTexte(auTravail(vue));
-  document.getElementById("pastille-cout").textContent = "";
   const infos = document.getElementById("infos");
   infos.hidden = ![...infos.children].some((e) => e.textContent);
   document.getElementById("cpt-chantier").textContent = vue.taches.length ? `${verifiees}/${vue.taches.length}` : "";
@@ -1924,7 +1920,7 @@ function direMaj(texte, duree = 15000) {
   if (texte && duree) minutePhrase = setTimeout(() => { majPhrase = ""; afficherMaj(derniere); }, duree);
   afficherMaj(derniere);
 }
-/* Appelée à chaque réponse du serveur : Atelier est-il revenu après son redémarrage ? */
+/* Appelée à chaque réponse réussie de /api/etat, dans charger() : Atelier est-il revenu après son redémarrage ? */
 function majRetour() {
   if (!majAttente) return;
   const coupure = majAttente.coupure;
@@ -1977,7 +1973,6 @@ async function mettreAJour() {
 let ncEnvoi = false, ncPhrase = "", minuteNcPhrase = null;
 function afficherNouveauChantier() {
   const zone = document.getElementById("nouveau-chantier-phrase"), bouton = document.getElementById("archiver-chantier");
-  if (!zone || !bouton) return;
   zone.textContent = ncPhrase;
   bouton.disabled = ncEnvoi;
   bouton.textContent = ncEnvoi ? "Archivage en cours" : "Archiver et repartir";
@@ -2197,11 +2192,9 @@ function allerCode(chemin) {
   for (const d of ancetres(codeChemin)) dossiersOuverts.add(d);
   if (codeChemin.endsWith("/")) dossiersOuverts.add(codeChemin.slice(0, -1));
   codeRecherche = "";
-  const champ = document.getElementById("code-chercher");
-  if (champ) champ.value = "";
+  document.getElementById("code-chercher").value = "";
   afficherCode(derniere);
-  const page = document.getElementById("code-page");
-  if (page) page.scrollTop = 0;
+  document.getElementById("code-page").scrollTop = 0;
   const ligne = [...document.querySelectorAll("#explorateur .ligne-arbre")].find((b) => b.dataset.chemin === codeChemin.replace(/\/$/, ""));
   if (ligne) ligne.scrollIntoView({ block: "nearest" });
 }
@@ -2252,7 +2245,7 @@ function fichierHtml(f, profondeur, enCours) {
     <span class="marques">${badgesHtml(f, enCours)}</span><span class="taille-points" title="${f.lignes} lignes" aria-label="${f.lignes} lignes">${taillePoints(f.lignes)}</span></button>`;
 }
 
-/* La barre du haut : où l'on est, l'étage, et la recherche. */
+/* La barre du haut : où l'on est, et l'étage. */
 function arianeHtml() {
   const parties = codeChemin.replace(/\/$/, "").split("/").filter(Boolean);
   const nom = (derniere && derniere.projet) || "Projet";
@@ -2455,7 +2448,7 @@ function chaineHtml(rangs, socle, liens, blocs, enCours, options = {}) {
 const agentCourt = (nom) => String(nom).split("-")[0] || nom;
 function largeurChaine() {
   const page = document.getElementById("code-page");
-  return Math.max(500, Math.min(1080, (page ? page.clientWidth : 1000) - 56));
+  return Math.max(500, Math.min(1080, page.clientWidth - 56));
 }
 
 /* ---- La page d'un dossier, ou du projet ---- */
@@ -2725,7 +2718,6 @@ function agir(cible) {
   if (action === "annuler-analyse") { estimationCarte = null; afficherCode(derniere); }
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
-  if (action === "nouveau-projet") document.getElementById("nouveau").click();
   if (action === "choisir") { choisie = cible.dataset.id; afficherPlan(derniere); }
   if (action === "voir-tache") { choisie = cible.dataset.id; location.hash = "#plan"; if (derniere) afficherPlan(derniere); }
 }
