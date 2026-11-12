@@ -1647,3 +1647,189 @@ def test_depassement_en_service(statut, depasse, brut, attendu):
     info = RateLimitInfo(status=statut, overage_status=depasse, raw=brut)
     assert depassement_en_service(info) is attendu
     assert depassement_en_service(None) is False
+
+
+# --- Tâche P1 : les outils refusés pendant le tour ---------------------------------------
+
+from claude_agent_sdk import TextBlock  # noqa: E402
+
+from atelier.agents import SURCHARGE, Resultat  # noqa: E402
+from atelier.sdk import est_surcharge  # noqa: E402
+
+UV_SYNC = {"command": "uv sync"}
+
+
+def refuse(nom, entree, identifiant):
+    """Une entrée de `permission_denials`, telle que Claude Code l'écrit en fin de tour."""
+    return {"tool_name": nom, "tool_use_id": identifiant, "tool_input": entree}
+
+
+def demande(nom, entree, identifiant):
+    """Étape : une demande d'autorisation qui porte son propre identifiant d'appel."""
+
+    async def demander(client):
+        contexte = ToolPermissionContext(tool_use_id=identifiant)
+        client.decisions.append(await client.options.can_use_tool(nom, entree, contexte))
+
+    return Geste(demander)
+
+
+def test_un_outil_refuse_au_guichet_et_un_refuse_par_le_sdk_sont_dans_refuses(ouvrir, tmp_path):
+    # Claude Code range aussi dans `permission_denials` l'outil que le guichet a refusé (t1) :
+    # il n'est compté qu'une fois. L'écriture (t2) a été refusée par Claude Code lui-même.
+    denials = [refuse("Bash", UV_SYNC, "t1"),
+               refuse("Write", {"file_path": f"{tmp_path}/b.py", "content": "x"}, "t2")]
+    session, _, _ = ouvrir([init(), Permission("Bash", UV_SYNC), fin(refus=denials)],
+                           guichet=FauxGuichet(Reponse("non")), dossier=tmp_path)  # fmt: skip
+    resultat = session.envoyer("Installe.")
+    assert resultat.ok
+    assert resultat.refuses == ["Bash(uv sync)", "Write(b.py)"]
+    assert resultat == Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)
+
+
+@pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk", "auto"])
+def test_les_refus_de_fin_de_tour_comptent_quel_que_soit_le_mode(ouvrir, mode):
+    denials = [refuse("Bash", UV_SYNC, "t7"), refuse("WebFetch", {"url": "https://x.y"}, "t8")]
+    session, _, _ = ouvrir([init(mode=mode), fin(refus=denials)], mode_permission=mode)
+    assert session.envoyer("Va.").refuses == ["Bash(uv sync)", "WebFetch(https://x.y)"]
+
+
+def test_un_tour_sans_refus_rend_une_liste_vide(ouvrir):
+    session, _, _ = ouvrir([init(), Permission("Bash", {"command": "ls"}), fin(refus=[])],
+                           guichet=FauxGuichet(Reponse("une_fois")))  # fmt: skip
+    resultat = session.envoyer("Va.")
+    assert resultat.ok and resultat.refuses == []
+    assert Resultat(ok=True).refuses == []  # la valeur par défaut, pour tout autre résultat
+
+
+@pytest.mark.parametrize(
+    "guichet, attendu",
+    [
+        (None, ["Bash(uv sync)"]),  # sans guichet : refusé par le pont
+        (FauxGuichet(panne=RuntimeError("tombé")), ["Bash(uv sync)"]),
+        (FauxGuichet(Reponse("peut-être")), ["Bash(uv sync)"]),  # réponse incomprise
+        (FauxGuichet(Reponse("non", ARRETE)), []),  # un refus pour arrêt n'en est pas un
+    ],
+)
+def test_ce_que_le_pont_refuse_lui_meme_compte_sauf_un_arret(ouvrir, guichet, attendu):
+    session, fabrique, _ = ouvrir(
+        [init(), Permission("Bash", UV_SYNC), fin(refus=[refuse("Bash", UV_SYNC, "t1")])],
+        guichet=guichet,
+    )
+    resultat = session.envoyer("Installe.")
+    assert isinstance(fabrique.clients[0].decisions[0], PermissionResultDeny)
+    assert resultat.refuses == attendu
+
+
+def test_les_refus_sont_dans_l_ordre_sans_doublon_et_bornes_a_vingt(ouvrir):
+    guichet = FauxGuichet(Reponse("non"))
+    etapes = [demande("Bash", {"command": "uv run pytest"}, "g1"),
+              demande("Bash", UV_SYNC, "g2"), demande("Bash", UV_SYNC, "g3")]  # fmt: skip
+    denials = [refuse("Bash", UV_SYNC, f"d{n}") for n in range(3)]
+    denials += [refuse("Read", {"file_path": f"f{n}.py"}, f"r{n}") for n in range(40)]
+    session, _, _ = ouvrir([init(), *etapes, fin(refus=denials)], guichet=guichet)
+    refuses = session.envoyer("Va.").refuses
+    assert refuses[:3] == ["Bash(uv run pytest)", "Bash(uv sync)", "Read(f0.py)"]
+    assert len(refuses) == 20 and len(set(refuses)) == 20
+    assert refuses[-1] == "Read(f17.py)"  # deux commandes, puis f0 à f17
+
+
+def test_un_refus_de_l_arbitre_compte_meme_sans_message_de_fin(ouvrir):
+    session, _, _ = ouvrir(
+        [init(mode="auto"), outil("Bash", CURL, "t7"), resultat_outil("t7", TEXTE_REFUS),
+         RuntimeError("exit code 1")],
+        mode_permission="auto",
+    )  # fmt: skip
+    resultat = session.envoyer("Va.")
+    assert not resultat.ok and resultat.refuses == ["Bash(curl https://example.com)"]
+
+
+def test_les_refus_ne_debordent_pas_sur_le_tour_suivant_et_un_refus_mal_forme_ne_casse_rien(
+    ouvrir,
+):
+    denials = [refuse("Bash", UV_SYNC, "t1"), "illisible", None,
+               {"tool_name": None, "tool_use_id": ["x"], "tool_input": "pas un objet"}]
+    session, _, _ = ouvrir([init(), fin(refus=denials)])
+    assert session.envoyer("Un.").refuses == ["Bash(uv sync)", "Outil"]
+    # Un refus au guichet, puis une panne qui coupe le client ; le tour suivant n'en hérite pas.
+    session, _, _ = ouvrir([init(), Permission("Bash", UV_SYNC), RuntimeError("panne")], [fin()],
+                           guichet=FauxGuichet(Reponse("non")))  # fmt: skip
+    assert session.envoyer("Un.").refuses == ["Bash(uv sync)"]
+    assert session.envoyer("Deux.").refuses == []
+
+
+# --- Tâche P1 : une surcharge du serveur n'est pas une limite atteinte -------------------
+
+# Les textes exacts du Claude Code livré avec le SDK (2.1.308), lus dans son programme.
+SERVEUR_LIMITE = ("API Error: Server is temporarily limiting requests (not your usage limit) · "
+                  "Rate limited")  # fmt: skip
+OPUS_CHARGE = "Opus is experiencing high load. Switch to Sonnet."
+VRAIE_LIMITE = "You've hit your limit · resets 3pm (Europe/Paris)"
+
+
+def erreur_api(texte_lu):
+    """Le message par lequel Claude Code dit une erreur « rate_limit » de l'API."""
+    return AssistantMessage(content=[TextBlock(text=texte_lu)], model="opus", error="rate_limit")
+
+
+def fin_en_erreur(texte_lu, statut=None):
+    return dataclasses.replace(fin(result=texte_lu, is_error=True), api_error_status=statut)
+
+
+@pytest.mark.parametrize(
+    "etapes",
+    [
+        [erreur_api(SERVEUR_LIMITE), fin_en_erreur(SERVEUR_LIMITE, 429)],
+        [erreur_api(OPUS_CHARGE), fin_en_erreur(OPUS_CHARGE)],
+        [fin_en_erreur(SERVEUR_LIMITE, 429)],  # le seul message de fin suffit
+        [erreur_api("Fable is experiencing high load, please use /model to switch to Sonnet"),
+         RuntimeError("exit code 1")],  # sans message de fin
+    ],
+)  # fmt: skip
+def test_une_surcharge_rend_son_erreur_a_part_et_non_la_limite(ouvrir, etapes):
+    session, _, evenements = ouvrir([init(), *etapes])
+    resultat = session.envoyer("Fais.")
+    assert (resultat.ok, resultat.erreur) == (False, SURCHARGE)
+    assert (resultat.type_limite, resultat.fin_limite) == ("", None)
+    assert SURCHARGE != LIMITE_ATTEINTE
+    assert limites_dites(evenements) == [] and du_type(evenements, "fin") == [SURCHARGE]
+
+
+@pytest.mark.parametrize(
+    "etapes",
+    [
+        [erreur_api(VRAIE_LIMITE), fin_en_erreur(VRAIE_LIMITE, 429)],
+        [fin_en_erreur("API Error: 429", 429)],
+        # un vrai refus annoncé dans le même tour l'emporte sur le texte de la surcharge
+        [limite("rejected"), erreur_api(SERVEUR_LIMITE), fin_en_erreur(SERVEUR_LIMITE, 429)],
+    ],
+)
+def test_une_vraie_limite_rend_toujours_limite_atteinte(ouvrir, etapes):
+    session, _, _ = ouvrir([init(), *etapes])
+    assert session.envoyer("Fais.").erreur == LIMITE_ATTEINTE
+
+
+def test_une_surcharge_dans_un_tour_reussi_ou_sur_le_tour_d_avant_ne_change_rien(ouvrir):
+    session, _, _ = ouvrir([erreur_api(OPUS_CHARGE), fin()])
+    assert session.envoyer("Un.").ok  # seul l'échec du tour fait la surcharge
+    session, _, _ = ouvrir([erreur_api(OPUS_CHARGE), RuntimeError("panne")],
+                           [fin(result="Raté.", is_error=True)])  # fmt: skip
+    assert session.envoyer("Un.").erreur == SURCHARGE
+    assert session.envoyer("Deux.").erreur == "Raté."
+
+
+@pytest.mark.parametrize(
+    "texte_lu, attendu",
+    [
+        (SERVEUR_LIMITE, True),
+        (OPUS_CHARGE, True),
+        ("SERVER IS TEMPORARILY LIMITING REQUESTS (NOT YOUR USAGE LIMIT)", True),
+        (VRAIE_LIMITE, False),
+        ("API Error: Request rejected (429) · this may be a temporary capacity issue.", False),
+        ("", False),
+        (None, False),
+        (429, False),
+    ],
+)
+def test_est_surcharge(texte_lu, attendu):
+    assert est_surcharge(texte_lu) is attendu

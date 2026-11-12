@@ -1170,3 +1170,230 @@ def test_l_agent_simule_rend_aussi_l_erreur_pour_une_session_vide(vide):
     assert (resultat.ok, resultat.erreur, resultat.session) == (False, REPRISE_IMPOSSIBLE, "")
     assert agent.reprises == []
     assert evenements[-1] == {"agent": "B-ouvrier-2", "type": "fin", "contenu": REPRISE_IMPOSSIBLE}
+
+
+# --- Tâche P1 : la forme courte d'un outil, et les outils refusés rendus par l'agent --------
+
+from atelier.agents import SURCHARGE, commande_permise, forme_courte  # noqa: E402
+from tests.test_sdk import AssistantMessage, TextBlock  # noqa: E402
+
+UV_SYNC = {"command": "uv sync"}
+
+
+def test_forme_courte():
+    racine = "/projets/p/.atelier/arbres/A"
+    commande = {"command": "uv sync\nuv run pytest -q", "description": "Installer et tester"}
+    assert forme_courte({"name": "Bash", "input": commande}) == "Bash(uv sync ; uv run pytest -q)"
+    ecrit = {"name": "Write", "input": {"file_path": f"{racine}/coeur/calcul.py"}}
+    assert forme_courte(ecrit, racine) == "Write(coeur/calcul.py)"
+    assert forme_courte(ecrit) == f"Write({racine}/coeur/calcul.py)"
+    assert forme_courte({"name": "WebFetch", "input": {"url": "https://x.y"}}) == (
+        "WebFetch(https://x.y)"
+    )  # fmt: skip
+    assert forme_courte({"name": "TodoWrite", "input": {"todos": []}}) == "TodoWrite"
+    assert forme_courte({"name": "Bash", "input": None}) == "Bash"
+    assert forme_courte({"name": None, "input": UV_SYNC}) == "Outil"
+    longue = forme_courte({"name": "Bash", "input": {"command": "x" * 500}})
+    assert longue == "Bash(" + "x" * 119 + "…)"
+
+
+def test_l_agent_rend_les_outils_refuses_sans_changer_l_egalite_des_resultats():
+    agent, _ = claude([init(), Permission("Bash", UV_SYNC), fin()])
+    agent.guichet = FauxGuichet(Reponse("non"))
+    resultat = lancer(agent)
+    assert resultat.refuses == ["Bash(uv sync)"]
+    assert resultat == Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)
+    agent, _ = claude([init(), fin()])
+    assert lancer(agent).refuses == []
+
+
+def test_l_agent_rend_une_surcharge_a_part():
+    message = "API Error: Server is temporarily limiting requests (not your usage limit) · x"
+    erreur = AssistantMessage(content=[TextBlock(text=message)], model="opus", error="rate_limit")
+    agent, _ = claude([init(), erreur, fin(result=message, is_error=True)])
+    resultat = lancer(agent)
+    assert (resultat.ok, resultat.erreur, resultat.type_limite) == (False, SURCHARGE, "")
+
+
+# --- Tâche P1 : l'agent simulé joue un ouvrier empêché, et une surcharge --------------------
+
+
+def test_par_defaut_l_ouvrier_simule_n_est_pas_empeche():
+    agent, _ = simule()
+    resultat = lancer(agent, ouvrier("A"))
+    assert resultat.refuses == [] and resultat.texte == "Compte rendu simulé."
+
+
+def test_l_ouvrier_simule_empeche_porte_ses_refus_et_le_dit_dans_son_compte_rendu(tmp_path):
+    agent, evenements = simule()
+    agent.empeches = {"A": ["Bash(uv sync)"]}
+    verif = {"role": "verificateur", "tache": "A", "tentative": 1}
+    assert lancer(agent, verif, lecture_seule=True).refuses == []  # le vérificateur n'y touche pas
+    resultat = lancer(agent, ouvrier("A"), dossier=tmp_path)
+    assert resultat.ok and resultat.fichiers == ["a.py"]  # le scénario reste celui écrit
+    assert resultat.refuses == ["Bash(uv sync)"]
+    lignes = resultat.texte.splitlines()
+    assert lignes[0] == "Compte rendu simulé."
+    assert [ligne for ligne in lignes if ligne.startswith("EMPÊCHÉ : ")] == [
+        "EMPÊCHÉ : uv sync — l'outil a été refusé : je ne peux pas aller plus loin."
+    ]
+    assert evenements[-1]["type"] == "fin"
+    suivant = lancer(agent, ouvrier("A", 2))  # la liste est épuisée : plus d'empêchement
+    assert suivant.refuses == [] and "EMPÊCHÉ" not in suivant.texte
+    assert lancer(agent, ouvrier("B")).refuses == []
+
+
+def test_l_ouvrier_simule_peut_etre_empeche_par_plusieurs_outils_et_apres_un_echec():
+    agent, _ = simule()
+    agent.scenario = {"A": ["ok", "erreur"]}
+    agent.empeches = {"A": ["", ["Bash(uv sync)", "Bash(uv run pytest)", "Bash(uv sync)"]]}
+    assert lancer(agent, ouvrier("A")).refuses == []
+    resultat = lancer(agent, ouvrier("A", 2))
+    assert resultat.erreur == "Arrêt simulé de l'agent."
+    assert resultat.refuses == ["Bash(uv sync)", "Bash(uv run pytest)"]
+    assert resultat.texte.startswith("EMPÊCHÉ : uv sync — ")
+    assert resultat.texte.splitlines()[1].startswith("EMPÊCHÉ : uv run pytest — ")
+
+
+def test_l_agent_simule_joue_une_surcharge_sans_annoncer_de_limite():
+    agent, evenements = simule()
+    agent.limites = {"A": ["surcharge"]}
+    resultat = lancer(agent, ouvrier("A"))
+    assert (resultat.ok, resultat.erreur) == (False, SURCHARGE)
+    assert (resultat.type_limite, resultat.fin_limite) == ("", None) and resultat.session
+    assert evenements == [{"agent": "A-ouvrier-1", "type": "fin", "contenu": SURCHARGE}]
+    assert lancer(agent, ouvrier("A")).ok  # la liste est épuisée : le scénario reprend
+
+
+# --- Tâche P1 : une commande est-elle permise à un ouvrier sans demander ? ------------------
+
+
+@pytest.mark.parametrize(
+    "profil, commande, attendu",
+    [
+        ({}, "uv sync", False),  # le cas mesuré : uv n'est pas permis
+        ({"commandes_permises": ["npm"]}, "uv sync", False),
+        ({"commandes_permises": ["uv"]}, "uv sync", True),
+        ({"commandes_permises": ["uv"]}, "uv run pytest -q", True),
+        ({"commandes_permises": ["uv"]}, "uv", True),
+        ({"commandes_permises": ["uv"]}, "uvx ruff", False),  # un préfixe s'arrête à un mot
+        ({}, "pytest -q", True),  # le socle
+        ({}, "ruff check .", True),
+        ({}, "git status", True),
+        ({}, "git commit -m x", False),
+        ({}, "ruff check . && pytest -q", True),  # une commande composée
+        ({}, "pytest -q && uv sync", False),
+        ({"commandes_permises": ["uv"]}, "uv sync && uv run pytest -q", True),
+        ({}, "pytest -q | tail -5", True),
+        ({}, "pytest -q > sortie.txt 2>&1", True),  # les redirections sont ignorées
+        ({}, "cd sous && pytest -q", False),  # cd n'est pas une règle du socle
+        ({}, "FORCE=1 pytest -q", False),
+        ({"autorisations": ["Bash(uv sync)"]}, "uv sync", True),  # retenue dans le profil
+        ({"autorisations": ["Bash(uv sync)"]}, "uv sync --frozen", False),
+        ({"autorisations": ["Bash"]}, "uv sync --frozen", True),
+        ({"commandes_permises": "uv"}, "uv sync", False),  # profil mal formé
+        ({"commandes_permises": ["uv", 3]}, "uv sync", True),
+        (None, "pytest -q", True),
+    ],
+)  # fmt: skip
+def test_commande_permise(profil, commande, attendu):
+    assert commande_permise(profil, commande) is attendu
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["", "   ", None, 42, "pytest $(rm -rf .)", "pytest `id`", "pytest -q\nuv sync",
+     "pytest -q &&", "&& pytest -q", "pytest -q ;; ruff check ."],
+)  # fmt: skip
+def test_une_commande_vide_ou_mal_formee_n_est_jamais_permise(commande):
+    assert commande_permise({"commandes_permises": ["uv"], "autorisations": ["Bash"]},
+                            commande) is False  # fmt: skip
+
+
+def test_commande_permise_suit_les_regles_donnees_aux_ouvriers():
+    profil = {"commandes_permises": ["uv", "cargo"]}
+    agent, _ = claude(profil=profil)
+    prefixes = [r[len("Bash("):-len(":*)")] for r in agent._outils(False) if r.endswith(":*)")]
+    assert {"uv", "cargo", "pytest", "git status"} <= set(prefixes)
+    assert all(commande_permise(profil, f"{p} --version") for p in prefixes)
+
+
+# --- Tâche P1, seconde passe : ce que Claude Code fait demander malgré une règle ------------
+# Les cas viennent de la sonde du vrai Claude Code (2.1.308, faux serveur d'API, modes
+# « acceptEdits » et « default ») : chaque « vrai » y passe sans demande, chaque « faux » y est
+# demandé, sauf ceux marqués « prudence », que Claude Code laisse passer ou qui n'ont pas été
+# essayés : la fonction dit faux plutôt que de risquer un « vrai » à tort.
+
+DEFAUT = {"mode_ouvriers": "default"}
+
+
+@pytest.mark.parametrize(
+    "profil, commande, attendu",
+    [
+        ({}, "pytest -q > /tmp/x", False),
+        ({}, "pytest -q > ../x", False),
+        ({}, "git diff HEAD~1 > /tmp/x", False),
+        ({}, "pytest -q < /etc/hostname", False),
+        ({}, "cat <<< bonjour", False),  # prudence
+        ({}, "pytest -q >", False),  # prudence : mal formée
+        ({}, "pytest -q > sortie.txt", True),  # dans la copie, en mode « acceptEdits »
+        ({}, "pytest -q >> sortie.txt", True),
+        ({}, "pytest -q &> sous/x.txt", True),
+        (DEFAUT, "pytest -q > sortie.txt", False),  # en mode « default », Claude Code demande
+        (DEFAUT, "pytest -q >> sortie.txt", False),
+        (DEFAUT, "pytest -q 2>&1 | tail -5", True),
+        (DEFAUT, "pytest -q 2>/dev/null", True),
+        (DEFAUT, "ruff check . > /dev/null", True),
+        (DEFAUT, "pytest -q >&2", True),
+        (DEFAUT, "uniq < pyproject.toml", True),  # une lecture dans la copie
+        (DEFAUT, "cat < /dev/null", True),
+    ],
+)  # fmt: skip
+def test_une_redirection_hors_de_la_copie_n_est_pas_permise(profil, commande, attendu):
+    assert commande_permise(profil, commande) is attendu
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["cat $HOME/.bashrc", 'cat "$HOME/x"', "pytest $ARGS", "pytest --junitxml=${TMPDIR}/j.xml",
+     "pytest '$x'"],  # prudence pour le dernier : Claude Code le laisse passer
+)  # fmt: skip
+def test_une_variable_n_est_jamais_permise(commande):
+    assert commande_permise({"autorisations": ["Bash"]}, commande) is False
+
+
+@pytest.mark.parametrize(
+    "commande, attendu",
+    [("cat ~/.bashrc", False), ("ls -la ~", False),
+     ("pytest ~/x", False), ("pytest --basetemp=~/bt", False),  # prudence
+     ("git diff HEAD~1", True), ("git log -1 @~2", True)],
+)  # fmt: skip
+def test_un_tilde_en_debut_de_mot_n_est_pas_permis(commande, attendu):
+    assert commande_permise({}, commande) is attendu
+
+
+@pytest.mark.parametrize(
+    "profil, commande, attendu",
+    [
+        ({}, "cat /etc/hostname", False),
+        ({}, "ls /", False),
+        ({}, "ls ..", False),
+        ({}, "grep -r x /etc/hostname", False),
+        ({}, "cat sous/../pyproject.toml", False),
+        ({}, "git -C /tmp status", False),
+        ({}, "wc -l --files0-from=/etc/hostname", False),  # prudence
+        ({}, 'cat "/etc/hostname"', False),  # prudence
+        ({"autorisations": ["Bash"]}, "cat /etc/hostname", False),  # prudence
+        ({}, "ls -la sous", True),
+        ({}, "cat ./pyproject.toml", True),
+        # Claude Code ne vérifie pas les chemins de ces commandes : il les laisse passer.
+        ({}, "pytest /tmp", True),
+        ({}, "python -m pytest -q --basetemp=/tmp/bt", True),
+        ({}, "du -sh /", True),
+        ({"commandes_permises": ["uv"]}, "/usr/bin/uv sync", False),  # comme avant : sans règle
+    ],
+)  # fmt: skip
+def test_un_chemin_absolu_ou_qui_remonte_n_est_pas_permis_la_ou_claude_code_le_verifie(
+    profil, commande, attendu
+):
+    assert commande_permise(profil, commande) is attendu
