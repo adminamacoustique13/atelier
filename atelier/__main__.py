@@ -75,7 +75,8 @@ def projet_simule(dossier: Path, nom: str, delai_s: float) -> Atelier:
     dossier.mkdir(parents=True, exist_ok=True)
     plan, scenario = plan_de_demonstration()
     chantier = Chantier(projet=nom, contrat=Contrat(objectif=""))
-    agent = AgentSimule(scenario, delai_s, plan=plan)
+    # Des gestes réguliers pendant que les agents patientent : leurs courbes d'activité vivent.
+    agent = AgentSimule(scenario, delai_s, plan=plan, gestes_s=0.35)
     # Un vrai guichet : la demande d'exemple du premier ouvrier attend un clic sur la carte.
     guichet = Guichet()
     atelier = Atelier(

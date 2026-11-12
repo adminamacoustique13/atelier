@@ -30,17 +30,27 @@ from atelier.guichet import ARRETE, CHOIX, Guichet
 from atelier.mise_a_jour import Etat, Resultat
 from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire_cahier
 from atelier.moteur import ARRETEE, Moteur, taches_du_plan
+from atelier.rythme import TRANCHE_S, Rythmes
 
 PAGE = Path(__file__).parent / "tableau" / "index.html"
 ICONE = Path(__file__).parent / "tableau" / "icone.png"
+# Les polices du tableau de bord, livrées avec l'Atelier : seules celles-ci sont servies.
+POLICES = {
+    f"/polices/{nom}": (Path(__file__).parent / "tableau" / "polices" / nom, nature)
+    for nom, nature in (
+        ("geist.woff2", "font/woff2"),
+        ("geist-mono.woff2", "font/woff2"),
+        ("doto.woff", "font/woff"),
+    )
+}
 MANIFESTE = json.dumps(
     {
         "name": "Atelier",
         "short_name": "Atelier",
         "start_url": "/",
         "display": "standalone",
-        "background_color": "#2b2c2f",
-        "theme_color": "#2b2c2f",
+        "background_color": "#000000",
+        "theme_color": "#000000",
         "icons": [{"src": "/icone.png", "sizes": "1024x1024", "type": "image/png"}],
     },
     ensure_ascii=False,
@@ -276,6 +286,7 @@ LIGNES_MAX = 30  # lignes d'activité gardées par agent
 LARGEUR_MAX = 300  # caractères par ligne d'activité
 MORCEAU_MAX = LIGNES_MAX * LARGEUR_MAX  # de quoi remplir toutes les lignes : le reste est perdu
 AGENTS_MAX = 40  # agents gardés : au-delà, les plus anciens sont retirés
+TRANCHE_DEMO_S = 0.5  # les courbes d'activité de la démonstration : 10 secondes sur 20 colonnes
 SESSIONS_MAX = AGENTS_MAX  # sessions suivies pour la confirmation de connexion, de même
 
 
@@ -291,11 +302,12 @@ class Activite:
     est passé à `sur_mode` (l'atelier l'écrit au fil), hors du verrou, une fois par changement.
     """
 
-    def __init__(self):
+    def __init__(self, tranche_s: float = TRANCHE_S):
         self._verrou = threading.Lock()
         self._lignes: dict[str, deque[str]] = {}
         self._reste: dict[str, str] = {}  # le texte reçu qui n'est pas encore une ligne entière
         self._modes: dict[str, tuple] = {}  # le dernier mode réel dit, par agent en marche
+        self.rythmes = Rythmes(tranche_s=tranche_s)  # combien chaque agent agit, pour les courbes
         self.sur_mode = None
 
     def _ranger(self, nom: str, texte: str) -> None:
@@ -320,6 +332,7 @@ class Activite:
 
     def _ranger_evenement(self, nom: str, genre, contenu: str, demande) -> bool:
         """Sous le verrou : range l'événement ; rend True pour un mode réel nouveau."""
+        self.rythmes.compter(nom, str(genre), contenu)
         if genre == "fin":
             self._lignes.pop(nom, None)
             self._reste.pop(nom, None)
@@ -345,6 +358,16 @@ class Activite:
             return False
         dit, self._modes[nom] = self._modes.get(nom), (contenu, str(demande or ""))
         return dit != self._modes[nom]
+
+    def rythme(self) -> dict:
+        """Les courbes d'activité des agents en marche et des tâches finies (voir `rythme`)."""
+        with self._verrou:
+            return self.rythmes.vue()
+
+    def oublier_bilans(self) -> None:
+        """Un nouveau chantier repart sans les courbes de l'ancien."""
+        with self._verrou:
+            self.rythmes.oublier_bilans()
 
     def oublier_modes(self) -> None:
         """Après un changement de mode demandé, tout écart de mode réel sera dit de nouveau."""
@@ -394,7 +417,8 @@ class Atelier:
     ):
         self.depot = Path(depot)
         self.mode = mode
-        self.activite = Activite()
+        # En démonstration un agent simulé ne travaille que quelques secondes : tranches courtes.
+        self.activite = Activite(TRANCHE_DEMO_S if mode == "démonstration" else TRANCHE_S)
         self._verrou_profil = threading.Lock()
         # Un vrai agent reçoit un vrai guichet. Un agent simulé n'en reçoit un que si on le lui
         # donne : sans personne pour répondre, sa demande d'exemple attendrait le délai du guichet.
@@ -553,6 +577,7 @@ class Atelier:
             )
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
+        donnees["rythmes"] = self.activite.rythme()
         donnees["mode_ouvriers"] = self._vue_mode()
         donnees["archives"] = list(self.archives)
         donnees["carte"] = self.carte.resume(self.en_cours(), self.provisoire())
@@ -838,6 +863,7 @@ class Atelier:
             nouveau.noter(phrase)
             self.moteur.chantier = nouveau
             self.brouillon = {"texte": "", "outils": []}
+            self.activite.oublier_bilans()
             self.archives = archives.lister(self.depot)
         if avait_annonce:
             self.annoncer_connexion()  # le nouveau fil redit ce qui est su de la facturation
@@ -1185,7 +1211,7 @@ class Requetes(BaseHTTPRequestHandler):
 
     def _repondre(self, code: int, corps: bytes, nature: str) -> None:
         self.send_response(code)
-        binaire = nature.startswith("image/")
+        binaire = nature.startswith(("image/", "font/"))
         self.send_header("Content-Type", nature if binaire else f"{nature}; charset=utf-8")
         self.send_header("Content-Length", str(len(corps)))
         self.end_headers()
@@ -1202,6 +1228,9 @@ class Requetes(BaseHTTPRequestHandler):
             return self._repondre(200, PAGE.read_bytes(), "text/html")
         if self.path in ("/icone.png", "/apple-touch-icon.png", "/favicon.ico"):
             return self._repondre(200, ICONE.read_bytes(), "image/png")
+        if self.path in POLICES:
+            fichier, nature = POLICES[self.path]
+            return self._repondre(200, fichier.read_bytes(), nature)
         if self.path == "/manifest.webmanifest":
             return self._repondre(200, MANIFESTE, "application/manifest+json")
         return self._json({"erreur": "Adresse inconnue."}, 404)
