@@ -17,9 +17,8 @@ def _champs(tache) -> tuple[str, list[str], list[str]]:
     else:
         def lire(cle, defaut=None):
             return getattr(tache, cle, defaut)
-    return str(lire("id", "")), list(lire("depend_de", None) or []), list(
-        lire("perimetre", None) or []
-    )
+    deps = list(dict.fromkeys(lire("depend_de", None) or []))  # une dépendance citée deux fois
+    return str(lire("id", "")), deps, list(lire("perimetre", None) or [])
 
 
 def _et(mots: list[str]) -> str:
@@ -29,61 +28,71 @@ def _et(mots: list[str]) -> str:
     return ", ".join(mots[:-1]) + " et " + mots[-1]
 
 
-def _ce_qui_chevauche(tache: str, autre: str, perimetres: dict[str, list[str]]) -> str:
-    """Dit en clair pourquoi deux tâches ne peuvent pas travailler en même temps."""
-    for x in perimetres[tache]:
-        for y in perimetres[autre]:
-            if x == y:
-                return f"{tache} et {autre} touchent tous deux {x}"
-            if se_chevauchent([x], [y]):
-                return f"{tache} ({x}) et {autre} ({y}) peuvent toucher les mêmes fichiers"
-    return f"{tache} et {autre} peuvent toucher les mêmes fichiers"
+def _premier_recoupement(a: list[str], b: list[str]) -> tuple[str, str]:
+    """Le premier couple de motifs (de `a`, de `b`) qui peuvent toucher le même fichier."""
+    for x in a:
+        for y in b:
+            if x == y or se_chevauchent([x], [y]):
+                return x, y
+    return "", ""
 
 
-def _vague_suivante(restantes, passees, perimetres, retenues) -> list[str]:
+def _vague_suivante(restantes, passees, idents, perimetres, chevauchements) -> list[int]:
     """Une vague : dans l'ordre du plan, chaque tâche prête qui ne chevauche aucune déjà prise.
 
     C'est la règle de `Moteur._prochaine` : la première prête dans le plan part, et une tâche
-    prête qui chevauche une tâche partie attend la vague suivante.
+    prête qui chevauche une tâche partie attend la vague suivante. Les tâches sont suivies par
+    leur rang dans le plan, non par leur identifiant : le moteur lance aussi deux tâches de
+    même identifiant. Rend les rangs de la vague.
     """
-    vague: list[str] = []
-    for ident, deps in restantes:
+    vague: list[int] = []
+    for rang, deps in restantes:
         if not set(deps) <= passees:
             continue
-        gene = next((a for a in vague if se_chevauchent(perimetres[ident], perimetres[a])), None)
+        gene = next((a for a in vague if se_chevauchent(perimetres[rang], perimetres[a])), None)
         if gene is None:
-            vague.append(ident)
+            vague.append(rang)
             continue
-        phrase = _ce_qui_chevauche(ident, gene, perimetres)
-        if phrase not in retenues:
-            retenues.append(phrase)
+        x, y = _premier_recoupement(perimetres[rang], perimetres[gene])
+        ligne = [idents[rang], idents[gene], x, y]
+        if ligne not in chevauchements:
+            chevauchements.append(ligne)
     return vague
 
 
 def _problemes(taches: list[tuple[str, list[str], list[str]]]) -> list[str]:
-    """Ce qui empêche un plan d'aller au bout : identifiant vide ou doublé, dépendance inconnue."""
-    connus: set[str] = set()
+    """Ce qui cloche dans un plan : identifiant vide ou doublé, dépendance inconnue.
+
+    Un identifiant doublé n'empêche pas le moteur d'aller au bout (il lance chaque tâche) ; il
+    est dit parce qu'une dépendance vers lui devient ambiguë.
+    """
+    nombres: dict[str, int] = {}
     problemes = []
     for ident, _, _ in taches:
+        nombres[ident] = nombres.get(ident, 0) + 1
         if not ident:
             problemes.append("une tâche n'a pas d'identifiant")
-        elif ident in connus:
+        elif nombres[ident] == 2:
             problemes.append(f"deux tâches portent l'identifiant {ident}")
-        connus.add(ident)
+        elif nombres[ident] == 3:
+            ancien = f"deux tâches portent l'identifiant {ident}"
+            problemes[problemes.index(ancien)] = f"plusieurs tâches portent l'identifiant {ident}"
     for ident, deps, _ in taches:
-        inconnues = [d for d in deps if d not in connus]
+        inconnues = [d for d in deps if d not in nombres]
         if inconnues:
             qui = "qui n'est pas" if len(inconnues) == 1 else "qui ne sont pas"
             problemes.append(f"{ident} dépend de {_et(inconnues)}, {qui} dans le plan")
-    return problemes
+    return list(dict.fromkeys(problemes))
 
 
 def _cycle(depart: str, dependances: dict[str, list[str]], bloquees: set[str]) -> list[str]:
     """Suit les dépendances bloquées depuis une tâche jusqu'à retomber sur un pas déjà fait."""
     chemin: list[str] = []
+    vus: set[str] = set()
     courant = depart
-    while courant not in chemin:
+    while courant not in vus:
         chemin.append(courant)
+        vus.add(courant)
         suivant = next((d for d in dependances.get(courant, []) if d in bloquees), None)
         if suivant is None:
             return []
@@ -97,6 +106,8 @@ def _bloquees_en_clair(bloquees: list[str], dependances: dict[str, list[str]]) -
     vus: set[str] = set()
     phrases = []
     for ident in bloquees:
+        if ident in vus:
+            continue
         boucle = _cycle(ident, dependances, reste)
         if not boucle or vus & set(boucle):
             continue
@@ -109,24 +120,39 @@ def _bloquees_en_clair(bloquees: list[str], dependances: dict[str, list[str]]) -
 
 
 def _plus_longue_chaine(taches, dependances: dict[str, list[str]]) -> int:
-    """Le nombre de tâches de la plus longue suite où chacune attend la précédente."""
+    """Le nombre de tâches de la plus longue suite où chacune attend la précédente.
+
+    Parcours en profondeur avec une pile, non récursif : une chaîne de milliers de tâches passe.
+    Une boucle ou une dépendance inconnue compte pour 0 (elles sont signalées à part).
+    """
     longueurs: dict[str, int] = {}
-    for ident, _, _ in taches:
-        longueurs[ident] = _longueur(ident, dependances, longueurs, set())
+    for depart, _, _ in taches:
+        if depart in longueurs:
+            continue
+        pile = [depart]
+        en_cours = {depart}
+        suite: dict[str, int] = {}
+        while pile:
+            ident = pile[-1]
+            deps = dependances[ident]
+            i = suite.get(ident, 0)
+            descend = False
+            while i < len(deps):
+                d = deps[i]
+                i += 1
+                if d in longueurs or d not in dependances or d in en_cours:
+                    continue
+                suite[ident] = i
+                pile.append(d)
+                en_cours.add(d)
+                descend = True
+                break
+            if descend:
+                continue
+            pile.pop()
+            en_cours.discard(ident)
+            longueurs[ident] = 1 + max((longueurs.get(d, 0) for d in deps), default=0)
     return max(longueurs.values(), default=0)
-
-
-def _longueur(ident, dependances, connues: dict[str, int], en_cours: set[str]) -> int:
-    if ident in connues:
-        return connues[ident]
-    if ident in en_cours or ident not in dependances:
-        return 0  # une boucle ou une dépendance inconnue : signalées à part
-    en_cours.add(ident)
-    plus = max((_longueur(d, dependances, connues, en_cours) for d in dependances[ident]),
-               default=0)
-    en_cours.discard(ident)
-    connues[ident] = plus + 1
-    return plus + 1
 
 
 def forme_du_plan(taches: list) -> dict:
@@ -137,34 +163,46 @@ def forme_du_plan(taches: list) -> dict:
     - `taches` (int) : le nombre de tâches ;
     - `vagues` (list[list[str]]) : les identifiants de chaque vague, dans l'ordre du plan ;
     - `nb_vagues` (int), `plus_grande_vague` (int), `plus_longue_chaine` (int) ;
-    - `retenues` (list[str]) : ce qui retient des tâches hors de la première vague, en clair ;
-    - `problemes` (list[str]) : ce qui empêche le plan d'aller au bout, vide s'il est possible ;
+    - `retenues` (list[str]) : ce qui retient des tâches hors de la première vague, en clair,
+      le détail paire par paire ;
+    - `attentes` (list[str]) et `chevauchements` (list[[tâche, gênante, motif, motif]]) : les
+      mêmes retenues en données, d'où la phrase regroupe les fichiers partagés ;
+    - `problemes` (list[str]) : ce qui cloche dans le plan, vide s'il est sain. Un identifiant
+      doublé y figure sans empêcher le plan d'aller au bout : le moteur lance chaque tâche ;
     - `jamais` (list[str]) : les tâches qui ne partiraient jamais ;
-    - `possible` (bool) ; `phrase` (str) : le résumé pour la personne et l'orchestrateur.
+    - `possible` (bool) : plan sain, sans problème ni tâche qui ne parte jamais ;
+    - `phrase` (str) : le résumé pour la personne et l'orchestrateur.
     """
     champs = [_champs(t) for t in taches]
-    perimetres = {ident: perimetre for ident, _, perimetre in champs}
-    dependances = {ident: deps for ident, deps, _ in champs}
-    restantes = [(ident, deps) for ident, deps, _ in champs]
+    idents = [ident for ident, _, _ in champs]
+    perimetres = [perimetre for _, _, perimetre in champs]
+    dependances: dict[str, list[str]] = {}
+    for ident, deps, _ in champs:
+        dependances[ident] = list(dict.fromkeys(dependances.get(ident, []) + deps))
+    restantes = [(rang, deps) for rang, (_, deps, _) in enumerate(champs)]
     vagues: list[list[str]] = []
-    retenues: list[str] = []
+    chevauchements: list[list[str]] = []
     passees: set[str] = set()
     while restantes:
-        vague = _vague_suivante(restantes, passees, perimetres, retenues)
+        vague = _vague_suivante(restantes, passees, idents, perimetres, chevauchements)
         if not vague:
             break  # plus rien de prêt : dépendance inconnue ou boucle, dites plus bas
-        vagues.append(vague)
-        passees |= set(vague)
-        restantes = [(i, d) for i, d in restantes if i not in passees]
-    jamais = [i for i, _ in restantes]
+        vagues.append([idents[r] for r in vague])
+        passees |= {idents[r] for r in vague}
+        pris = set(vague)
+        restantes = [(r, d) for r, d in restantes if r not in pris]
+    jamais = [idents[r] for r, _ in restantes]
     problemes = _problemes(champs) + _bloquees_en_clair(jamais, dependances)
+    attentes = _attentes(champs, vagues)
     forme = {
         "taches": len(champs),
         "vagues": vagues,
         "nb_vagues": len(vagues),
         "plus_grande_vague": max((len(v) for v in vagues), default=0),
         "plus_longue_chaine": _plus_longue_chaine(champs, dependances),
-        "retenues": _retenues(champs, vagues, retenues),
+        "retenues": attentes + [_chevauchement_en_clair(c) for c in chevauchements],
+        "attentes": attentes,
+        "chevauchements": chevauchements,
         "problemes": problemes,
         "jamais": jamais,
         "possible": not problemes and not jamais,
@@ -173,13 +211,80 @@ def forme_du_plan(taches: list) -> dict:
     return forme
 
 
-def _retenues(champs, vagues: list[list[str]], chevauchements: list[str]) -> list[str]:
-    """Pour chaque tâche hors de la première vague, ses dépendances ; puis les chevauchements."""
+def _attentes(champs, vagues: list[list[str]]) -> list[str]:
+    """Pour chaque tâche hors de la première vague, ce qu'elle attend (une fois chacune)."""
     premiere = set(vagues[0]) if vagues else set()
     partie = {i for v in vagues for i in v}
     attentes = [f"{ident} attend {_et(deps)}" for ident, deps, _ in champs
                 if ident in partie and ident not in premiere and deps]
-    return attentes + [c for c in chevauchements if c not in attentes]
+    return list(dict.fromkeys(attentes))
+
+
+def _chevauchement_en_clair(ligne: list[str]) -> str:
+    """Une paire de tâches qui ne peuvent pas travailler ensemble, dite en clair."""
+    tache, gene, x, y = ligne
+    if not x:
+        return f"{tache} et {gene} peuvent toucher les mêmes fichiers"
+    if x == y:
+        return f"{tache} et {gene} touchent toutes deux {x}"
+    return f"{tache} ({x}) et {gene} ({y}) peuvent toucher les mêmes fichiers"
+
+
+# Au-delà de ce nombre de tâches, la phrase dit « 10 tâches » au lieu de les nommer.
+NOMMEES_AU_PLUS = 5
+
+
+def _groupes_en_clair(chevauchements: list[list[str]]) -> list[str]:
+    """Regroupe les chevauchements par fichier partagé : une proposition par fichier.
+
+    Deux motifs identiques : « D et A touchent toutes deux X », « A, B et C touchent toutes X »,
+    « 10 tâches touchent X ». Deux motifs différents (un dossier et un fichier dedans) :
+    regroupés par tâche gênante.
+    """
+    exacts: dict[str, list[str]] = {}
+    larges: dict[tuple[str, str], list[tuple[str, str]]] = {}
+    sans_motif: list[str] = []
+    for tache, gene, x, y in chevauchements:
+        if not x:
+            sans_motif.append(_chevauchement_en_clair([tache, gene, x, y]))
+        elif x == y:
+            membres = exacts.setdefault(x, [])
+            membres += [m for m in (tache, gene) if m not in membres]
+        else:
+            larges.setdefault((gene, y), []).append((tache, x))
+    phrases = [_fichier_partage_en_clair(f, m, chevauchements) for f, m in exacts.items()]
+    phrases += [_dossier_partage_en_clair(g, y, liste) for (g, y), liste in larges.items()]
+    return phrases + sans_motif
+
+
+def _fichier_partage_en_clair(fichier: str, membres: list[str], chevauchements) -> str:
+    """Les tâches qui touchent un même fichier, nommées ou comptées selon leur nombre."""
+    if len(membres) == 1:
+        return f"plusieurs tâches d'identifiant {membres[0]} touchent {fichier}"
+    if len(membres) == 2:
+        return f"{_et(membres)} touchent toutes deux {fichier}"
+    if len(membres) <= NOMMEES_AU_PLUS:
+        rangees = sorted(membres, key=_rang_dans(chevauchements))
+        return f"{_et(rangees)} touchent toutes {fichier}"
+    return f"{len(membres)} tâches touchent {fichier}"
+
+
+def _dossier_partage_en_clair(gene: str, y: str, liste: list[tuple[str, str]]) -> str:
+    """Les tâches dont le périmètre recoupe celui de `gene` sans être le même motif."""
+    if len(liste) == 1:
+        return _chevauchement_en_clair([liste[0][0], gene, liste[0][1], y])
+    if len(liste) <= NOMMEES_AU_PLUS:
+        return f"{_et([t for t, _ in liste])} peuvent toucher les mêmes fichiers que {gene} ({y})"
+    return f"{len(liste)} tâches peuvent toucher les mêmes fichiers que {gene} ({y})"
+
+
+def _rang_dans(chevauchements: list[list[str]]):
+    """Une clé de tri : l'ordre où les tâches apparaissent dans les chevauchements."""
+    ordre: dict[str, int] = {}
+    for tache, gene, _, _ in chevauchements:
+        for m in (gene, tache):
+            ordre.setdefault(m, len(ordre))
+    return ordre.__getitem__
 
 
 def _nombre(n: int, mot: str) -> str:
@@ -203,27 +308,48 @@ def _largeur_en_clair(forme: dict) -> str:
 def _impossible_en_clair(forme: dict) -> str:
     """« Ce plan ne peut pas aller au bout : D ne partirait jamais. En cause : … »"""
     jamais = forme["jamais"]
-    bilan = ""
-    if jamais:
-        verbe = "ne partiraient jamais" if len(jamais) > 1 else "ne partirait jamais"
-        bilan = f" : {_et(jamais)} {verbe}"
-    return f"Ce plan ne peut pas aller au bout{bilan}. En cause : {' ; '.join(forme['problemes'])}."
+    verbe = "ne partiraient jamais" if len(jamais) > 1 else "ne partirait jamais"
+    return (f"Ce plan ne peut pas aller au bout : {_et(jamais)} {verbe}. "
+            f"En cause : {' ; '.join(forme['problemes'])}.")
+
+
+def _defaut_en_clair(forme: dict) -> str:
+    """Pour un plan que le moteur mènera au bout malgré un défaut (identifiant doublé ou vide)."""
+    phrase = ("Ce plan peut aller au bout, mais il a un défaut à corriger : "
+              f"{' ; '.join(forme['problemes'])}.")
+    if any("portent l'identifiant" in p for p in forme["problemes"]):
+        phrase += (" Le moteur lance chacune de ces tâches ; ce qui dépend de cet identifiant "
+                   "part dès que l'une d'elles est vérifiée.")
+    return phrase
+
+
+def _retenues_en_clair(forme: dict) -> list[str]:
+    """Les attentes, puis les chevauchements regroupés par fichier."""
+    if "attentes" not in forme:  # une forme sans le détail en données : la liste, telle quelle
+        return forme["retenues"]
+    return forme["attentes"] + _groupes_en_clair(forme["chevauchements"])
 
 
 def resumer(forme: dict) -> str:
     """Le résumé en français d'une forme rendue par `forme_du_plan`, en phrases complètes."""
     if not forme["taches"]:
         return "Ce plan ne contient aucune tâche."
-    phrases = [] if forme["possible"] else [_impossible_en_clair(forme)]
+    phrases = []
+    if forme["jamais"]:
+        phrases.append(_impossible_en_clair(forme))
+    elif forme["problemes"]:
+        phrases.append(_defaut_en_clair(forme))
     parties = sum(len(v) for v in forme["vagues"])
     if parties:
+        entier = not forme["jamais"]
         taille = "d'une seule tâche" if forme["taches"] == 1 else f"de {forme['taches']} tâches"
-        sujet = (f"Ce plan {taille}" if forme["possible"]
+        sujet = (f"Ce plan {taille}" if entier
                  else f"La partie qui peut partir, {_nombre(parties, 'tâche')},")
         phrases.append(f"{sujet} {_largeur_en_clair(forme)}")
-        if forme["possible"] and forme["plus_longue_chaine"] > 1:
+        if entier and forme["plus_longue_chaine"] > 1:
             phrases.append(f"Sa plus longue chaîne de dépendances compte "
                            f"{forme['plus_longue_chaine']} tâches.")
-    if forme["retenues"]:
-        phrases.append(f"Ce qui le retient : {' ; '.join(forme['retenues'])}.")
+    retenues = _retenues_en_clair(forme)
+    if retenues:
+        phrases.append(f"Ce qui le retient : {' ; '.join(retenues)}.")
     return " ".join(phrases)
