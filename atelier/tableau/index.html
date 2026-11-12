@@ -250,13 +250,19 @@ textarea::placeholder { color: var(--faible); }
 .agent { border-top: 1px solid var(--trait); }
 .agent:first-child { border-top: 0; }
 .agent-tete { display: flex; align-items: center; gap: 10px; }
-button.agent-ligne {
+.agent-ligne {
   flex: 1 1 0; min-width: 0; height: auto; padding: 7px 0; border: 0; border-radius: 0; background: none; font: 400 12px var(--sans); letter-spacing: 0; text-transform: none; text-align: left;
   display: grid; grid-template-columns: 52px 92px minmax(0, 1fr); gap: 8px; align-items: baseline; color: var(--discret);
 }
-button.agent-ligne .id { font: 500 11.5px var(--mono); color: var(--texte); }
-button.agent-ligne .role { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
-button.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-ligne .id { font: 500 11.5px var(--mono); color: var(--texte); }
+.agent-ligne .role { font: 500 10px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); }
+.agent-ligne .derniere { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.agent-suivi { padding: 0 0 8px 152px; margin-top: -3px; display: flex; flex-wrap: wrap; align-items: baseline; gap: 3px 14px; font: 400 12px var(--sans); color: var(--discret); }
+.agent-suivi .phase { color: var(--en-cours); }
+.agent-suivi .etape { color: var(--texte); }
+.agent-suivi .attend-depuis { font: 400 10.5px var(--mono); letter-spacing: 0.02em; color: var(--attend); }
+.agent-suivi .temps { font: 400 10.5px var(--mono); letter-spacing: 0.02em; color: var(--faible); }
+.etat-phase { display: block; margin-top: 2px; font-size: 11px; color: var(--faible); }
 .journal { list-style: none; padding: 2px 0 10px 152px; display: flex; flex-direction: column; gap: 1px; font: 400 11.5px var(--mono); color: var(--faible); max-height: 260px; overflow-y: auto; }
 .journal li { overflow-wrap: anywhere; }
 .tuiles { display: flex; flex-direction: column; gap: 12px; }
@@ -649,8 +655,9 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
   .voisins-toile { grid-template-columns: minmax(0, 1fr); gap: 18px; }
   .voisins-toile svg.fleches { display: none; }
   .journal { padding-left: 0; }
-  button.agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
-  button.agent-ligne .role { display: none; }
+  .agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
+  .agent-ligne .role { display: none; }
+  .agent-suivi { padding-left: 48px; }
   .rail { display: none; }
   #vue-plan.active { flex-direction: column; overflow-y: auto; }
   .toile { flex: none; overflow-x: auto; }
@@ -891,6 +898,24 @@ const agentsDe = (vue) => vue.agents || [];
 const ilFautRepondre = (vue) => contratEnAttente(vue) || ouvertes(vue).length > 0 || autorisationsDe(vue).length > 0;
 const arretee = (t) => t.etat === "revenu" && (t.historique || []).slice(-1)[0]?.issue === "arretee";
 const libelleEtat = (t) => (arretee(t) ? "Arrêtée par toi" : t.etat_fr);
+/* Une durée en secondes, dite comme on la lit : « 12 s », « 2 min 05 », « 1 h 10 ». */
+const duree = (s) => {
+  s = Math.max(0, Math.round(Number(s) || 0));
+  if (s < 60) return `${s} s`;
+  if (s < 3600) return `${Math.floor(s / 60)} min ${String(s % 60).padStart(2, "0")}`;
+  return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")}`;
+};
+const CALME_S = 20; // au-delà, « dernière action il y a … » : l'agent réfléchit, ou piétine
+/* Où en est une tâche active : la phase que tient le moteur, l'étape annoncée par l'agent, les durées. */
+function suiviHtml(t, agent) {
+  const morceaux = [];
+  if (t && t.phase) morceaux.push(`<span class="phase">${propre(t.phase.texte)}</span><span class="temps">depuis ${duree(t.phase.depuis_s)}</span>`);
+  if (agent && agent.etape) morceaux.push(`<span class="etape">Étape ${propre(agent.etape)}</span>`);
+  const lignes = (agent && agent.lignes) || [], attend = /^En attente de ton autorisation/.test(lignes[lignes.length - 1] || "");
+  if (agent && attend) morceaux.push(`<span class="attend-depuis">t'attend depuis ${duree(agent.calme_s)}</span>`);
+  else if (agent && agent.calme_s >= CALME_S) morceaux.push(`<span class="temps">dernière action il y a ${duree(agent.calme_s)}</span>`);
+  return morceaux.length ? `<div class="agent-suivi">${morceaux.join("")}</div>` : "";
+}
 const contratEnAttente = (vue) => vue.taches.length > 0 && !vue.contrat.valide;
 
 /* Texte de l'orchestrateur : paragraphes, listes à tirets, gras, code en ligne et blocs de code. */
@@ -1158,7 +1183,9 @@ const POSTE = { l: 180, h: 196, ecart: 10, parRang: 6 };
 function poste(t, x, y, agent, rythme, etat) {
   const actif = t.etat === "en_cours" || t.etat === "en_verification", controle = t.etat === "en_verification";
   const couleur = etat === "attend" ? COULEURS.attend : actif ? COULEURS.en_cours : etat === "verifie" ? COULEURS.verifie : "rgba(220,220,220,0.52)";
-  const sous = controle ? `Vérifiée par ${t.verificateur_fr}` : `${libelleEtat(t)}${t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
+  const sous = actif && agent && agent.etape ? `Étape ${agent.etape}`
+    : actif && t.phase ? `${t.phase.texte} · ${duree(t.phase.depuis_s)}`
+    : controle ? `Vérifiée par ${t.verificateur_fr}` : `${libelleEtat(t)}${t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
   const derniere = agent && agent.lignes.length ? agent.lignes[agent.lignes.length - 1] : "";
   const ouvrir = agent ? ` data-action="derouler" data-nom="${propre(agent.nom)}" role="button" tabindex="0" aria-label="Activité de la tâche ${propre(t.id)} : ${propre(derniere || "aucune ligne pour l'instant")}"` : "";
   const classes = [t.etat, agent ? "poste-actif" : "", etat === "attend" ? "attendue" : ""].filter(Boolean).join(" ");
@@ -1218,14 +1245,21 @@ function aFaire(vue) {
 /* Sous la salle : un agent par ligne, sa dernière activité, un clic pour dérouler ses 30 dernières lignes, et son bouton d'arrêt. */
 const ROLES = { ouvrier: "ouvrier", verificateur: "vérificateur", orchestrateur: "orchestrateur" };
 function agentsHtml(vue) {
-  const actives = new Set(vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").map((t) => t.id));
-  return agentsDe(vue).map((a) => {
+  const enMarche = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification");
+  const actives = new Set(enMarche.map((t) => t.id)), avecAgent = new Set(agentsDe(vue).map((a) => a.tache));
+  // Une tâche active sans agent en marche : l'atelier prépare sa copie, lance les contrôles ou fusionne.
+  const sansAgent = enMarche.filter((t) => !avecAgent.has(t.id) && t.phase).map((t) => `<div class="agent"><div class="agent-tete">
+      <div class="agent-ligne"><span class="id">${propre(t.id)}</span><span class="role">atelier</span><span class="derniere">${propre(t.phase.texte)}</span></div>
+      ${rejoue ? "" : boutonArret(t.id, t.id)}</div>
+      <div class="agent-suivi"><span class="temps">depuis ${duree(t.phase.depuis_s)}</span></div></div>`).join("");
+  return sansAgent + agentsDe(vue).map((a) => {
     const lignes = a.lignes || [], ouvert = deroules.has(a.nom), derniere = lignes.length ? lignes[lignes.length - 1] : "Pas encore d'activité.";
     const cle = a.tache || "orchestrateur", arretable = !rejoue && (!a.tache || actives.has(a.tache));
     return `<div class="agent"><div class="agent-tete">
       <button class="agent-ligne" data-action="derouler" data-nom="${propre(a.nom)}" aria-expanded="${ouvert}" title="${ouvert ? "Replier" : "Dérouler"} l'activité">
         <span class="id">${propre(a.tache || "Chef")}</span><span class="role">${propre(ROLES[a.role] || a.role)}</span><span class="derniere">${propre(derniere)}</span></button>
       ${arretable ? boutonArret(cle, a.tache || "") : ""}</div>
+      ${suiviHtml(vue.taches.find((t) => t.id === a.tache), a)}
       ${ouvert ? `<ol class="journal" data-garde="${propre(a.nom)}" aria-label="Dernières lignes d'activité">${lignes.slice(-30).map((l) => `<li>${propre(l)}</li>`).join("")}</ol>` : ""}</div>`;
   }).join("");
 }
@@ -1312,7 +1346,7 @@ function afficherChantier(vue) {
     <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}</td>
     <td class="dose">${propre(doseCourte(t))}${t.montees ? " ↑" : ""}</td>
     <td class="droite">${t.tentatives}</td>
-    <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span></td>
+    <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span>${t.phase ? `<span class="etat-phase">${propre(t.phase.texte)} · ${duree(t.phase.depuis_s)}</span>` : ""}</td>
     <td class="droite">${euros(t.cout_usd)}</td><td class="droite petit">${nombre(t.tokens)}</td></tr>`).join("")
     || `<tr><td colspan="7" class="calme">Aucune tâche.</td></tr>`);
   const moteur = vue.evenements.filter((e) => (e.auteur || "moteur") === "moteur");

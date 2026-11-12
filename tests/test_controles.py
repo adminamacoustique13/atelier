@@ -108,3 +108,33 @@ def test_preparer_remplace_un_ancien_arbre_sans_garder_le_verrou(tmp_path):
     assert second == premier
     assert not (second / "reste.txt").exists()
     assert not controles.verrou_fusion.locked()
+
+
+def test_les_fichiers_fabriques_par_les_tests_ne_sortent_pas_du_perimetre(tmp_path):
+    """Constaté au premier essai réel : pytest créait un __pycache__, compté hors périmètre,
+    puis enregistré avec la tâche quand c'est le vérificateur qui l'avait créé."""
+    from atelier.controles import hors_perimetre
+    from atelier.projets import exclure_etat
+
+    depot_d_essai(tmp_path)
+    (tmp_path / ".git" / "info" / "exclude").write_text("# mes réglages\n*.log\n", "utf-8")
+    exclure_etat(tmp_path)
+    exclure_etat(tmp_path)  # une seconde ouverture n'ajoute rien
+    exclusions = (tmp_path / ".git" / "info" / "exclude").read_text("utf-8")
+    assert exclusions.startswith("# mes réglages\n*.log\n")
+    assert exclusions.count("__pycache__/") == 1
+
+    controles = ControlesGit(tmp_path)
+    tache = SimpleNamespace(id="A", titre="Calcul")
+    dossier = controles.preparer(tache)
+    (dossier / "calcul.py").write_text("x = 1\n", "utf-8")
+    fabriques = ("__pycache__/calcul.cpython-313.pyc", ".pytest_cache/v/x", "node_modules/a.js")
+    for fabrique in fabriques:
+        (dossier / fabrique).parent.mkdir(parents=True, exist_ok=True)
+        (dossier / fabrique).write_text("fabriqué", "utf-8")
+    modifies = controles.fichiers_modifies(tache, dossier, None)
+    assert modifies == ["calcul.py"] and hors_perimetre(modifies, ["calcul.py"]) == []
+
+    controles.enregistrer(tache, dossier)
+    suivis = subprocess.run(["git", "ls-files"], cwd=tmp_path, capture_output=True, text=True)
+    assert suivis.stdout.split() == ["LISEZMOI.md", "calcul.py"]

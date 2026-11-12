@@ -6,6 +6,14 @@ import json
 
 from atelier.modele import Contrat, Tache
 
+# Le tableau de bord affiche la dernière ligne de cette forme : la personne responsable voit
+# où en est l'agent sans lire tout son fil.
+SUIVI = """## Suivi
+Avant chaque étape de ton travail, écris sur une ligne à part : « Étape 2/5 : ce que tu \
+vas faire », en quelques mots simples (le rang et le total sont une estimation, ajuste-les \
+en route). La personne qui suit le chantier lit ces lignes pour savoir où tu en es.
+"""
+
 
 def _liste(elements: list[str]) -> str:
     return "\n".join(f"{i}. {e}" for i, e in enumerate(elements, 1)) or "(aucun)"
@@ -47,6 +55,7 @@ Tu peux attendre : {tache.attend or "rien"}
 Commandes de contrôle, à faire passer avant de rendre ton travail :
 {commandes}
 {reprise}
+{SUIVI}
 ## Interdits
 - Rien hors de ton périmètre. Si tu penses en avoir besoin, arrête-toi et dis-le \
 dans ton compte rendu.
@@ -93,6 +102,7 @@ de référence et à ses cas tests, pas seulement à ta relecture.
 5. Lance les commandes de contrôle :
 {commandes}
 
+{SUIVI}
 ## Ce que tu rends
 Un court verdict en français, puis, sur la toute dernière ligne, un objet JSON seul :
 {{"valide": true ou false, "motif": "bacle" ou "ne_sait_pas" ou "consigne", \

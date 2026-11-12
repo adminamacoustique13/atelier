@@ -391,6 +391,24 @@ def test_les_lignes_d_un_agent_sont_bornees_aux_trente_dernieres():
     assert len(activite._lignes["B-ouvrier-1"]) == 30  # la mémoire aussi est bornée
 
 
+def test_l_etape_annoncee_et_les_durees_de_chaque_agent():
+    activite = Activite()
+    temps = [100.0]
+    activite.horloge = lambda: temps[0]
+    activite.ajouter(evenement("B-ouvrier-1", "texte", "**Étape 1/3 : lire le périmètre**\n"))
+    temps[0] = 130.0
+    activite.ajouter(evenement("B-ouvrier-1", "outil", "Lit a.py"))
+    activite.ajouter(evenement("B-ouvrier-1", "texte", "Étape : écrire les tests\nJe commence.\n"))
+    temps[0] = 145.0
+    (agent,) = activite.agents()
+    assert agent["etape"] == "écrire les tests"
+    assert (agent["depuis_s"], agent["calme_s"]) == (45, 15)
+    activite.ajouter(evenement("B-ouvrier-1", "texte", "Étape 3/3 : relire\n"))
+    assert activite.agents()[0]["etape"] == "3/3 · relire"
+    activite.ajouter(evenement("B-ouvrier-1", "fin", "ok"))
+    assert activite.agents() == [] and not activite._temps and not activite._etapes
+
+
 def test_un_texte_coupe_en_morceaux_se_recompose_en_lignes():
     activite = Activite()
     for morceau in ("Bon", "jour\r\nsui", "te\n\n  \nfin", " de ligne"):
@@ -603,12 +621,13 @@ def test_arreter_une_tache_en_cours_la_rend_sans_seconde_chance(tableau, tmp_pat
     atelier.lancer()
     assert attendre(lambda: [a["nom"] for a in serveur.etat()["agents"]] == ["A-ouvrier-1"])
     (agent,) = serveur.etat()["agents"]
-    assert agent == {
+    assert {k: agent[k] for k in ("nom", "tache", "role", "lignes")} == {
         "nom": "A-ouvrier-1",
         "tache": "A",
         "role": "ouvrier",
         "lignes": ["Lit la consigne"],
     }
+    assert agent["etape"] == "" and agent["depuis_s"] >= 0 and agent["calme_s"] >= 0
     dosage = (atelier.moteur.chantier.tache("A").modele, atelier.moteur.chantier.tache("A").effort)
 
     code, reponse = serveur.appeler("/api/arreter", {"tache": "A"})

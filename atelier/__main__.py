@@ -1,4 +1,4 @@
-"""Les commandes de l'atelier : demo, planifier, servir, instantanes."""
+"""Les commandes de l'atelier : demo, planifier, servir, essai, instantanes."""
 
 from __future__ import annotations
 
@@ -230,6 +230,15 @@ def main() -> None:
     aide = "Dossier où créer les nouveaux projets (par défaut : le parent du dépôt)."
     servir.add_argument("--racine", help=aide)
     servir.set_defaults(action=commande_servir)
+
+    essai = commandes.add_parser(
+        "essai", help="Essai réel de bout en bout, sur un dépôt jetable (vrais agents)."
+    )
+    aide = "Où créer le dépôt jetable (par défaut : un dossier temporaire)."
+    essai.add_argument("--dossier", help=aide)
+    aide = "Sans l'essai du bouton « Arrêter »."
+    essai.add_argument("--sans-arret", action="store_true", help=aide)
+    essai.set_defaults(action=lambda a: __import__("atelier.essai").essai.commande_essai(a))
 
     instantanes = commandes.add_parser("instantanes", help="Page autonome de démonstration.")
     instantanes.add_argument("sortie")

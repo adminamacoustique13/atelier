@@ -32,10 +32,17 @@ import asyncio
 import concurrent.futures
 import re
 import threading
+import warnings
 from contextlib import suppress
 from pathlib import Path
 
 from atelier.agents import Resultat, decrire_outil, mode_valide
+
+# Le SDK avertit, à chaque agent, que le guichet n'est pas consulté pour les outils permis
+# d'avance (lecture, modifications dans la copie de travail). C'est voulu (voir DECISIONS.md,
+# « les modifications de fichiers restent permises d'avance ») : l'avertissement ne ferait
+# qu'encombrer le journal de l'Atelier.
+warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
 
 ARRET = "Arrêté par la personne responsable."
 SANS_REPONSE = "Claude Code s'est arrêté sans répondre."
@@ -455,7 +462,7 @@ class SessionSDK:
         elif isinstance(message, sdk.AssistantMessage):
             for bloc in message.content:
                 if isinstance(bloc, sdk.ToolUseBlock):
-                    forme = decrire_outil({"name": bloc.name, "input": bloc.input})
+                    forme = decrire_outil({"name": bloc.name, "input": bloc.input}, self.dossier)
                     self._appels.retenir(bloc.id, forme)
                     self._emettre("outil", forme)
         elif isinstance(message, sdk.UserMessage) and isinstance(message.content, list):
@@ -547,7 +554,7 @@ class SessionSDK:
         if coupure.pose.is_set():  # l'ancien Claude Code, en train de s'interrompre
             return PermissionResultDeny(message=ARRET, interrupt=True)
         arret = self._arret
-        self._emettre("attente", decrire_outil({"name": outil, "input": entree}))
+        self._emettre("attente", decrire_outil({"name": outil, "input": entree}, self.dossier))
         if self.guichet is None:
             return PermissionResultDeny(message=SANS_GUICHET)
         if arret is None or arret.pose.is_set():

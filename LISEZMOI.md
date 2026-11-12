@@ -21,6 +21,11 @@ python3 -m atelier servir --depot /chemin/du/projet
 ```
 Ouvre le tableau de bord sur le vrai dépôt. Le chantier ne démarre que lorsque tu valides le contrat.
 
+```
+python3 -m atelier essai
+```
+L'essai réel : un petit chantier joué de bout en bout avec de vrais agents, sur un dépôt jetable (voir « L'essai réel » plus bas). Appel réel, quelques minutes, de l'ordre de 0,40 $ en coût équivalent.
+
 ## Le profil du projet
 
 Un fichier `chantier/profil.json` dans chaque dépôt :
@@ -214,6 +219,18 @@ Le tableau de bord n'a que cinq couleurs : noir et bleu nuit pour le fond, gris 
 
 Chaque poste de la salle du Chantier porte une courbe en points : une colonne par tranche de 15 secondes, sur les 5 dernières minutes, d'autant plus haute que l'agent a agi pendant ces 15 secondes (un outil lancé compte pour un, du texte écrit pour un par 120 caractères). Tant qu'une demande attend ta réponse, les dernières colonnes passent en ambre, à plat : tu vois depuis combien de temps l'agent est bloqué. Quand la tâche est finie, sa courbe résume toute la marche de son ouvrier. Dans la démonstration, où un agent simulé ne travaille que quelques secondes, une colonne vaut une demi-seconde.
 
+### Où en est un agent
+
+Sous la salle du Chantier, chaque agent en marche a sa ligne : sa tâche, son rôle, et ce qu'il vient de faire, en clair (« Modifie calcul.py », « Lit tests/test_calcul.py », ou la description que Claude Code donne d'une commande, suivie de la commande). Juste dessous :
+
+- **la phase** de la tâche, tenue par l'Atelier, et depuis combien de temps elle dure : « Préparation de sa copie de travail », « L'ouvrier travaille (tentative 2) », « Contrôle du périmètre », « Contrôles automatiques : » suivi des commandes, « Le vérificateur relit », « Enregistrement et fusion » ;
+- **l'étape** que l'agent annonce lui-même (« Étape 2/4 · écrire les tests ») : sa consigne lui demande d'écrire une telle ligne avant chaque étape. Le total est son estimation, il peut l'ajuster en route ;
+- « **dernière action il y a …** » quand l'agent n'a rien fait depuis plus de 20 secondes (il réfléchit, ou il piétine), et « **t'attend depuis …** », en ambre, quand il attend ta réponse à une carte.
+
+Une tâche active sans agent en marche (l'Atelier prépare sa copie, lance les contrôles ou fusionne) a aussi sa ligne, marquée « atelier ». La phase apparaît encore sous l'état de la tâche dans le détail des tâches (06), et sur son poste dans la salle.
+
+Les agents de Claude Code, lancés par la bibliothèque, n'ont pas d'outil de liste de tâches qu'on pourrait lire : l'étape annoncée est ce qui s'en rapproche le plus.
+
 ## La carte du code
 
 L'onglet Code montre le code du projet de trois façons. L'explorateur reste toujours à gauche ; au milieu, deux boutons passent du plan à la vue d'un fichier :
@@ -242,11 +259,25 @@ Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqu�
 4. Un vérificateur, un modèle au-dessus de l'ouvrier, juge le livrable sans pouvoir écrire.
 5. Accepté : le travail est enregistré et fusionné. Refusé : il est jeté, et la tâche a une seconde chance, puis monte d'un cran, puis te revient.
 
+## L'essai réel
+
+`python3 -m atelier essai` (ou `uv run python -m atelier essai` dans le dossier de l'Atelier) vérifie, sur la machine où l'Atelier est installé, ce que les tests ne peuvent pas montrer. Il crée un dépôt jetable dans un dossier temporaire (ou celui de `--dossier`), sans toucher à tes projets, puis :
+
+1. vérifie que la bibliothèque se charge, dans la version testée ;
+2. écrit un message à l'orchestrateur et attend sa réponse, puis dit ce qui est facturé selon le SDK (abonnement ou clé API) ;
+3. lance un chantier de deux tâches, sur Sonnet en effort faible : A (une fonction `moyenne`) doit traverser tout le chantier, ouvrier, contrôles, vérificateur, fusion ; B est arrêtée par le bouton « Arrêter » dès que son ouvrier travaille (`--sans-arret` pour s'en passer) ;
+4. accepte une fois chaque carte d'autorisation, et les liste ;
+5. vérifie que le travail de A est dans `main`, sans fichier en trop, qu'il marche, et qu'aucun programme Claude ne reste après la fin.
+
+Chaque étape s'affiche « ok », « ÉCHEC » ou « info », et le tout est écrit dans `ESSAI.md`, dans le dossier de l'essai. La commande sort en erreur si une étape a échoué. Compte trois à cinq minutes.
+
 ## Ce qui est testé et ce qui ne l'est pas
 
 Testé (`python3 -m pytest -q`) : le pont vers `claude-agent-sdk` sur un faux client, les cartes d'autorisation, l'arrêt d'un agent, l'annonce de la source de connexion, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
 
-Pas encore essayé avec de vrais agents : aucune machine du chantier n'était connectée à un compte Claude. Le pont (`atelier/sdk.py`) et les agents (`atelier/agents.py`, classe `AgentClaude`) n'ont tourné que sur des faux clients, jamais sur le vrai Claude Code embarqué : ni les ouvriers, ni les vérificateurs, ni la conversation, ni les cartes d'autorisation, ni l'annonce de la source de connexion. C'est le premier essai à faire sur ton Mac, sur un dépôt sans importance.
+Essayé avec de vrais agents le 2026-11-12, sur une machine Linux du cloud (pas encore sur un Mac), par `python3 -m atelier essai` et par un chantier piloté depuis le tableau de bord : la conversation de l'orchestrateur, le plan, les ouvriers, les contrôles, le vérificateur, la fusion, les cartes d'autorisation (« une fois »), l'arrêt d'un ouvrier, l'annonce de la source de connexion (abonnement). Ce premier essai a trouvé deux défauts, corrigés depuis : un réglage d'outils rendu avec le plan était perdu, et les fichiers `__pycache__` créés en lançant les tests faisaient refuser la tâche ou entraient dans `main`.
+
+Pas encore essayé avec de vrais agents : l'installation et le redémarrage sur Mac, le bouton « Mettre à jour », les modes des ouvriers autres que « Accepter les modifications », « Toujours pour ce projet », la reprise après une réponse arrêtée de l'orchestrateur. Sur ton Mac, commence par `python3 -m atelier essai` : il couvre en quelques minutes ce qui a été essayé dans le cloud.
 
 ## Les fichiers
 
@@ -264,4 +295,5 @@ Pas encore essayé avec de vrais agents : aucune machine du chantier n'était co
 | `atelier/projets.py` | Les projets ouverts : création, reprise d'un dépôt existant, liaison à un dépôt en ligne |
 | `atelier/mise_a_jour.py` | La mise à jour de l'Atelier lui-même : vérification en ligne et `git pull` |
 | `atelier/serveur.py` | Le serveur local du tableau de bord |
+| `atelier/essai.py` | L'essai réel de bout en bout, avec de vrais agents (`python3 -m atelier essai`) |
 | `atelier/tableau/index.html` | Le tableau de bord |

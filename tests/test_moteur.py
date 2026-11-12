@@ -31,6 +31,41 @@ def test_sans_contrat_valide_rien_ne_demarre():
         moteur(c)[0].executer()
 
 
+def test_le_moteur_dit_ou_en_est_chaque_tache_active():
+    """Même quand aucun agent ne tourne (copie, contrôles, fusion), la phase est connue."""
+    c = chantier([tache("A")])
+    vues = []
+
+    class Controles(ControlesSimules):
+        commandes = ["python3 -m pytest -q"]
+
+        def preparer(self, t):
+            vues.append(m.phase(t.id)["texte"])
+
+        def mecaniques(self, t, dossier):
+            vues.append(m.phase(t.id)["texte"])
+            return True, ""
+
+        def enregistrer(self, t, dossier):
+            vues.append(m.phase(t.id)["texte"])
+
+    class Agent(AgentSimule):
+        def executer(self, consigne, modele, effort, dossier, lecture_seule=False, contexte=None):
+            vues.append(m.phase(contexte["tache"])["texte"])
+            return super().executer(consigne, modele, effort, dossier, lecture_seule, contexte)
+
+    m = Moteur(c, Agent({}, perimetres={"A": ["a.py"]}), Controles())
+    m.executer()
+    assert vues == [
+        "Préparation de sa copie de travail",
+        "L'ouvrier travaille (tentative 1)",
+        "Contrôles automatiques : python3 -m pytest -q",
+        "Le vérificateur relit (Sonnet, effort moyen)",
+        "Enregistrement et fusion",
+    ]
+    assert m.phase("A") is None  # une tâche finie n'a plus de phase
+
+
 def test_chantier_nominal_tout_est_verifie_dans_l_ordre_des_dependances():
     c = chantier([tache("A"), tache("B"), tache("C", depend_de=["A", "B"])])
     m, agent = moteur(c)
@@ -479,6 +514,37 @@ def test_l_orchestrateur_propose_des_outils_et_un_clic_les_fait_valoir(tmp_path)
     assert "Outils du projet" in historique
     atelier.decider(demande["id"], ACCEPTER_OUTILS)  # un second clic ne refait rien
     assert historique.count("Outils du projet") == 1
+
+
+def test_un_reglage_d_outils_rendu_avec_le_plan_n_est_pas_perdu(tmp_path):
+    """Constaté au premier essai réel : le plan effaçait le réglage rendu juste avant lui."""
+    import json
+    from types import SimpleNamespace
+
+    from atelier.projets import creer_depot
+
+    atelier = creer_depot(tmp_path / "p", "P")
+    outils = {"commandes": ["python3 -m pytest -q"], "pourquoi": "Rejouer les tests."}
+    plan = {"objectif": "o", "taches": [{"id": "A", "titre": "t", "perimetre": ["a.py"]}]}
+    texte = (
+        f"Je fixe ce contrôle, puis je donne le plan.\n\n```atelier-outils\n{json.dumps(outils)}"
+        f"\n```\n\n```atelier-plan\n{json.dumps(plan)}\n```"
+    )
+    atelier._recevoir("?", SimpleNamespace(ok=True, texte=texte, cout_usd=0, tokens=0))
+    assert [t.id for t in atelier.moteur.chantier.taches] == ["A"]
+    demandes = atelier.moteur.chantier.demandes
+    assert [d["nature"] for d in demandes] == ["outils"]
+    assert "python3 -m pytest -q" in demandes[0]["question"]
+
+    # Un plan corrigé ensuite garde le réglage tant qu'il n'a pas de réponse, pas après.
+    atelier._recevoir("?", SimpleNamespace(ok=True, texte=texte.split("```atelier-outils")[0]
+                                           + f"```atelier-plan\n{json.dumps(plan)}\n```",
+                                           cout_usd=0, tokens=0))  # fmt: skip
+    assert len(atelier.moteur.chantier.demandes) == 1
+    atelier.decider(demandes[0]["id"], "Refuser")
+    seul_plan = f"```atelier-plan\n{json.dumps(plan)}\n```"
+    atelier._recevoir("?", SimpleNamespace(ok=True, texte=seul_plan, cout_usd=0, tokens=0))
+    assert atelier.moteur.chantier.demandes == []
 
 
 def test_l_accueil_resume_chaque_projet_sans_le_demarrer(tmp_path):

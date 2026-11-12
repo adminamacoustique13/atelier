@@ -4,6 +4,17 @@ Aucune machine du chantier n'était connectée à un compte Claude. Cet essai es
 
 La branche contient tout le chantier : le pont vers le SDK, les cartes d'autorisation, l'activité en direct, les boutons « Arrêter », la nouvelle installation, l'annonce de ce qui est facturé, le menu « Mode des ouvriers » et le bouton « Mettre à jour ».
 
+## D'abord : l'essai automatique (cinq minutes)
+
+Depuis le 2026-11-12, une commande joue d'elle-même la plus grande partie de cet essai (connexion, ce qui est facturé, un ouvrier, les contrôles, le vérificateur, la fusion, une carte d'autorisation, l'arrêt d'un agent), sur un dépôt jetable :
+
+```
+cd ~/Atelier-appli
+uv run python -m atelier essai
+```
+
+Elle affiche une ligne par étape (« ok », « ÉCHEC » ou « info ») et écrit son rapport dans `ESSAI.md`, dans le dossier qu'elle indique au départ. Envoie-moi ce rapport. Elle a déjà tourné dans le cloud, sur Linux : tout y est passé. Les sections ci-dessous restent utiles pour ce qu'elle ne couvre pas : l'installation, le redémarrage, le menu des modes, « Toujours pour ce projet », l'arrêt de l'orchestrateur et la mise à jour.
+
 ## Avant de commencer
 
 1. Vérifie que tu es connecté à ton abonnement : ouvre le Terminal, lance `claude`, tape `/status`, puis quitte.

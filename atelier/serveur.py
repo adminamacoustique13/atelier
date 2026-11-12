@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import threading
 import time
@@ -282,6 +283,8 @@ LIGNES_PAR_GENRE = {
     "refus": "Refusé par l'arbitre : {0}.",
     "mode": "Mode réellement appliqué : {1}.",
 }
+# Une ligne où l'agent dit l'étape qu'il entame (sa consigne le lui demande) : « Étape : ... ».
+ETAPE = re.compile(r"^[*_#\s]*[ÉéEe]tape\s*(\d+\s*(?:/\s*\d+)?)?\s*[:：]\s*[*_]*\s*(.+?)[*_]*$")
 LIGNES_MAX = 30  # lignes d'activité gardées par agent
 LARGEUR_MAX = 300  # caractères par ligne d'activité
 MORCEAU_MAX = LIGNES_MAX * LARGEUR_MAX  # de quoi remplir toutes les lignes : le reste est perdu
@@ -307,6 +310,9 @@ class Activite:
         self._lignes: dict[str, deque[str]] = {}
         self._reste: dict[str, str] = {}  # le texte reçu qui n'est pas encore une ligne entière
         self._modes: dict[str, tuple] = {}  # le dernier mode réel dit, par agent en marche
+        self._temps: dict[str, list[float]] = {}  # [départ, dernière action], par agent en marche
+        self._etapes: dict[str, str] = {}  # la dernière ligne « Étape : ... » de chaque agent
+        self.horloge = time.monotonic
         self.rythmes = Rythmes(tranche_s=tranche_s)  # combien chaque agent agit, pour les courbes
         self.sur_mode = None
 
@@ -314,6 +320,11 @@ class Activite:
         lignes = self._lignes[nom]
         for ligne in texte.split("\n"):
             ligne = ligne.strip()
+            etape = ETAPE.match(ligne)
+            if etape and etape.group(2).strip():
+                rang = "".join((etape.group(1) or "").split())
+                dite = f"{rang} · {etape.group(2).strip()}" if rang else etape.group(2).strip()
+                self._etapes[nom] = dite[:LARGEUR_MAX]
             lignes.extend(ligne[i : i + LARGEUR_MAX] for i in range(0, len(ligne), LARGEUR_MAX))
 
     def ajouter(self, evenement: dict) -> None:
@@ -334,16 +345,13 @@ class Activite:
         """Sous le verrou : range l'événement ; rend True pour un mode réel nouveau."""
         self.rythmes.compter(nom, str(genre), contenu)
         if genre == "fin":
-            self._lignes.pop(nom, None)
-            self._reste.pop(nom, None)
-            self._modes.pop(nom, None)
+            self._oublier(nom)
             return False
+        maintenant = self.horloge()
+        self._temps.setdefault(nom, [maintenant, maintenant])[1] = maintenant
         self._lignes.setdefault(nom, deque(maxlen=LIGNES_MAX))
         while len(self._lignes) > AGENTS_MAX:  # sans « fin », on oublie les plus anciens
-            ancien = next(iter(self._lignes))
-            del self._lignes[ancien]
-            self._reste.pop(ancien, None)
-            self._modes.pop(ancien, None)
+            self._oublier(next(iter(self._lignes)))
         if genre == "texte":
             recu = self._reste.get(nom, "") + contenu.replace("\r", "")
             *entieres, reste = recu.split("\n")
@@ -358,6 +366,10 @@ class Activite:
             return False
         dit, self._modes[nom] = self._modes.get(nom), (contenu, str(demande or ""))
         return dit != self._modes[nom]
+
+    def _oublier(self, nom: str) -> None:
+        for registre in (self._lignes, self._reste, self._modes, self._temps, self._etapes):
+            registre.pop(nom, None)
 
     def rythme(self) -> dict:
         """Les courbes d'activité des agents en marche et des tâches finies (voir `rythme`)."""
@@ -377,14 +389,29 @@ class Activite:
     def agents(self) -> list[dict]:
         """Rend, pour chaque agent en marche, son nom, sa tâche, son rôle et ses lignes."""
         with self._verrou:
-            vus = [(n, [*lignes, self._reste.get(n, "")]) for n, lignes in self._lignes.items()]
+            maintenant = self.horloge()
+            vus = [
+                (n, [*lignes, self._reste.get(n, "")], self._etapes.get(n, ""), self._temps.get(n))
+                for n, lignes in self._lignes.items()
+            ]
         agents = []
-        for nom, lignes in vus:
+        for nom, lignes, etape, temps in vus:
             morceaux = nom.rsplit("-", 2)
             tache, role = (morceaux[0], morceaux[1]) if len(morceaux) == 3 else ("", nom)
             lignes = [ligne.strip() for ligne in lignes if ligne.strip()]
             lignes = lignes[-LIGNES_MAX:]
-            agents.append({"nom": nom, "tache": tache, "role": role, "lignes": lignes})
+            depart, derniere = temps or (maintenant, maintenant)
+            agents.append(
+                {
+                    "nom": nom,
+                    "tache": tache,
+                    "role": role,
+                    "lignes": lignes,
+                    "etape": etape,  # ce que l'agent dit faire, s'il l'a dit
+                    "depuis_s": round(maintenant - depart),  # depuis son premier signe de vie
+                    "calme_s": round(maintenant - derniere),  # depuis sa dernière action
+                }
+            )
         return agents
 
 
@@ -575,6 +602,9 @@ class Atelier:
                 brouillon,
                 len(autorisations),
             )
+            for tache in donnees["taches"]:
+                if tache["etat"] in ("en_cours", "en_verification"):
+                    tache["phase"] = self.moteur.phase(tache["id"])
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
         donnees["rythmes"] = self.activite.rythme()
@@ -1114,7 +1144,11 @@ class Atelier:
                 return chantier.noter("Plan non repris : le contrat est déjà validé.")
             if not taches:
                 return chantier.noter("Le plan rendu ne contenait aucune tâche lisible.")
-            chantier.taches, chantier.demandes, chantier.termine = taches, [], False
+            # Un réglage d'outils rendu avec le plan, ou avant lui, attend toujours sa réponse.
+            reglages = [
+                d for d in chantier.demandes if d.get("nature") == "outils" and d["reponse"] is None
+            ]
+            chantier.taches, chantier.demandes, chantier.termine = taches, reglages, False
             chantier.agents_lances = chantier.montees = 0
             chantier.contrat = Contrat(
                 objectif=str(plan.get("objectif") or demande),
