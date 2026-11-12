@@ -247,11 +247,16 @@ Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqu�
 2. L'ouvrier travaille dans cette copie, avec son modèle et son effort.
 3. L'atelier contrôle le périmètre en lisant git, puis lance les commandes du profil.
 4. Un vérificateur, un modèle au-dessus de l'ouvrier, juge le livrable sans pouvoir écrire.
-5. Accepté : le travail est enregistré et fusionné. Refusé : il est jeté, et la tâche a une seconde chance, puis monte d'un cran, puis te revient.
+5. Accepté : avant d'entrer dans la branche principale, le travail est rejoué sur elle. Si d'autres tâches y sont entrées depuis le départ de l'ouvrier, l'atelier fusionne la branche principale dans la copie de la tâche et relance les commandes du profil sur ce mélange. Tout passe : le travail entre dans la branche principale, et elle ne contient jamais que du code contrôlé tel quel. Un conflit ou un contrôle rouge : rien n'entre, et la tâche est traitée comme refusée, avec la sortie des contrôles dans les remarques de la tentative suivante.
+6. Refusé : le travail est jeté, et la tâche a une seconde chance, puis monte d'un cran. Une tâche à bout de tentatives est relancée seule une fois de plus, un cran plus haut, si le plafond d'escalade du contrat le permet. Ensuite seulement, elle te revient.
+
+**La réparation de la branche principale.** Quand toutes les tâches sont vérifiées, l'atelier relance les commandes du profil sur la branche principale, dans une copie propre (sans les fichiers en cours d'édition ni les copies des tâches). Si elles échouent, il ajoute seul une tâche « Réparer les contrôles de la branche principale » (`REPARATION-1`), qui reçoit leur sortie et peut toucher tout le dépôt, sans retirer ni affaiblir de test. Elle suit le même chemin qu'une autre tâche : ouvrier, contrôles, vérificateur. Au plus deux réparations par chantier : si les contrôles restent rouges, le fil le dit et le chantier ne se dit pas terminé.
+
+Ce qui te revient encore : une tâche arrêtée par toi, une consigne que le vérificateur juge mal posée, une tâche au plafond d'escalade après sa relance seule, et les cartes d'autorisation.
 
 ## Ce qui est testé et ce qui ne l'est pas
 
-Testé (`python3 -m pytest -q`) : le pont vers `claude-agent-sdk` sur un faux client, les cartes d'autorisation, l'arrêt d'un agent, l'annonce de la source de connexion, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, et le cycle git complet sur un vrai dépôt.
+Testé (`python3 -m pytest -q`) : le pont vers `claude-agent-sdk` sur un faux client, les cartes d'autorisation, l'arrêt d'un agent, l'annonce de la source de connexion, la reprise de session, la lecture du plan, la création et le changement de projet, le dosage, l'ordonnancement, les dépendances, les périmètres, la seconde chance, la montée en gamme, le plafond, l'enveloppe, les décisions, la relance seule, la réparation de la branche principale, et le cycle git complet sur un vrai dépôt, dont l'intégration contrôlée de deux tâches qui ne passent pas ensemble et un conflit.
 
 Pas encore essayé avec de vrais agents : aucune machine du chantier n'était connectée à un compte Claude. Le pont (`atelier/sdk.py`) et les agents (`atelier/agents.py`, classe `AgentClaude`) n'ont tourné que sur des faux clients, jamais sur le vrai Claude Code embarqué : ni les ouvriers, ni les vérificateurs, ni la conversation, ni les cartes d'autorisation, ni l'annonce de la source de connexion. C'est le premier essai à faire sur ton Mac, sur un dépôt sans importance.
 

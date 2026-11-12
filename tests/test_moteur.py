@@ -519,3 +519,98 @@ def test_l_accueil_resume_chaque_projet_sans_le_demarrer(tmp_path):
     fiche = next(f for f in autres.accueil() if f["id"] == "recent")
     assert fiche["archives"] == 1 and fiche["chantier"]["etat"] == "vide" and fiche["courant"]
     assert autres.nouvelle_session("recent")["fait"] is False  # un chantier vide n'est pas archivé
+
+
+# --- sans intervention : relance seule, intégration refusée, réparation de main -------------
+
+
+def test_une_tache_epuisee_est_relancee_seule_un_cran_plus_haut():
+    c = chantier([tache("A")])  # plafond du contrat : Opus, effort élevé
+    m, agent = moteur(c, {"A": ["ne_sait_pas", "ne_sait_pas", "ne_sait_pas", "ok"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and c.demandes == [] and c.termine
+    assert a.relances_auto == 1 and a.tentatives == 4
+    ouvriers = [(x["modele"], x["effort"]) for x in agent.appels if x["role"] == "ouvrier"]
+    assert ouvriers == [("haiku", "low"), ("haiku", "low"), ("sonnet", "low"), ("opus", "low")]
+    assert any("Je relance seul un cran plus haut : Opus" in e["texte"] for e in c.evenements)
+
+
+def test_la_relance_seule_n_a_lieu_qu_une_fois_puis_la_tache_revient():
+    c = chantier([tache("A")])
+    m, _ = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    a = c.tache("A")
+    assert a.etat == "revenu" and len(c.demandes) == 1 and a.relances_auto == 1
+    assert not c.termine
+
+
+def test_au_plafond_aucune_relance_seule():
+    c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
+    m, _ = moteur(c, {"A": ["ne_sait_pas"]})
+    m.executer()
+    assert c.tache("A").relances_auto == 0 and c.tache("A").etat == "revenu"
+
+
+class ControlesReglables(ControlesSimules):
+    """Des contrôles dont l'enregistrement et la branche principale répondent selon une liste."""
+
+    def __init__(self, enregistrements=(), principale=()):
+        self.enregistrements, self.principale = list(enregistrements), list(principale)
+        self.enregistrees, self.controles_principale = [], 0
+
+    def enregistrer(self, tache, dossier):
+        probleme = self.enregistrements.pop(0) if self.enregistrements else ""
+        if not probleme:
+            self.enregistrees.append(tache.id)
+        return probleme
+
+    def controler_principale(self):
+        self.controles_principale += 1
+        return self.principale.pop(0) if self.principale else (True, "")
+
+
+def test_une_integration_refusee_compte_comme_une_tentative_refusee():
+    c = chantier([tache("A")])
+    controles = ControlesReglables(enregistrements=["Conflit avec la branche principale."])
+    agent = AgentSimule(perimetres={"A": ["a.py"]})
+    Moteur(c, agent, controles).executer()
+    a = c.tache("A")
+    assert a.etat == "verifie" and a.tentatives == 2 and controles.enregistrees == ["A"]
+    assert a.historique[0]["issue"] == "ne_sait_pas"
+    assert a.historique[0]["detail"] == "Conflit avec la branche principale."
+    assert a.historique[1]["issue"] == "valide"
+
+
+def test_main_rouge_en_fin_de_chantier_lance_seule_une_reparation():
+    c = chantier([tache("A")])
+    controles = ControlesReglables(principale=[(False, "FAILED test_x.py::test_y")])
+    Moteur(c, AgentSimule(perimetres={"A": ["a.py"]}), controles).executer()
+    assert [t.id for t in c.taches] == ["A", "REPARATION-1"]
+    reparation = c.tache("REPARATION-1")
+    assert reparation.etat == "verifie" and reparation.ajoutee and reparation.perimetre == ["*"]
+    assert "FAILED test_x.py::test_y" in reparation.pourquoi
+    assert controles.controles_principale == 2 and c.termine and c.demandes == []
+    textes = [e["texte"] for e in c.evenements]
+    assert any("je lance seul la tâche REPARATION-1" in t for t in textes)
+    assert textes[-1].startswith("Chantier terminé : 2 tâches vérifiées sur 2")
+
+
+def test_les_reparations_sont_bornees_et_le_chantier_ne_se_dit_pas_fini():
+    c = chantier([tache("A")])
+    rouge = (False, "toujours rouge")
+    controles = ControlesReglables(principale=[rouge] * 5)
+    Moteur(c, AgentSimule(perimetres={"A": ["a.py"]}), controles).executer()
+    assert [t.id for t in c.taches] == ["A", "REPARATION-1", "REPARATION-2"]
+    assert not c.termine and controles.controles_principale == 3
+    textes = [e["texte"] for e in c.evenements]
+    assert any(t.startswith("Les contrôles échouent encore sur la branche principale après 2")
+               for t in textes)  # fmt: skip
+    assert textes[-1].startswith("Je m'arrête ici")
+
+
+def test_pas_de_controle_de_main_tant_qu_une_tache_attend_une_decision():
+    c = chantier([tache("A")], plafond_modele="haiku", plafond_effort="low")
+    controles = ControlesReglables(principale=[(False, "rouge")])
+    Moteur(c, AgentSimule({"A": ["ne_sait_pas"]}), controles).executer()
+    assert controles.controles_principale == 0 and len(c.taches) == 1
