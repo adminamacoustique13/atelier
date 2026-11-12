@@ -5,10 +5,10 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
 | F1. Fichiers partagés et leur fusion | en seconde vérification (même vérificateur, à chaud) | Opus | complète, Opus : refusé une fois | 1 + 1 reprise | suite 1 697 dans sa copie, 25 tests de fusion |
-| F2. V3f : six places, vérificateur hors place, réveil, régulateur | en cours | Opus | complète, Opus | 1 | |
+| F2. V3f : six places, vérificateur hors place, réveil, régulateur | en vérification | Opus | complète, Opus | 1 | suite 1 686 dans sa copie (2 tests de mesure réécrits et 1 retiré-remplacé, à juger par le vérificateur), 8 essais verts |
 | F3.1. Un outil refusé ne bloque que si un contrôle du projet en a besoin ; même règle pour le vérificateur | en cours (même ouvrier, à chaud) | Opus | bornée, Opus | 1 | |
 | F5. Un plan trop étroit est élargi avant d'être proposé (la forme du plan, écrite en V1, n'était branchée nulle part) | reportée à un prochain chantier (arrêtée sur décision de la personne responsable) | Opus | | | |
-| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | prête, entre derrière F1 | Sonnet | mécanique : 3 tests qui échouaient avant | 1 | 4 tests ; suite F1+F3+F4 réunies : 1 712 verts, ruff propre |
+| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | à refaire sur la seconde version de F1 (même ouvrier) | Sonnet | mécanique : 3 tests qui échouaient avant | 1 | 4 tests ; suite F1+F3+F4 réunies : 1 712 verts, ruff propre |
 | F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | vérifié | Opus | bornée, Opus : accepté | 1 + 1 reprise | 19 tests nouveaux, 16 mutations sur 18 attrapées (les 2 autres sans effet réel) ; suite 1 691, 8 essais verts |
 
 ## F1. Fichiers partagés et leur fusion
@@ -49,3 +49,5 @@ Ajoutée en route : défaut antérieur relevé par F1. `fnmatch` lit `[slug]` co
 ## Retours des vérificateurs
 - F1, refusé (premier passage) : tout conflit était repris à chaud, même sur un fichier non déclaré ; rien de mécanique n'empêchait des marqueurs d'entrer dans la branche principale ; un second conflit dans un départ faisait monter d'un cran. Ma consigne ne couvrait pas ces cas (critère 7 mesuré seulement par les tests existants, qui ne font passer aucun conflit par le moteur). Reprise à chaud avec ces trois points et cinq retouches (motif ancré dans le fichier d'attributs, motifs `#` et `!` rejetés, règle d'ajout seul dite à l'ouvrier et dans LISEZMOI, vérificateur prévenu du conflit résolu, conflit modifié/supprimé nommé).
 - F3, accepté. Réserves sur le but, reprises en F3.1 : la règle du « premier mot » bloque à tort quand un contrôle commence par `python -m` ou `cd … &&` ; la consigne du vérificateur lui fait encore signaler toute commande refusée ; la règle de `EMPECHE_OUVRIER` est en deux phrases. Laissé pour plus tard : `decider` et `repondre` acceptent une seconde réponse (défaut antérieur : un clic tardif écrase la relance automatique).
+- Réunion d'essai F1 (seconde version) + F2 + F3 sur la branche : trois conflits de texte dans `moteur.py` (un import, la signature de `_prochaine`, la fin de `repondre`), tous des ajouts des deux côtés ; une fois réunis, 1 730 tests verts et ruff propre.
+- Restes de raccord relevés par F2, pour après les vérifications : la reprise après conflit de fusion (F1) doit prendre une place et passer par la suspension ; `Atelier.en_marche()` doit lire `moteur.en_route` ; `archives.GROUPES` ne connaît pas les phases `place`, `jeton`, `pause`.
