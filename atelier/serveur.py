@@ -31,7 +31,7 @@ from atelier.guichet import ARRETE, CHOIX, Guichet
 from atelier.mise_a_jour import Etat, Resultat
 from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire_cahier
 from atelier.moteur import ARRETEE, Moteur, taches_du_plan
-from atelier.rythme import TRANCHE_S, Rythmes
+from atelier.rythme import TRANCHE_S, Rythmes, poste
 
 PAGE = Path(__file__).parent / "tableau" / "index.html"
 ICONE = Path(__file__).parent / "tableau" / "icone.png"
@@ -146,6 +146,11 @@ CHOIX_MODES = [
     {"mode": mode, "libelle": MODES_FR[mode][0], "explication": MODES_FR[mode][1]}
     for mode in MODES_OUVRIERS
 ]
+
+
+def _avant_balises(texte: str) -> str:
+    """Rend le texte de l'orchestrateur coupé à la première balise de plan ou d'outils."""
+    return texte.split(BALISE_PLAN)[0].split(BALISE_OUTILS)[0]
 
 
 def libelle_mode(mode) -> str:
@@ -285,6 +290,8 @@ LIGNES_PAR_GENRE = {
 }
 # Une ligne où l'agent dit l'étape qu'il entame (sa consigne le lui demande) : « Étape : ... ».
 ETAPE = re.compile(r"^[*_#\s]*[ÉéEe]tape\s*(\d+\s*(?:/\s*\d+)?)?\s*[:：]\s*[*_]*\s*(.+?)[*_]*$")
+PROFIL_ILLISIBLE = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+PROFIL_NON_ECRIT = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
 LIGNES_MAX = 30  # lignes d'activité gardées par agent
 LARGEUR_MAX = 300  # caractères par ligne d'activité
 MORCEAU_MAX = LIGNES_MAX * LARGEUR_MAX  # de quoi remplir toutes les lignes : le reste est perdu
@@ -396,8 +403,7 @@ class Activite:
             ]
         agents = []
         for nom, lignes, etape, temps in vus:
-            morceaux = nom.rsplit("-", 2)
-            tache, role = (morceaux[0], morceaux[1]) if len(morceaux) == 3 else ("", nom)
+            tache, role = poste(nom)
             lignes = [ligne.strip() for ligne in lignes if ligne.strip()]
             lignes = lignes[-LIGNES_MAX:]
             depart, derniere = temps or (maintenant, maintenant)
@@ -593,7 +599,7 @@ class Atelier:
         autorisations = self.guichet.ouvertes() if self.guichet else []
         with self.moteur.verrou:
             brouillon = {
-                "texte": self.brouillon["texte"].split(BALISE_PLAN)[0].split(BALISE_OUTILS)[0],
+                "texte": _avant_balises(self.brouillon["texte"]),
                 "outils": list(self.brouillon["outils"]),
             }
             donnees = vue(
@@ -723,9 +729,9 @@ class Atelier:
                     fichier["commandes"] = demande["outils"]["commandes"]
                 self._ecrire_profil(fichier)
             except ValueError:
-                raison = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+                raison = PROFIL_ILLISIBLE
             except OSError:
-                raison = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+                raison = PROFIL_NON_ECRIT
             else:
                 raison = ""
                 valeurs = {"commandes_permises": permises}
@@ -800,9 +806,9 @@ class Atelier:
         try:
             self._inscrire_regle(regle)
         except ValueError:
-            raison = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+            raison = PROFIL_ILLISIBLE
         except OSError:
-            raison = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+            raison = PROFIL_NON_ECRIT
         else:
             with self.moteur.verrou:
                 self.moteur.chantier.noter(f"Autorisation retenue pour ce projet : {regle}.")
@@ -900,9 +906,9 @@ class Atelier:
             fichier[cle] = valeur
             self._ecrire_profil(fichier)
         except ValueError:
-            return "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+            return PROFIL_ILLISIBLE
         except OSError:
-            return "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+            return PROFIL_NON_ECRIT
         return ""
 
     def _noter_mode_reel(self, evenement: dict) -> None:
@@ -1184,7 +1190,7 @@ class Atelier:
         with self.moteur.verrou:
             self.moteur.chantier.cout_usd += reponse.cout_usd
             self.moteur.chantier.tokens += reponse.tokens
-            ecrit = self.brouillon["texte"].split(BALISE_PLAN)[0].split(BALISE_OUTILS)[0].strip()
+            ecrit = _avant_balises(self.brouillon["texte"]).strip()
         if ecrit:
             self._dire(ecrit)
         self._dire("(Réponse arrêtée par toi. Tu peux écrire la suite.)")

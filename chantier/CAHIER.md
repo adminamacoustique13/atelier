@@ -12,7 +12,8 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 |---|---|---|---|---|---|
 | M1. Python : code mort et commentaires faux | vérifié | Sonnet | bornée, Opus : accepté | 1 | 758 tests et contrôle de forme verts ; recherches refaites par le vérificateur |
 | M2. Page : code mort et commentaires faux | vérifié | Sonnet | bornée, Opus : accepté | 1 | 758 tests, contrôle de forme et 365 vérifications dans le navigateur verts ; chaque retrait recherché à nouveau par le vérificateur |
-| M3. Python : petits doublons | à lancer | Sonnet | bornée, Opus | | |
+| M3a. Archives et carte : table des efforts, format d'un coût | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (1 nouveau) ; égalité des deux formats prouvée par script sur 19 valeurs |
+| M3b. Serveur et rythme : nom d'agent, coupe aux balises, phrases du profil | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (2 nouveaux) ; remplacements d'expressions identiques |
 | M4. Serveur : une seule lecture et une seule écriture du profil | vérifié | Opus | complète, Fable : accepté | 1 | 761 tests (3 nouveaux, rouges sur le code de départ) ; 1 104 scénarios comparés avant/après sans différence ; 13 casses sur 14 vues par les tests |
 | M5. Une seule fonction pour appeler git | à lancer, attend une décision | Opus | complète, Fable | | |
 | M6a. Page : les petits calculs écrits plusieurs fois | vérifié | Opus | bornée, Opus : accepté | 1 | 758 tests, 365 vérifications dans le navigateur ; égalité avant/après prouvée par deux scripts indépendants (ouvrier, vérificateur) |
@@ -85,7 +86,7 @@ Les essais réécrivent des images de `chantier/captures/` : l'orchestrateur les
 
 ## Vague 2 — les doublons (détaillée au lancement, sur le code issu de la vague 1)
 
-- **M3** : `archives.EFFORTS` reprend `dosage.EFFORTS_FR` ; `ARRET` et `ARRETE`, même texte sous deux noms, deviennent une seule constante ; le repli d'identité git écrit deux fois.
+- **M3a et M3b** (faites) : la table des efforts, le format d'un coût, le découpage du nom d'un agent, la coupe du brouillon aux balises et les deux phrases du profil écrits une fois. Vérification mécanique seule, comme la leçon le prévoit pour des remplacements de quelques lignes prouvés à l'identique. `ARRET` et `ARRETE`, et le repli d'identité git, touchent des garde-fous : ils rejoignent la décision de M5.
 - **M4** : les trois « lire, modifier, réécrire `chantier/profil.json` » de `serveur.py` passent par une seule fonction, avec une seule gestion d'erreur.
 - **M5** : les cinq fonctions `_git` deviennent une seule. Elle toucherait `atelier/controles.py`, un garde-fou : zone rouge, donc décision de la personne responsable avant de lancer.
 - **M6a** (faite) : les petits calculs de la page écrits une fois. **M6b** : une seule façon d'envoyer une requête, un seul tracé de fil, une seule minuterie de message, là où les versions font vraiment la même chose.
