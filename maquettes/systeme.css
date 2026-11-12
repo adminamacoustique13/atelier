@@ -1,0 +1,32 @@
+/* Système commun de l'Atelier : une palette, trois polices, un en-tête. */
+:root{
+  /* Palette : noir, bleu nuit, ambre, gris clair, blanc. */
+  --noir:#000000; --nuit:#141a2c; --ambre:#e8953a; --gris:#dcdcdc; --blanc:#ffffff;
+  --fond:var(--noir); --surface:#0e1220; --surface-haut:#151b2d;
+  --bord:rgba(220,220,220,.09); --bord-fort:rgba(220,220,220,.16);
+  --texte:var(--blanc); --discret:rgba(220,220,220,.72); --faible:rgba(220,220,220,.42); --eteint:rgba(220,220,220,.1);
+  /* États : ambre = t'attend, blanc = vérifié, bleu acier (le bleu nuit éclairci) = en cours. */
+  --attend:var(--ambre); --verifie:var(--blanc); --en-cours:#8297c4;
+  --sans:"Geist",system-ui,sans-serif; --mono:"Geist Mono",ui-monospace,monospace; --points:"Doto",monospace;
+}
+*{box-sizing:border-box;margin:0}
+body{width:1440px;height:900px;overflow:hidden;position:relative;color:var(--texte);font:400 13px/1.45 var(--sans);-webkit-font-smoothing:antialiased;
+  background:radial-gradient(120% 90% at 50% -25%,#1c2440 0%,#0b0f1b 48%,#000 100%)}
+.mono{font-family:var(--mono)} .points{font-family:var(--points);font-weight:900;letter-spacing:.02em}
+.lab{font:500 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--discret)}
+code{font:400 12px var(--mono);background:rgba(255,255,255,.06);padding:2px 6px;border-radius:5px}
+.btn{display:inline-flex;align-items:center;white-space:nowrap;height:30px;padding:0 13px;border-radius:8px;font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;border:1px solid var(--bord-fort);color:var(--texte)}
+.btn.attend{background:var(--attend);color:#1c0f00;border-color:transparent}
+/* En-tête commun */
+.tete{position:absolute;z-index:10;top:0;left:0;right:0;height:72px;display:flex;align-items:center;gap:26px;padding:0 26px}
+.tete .mot{font:900 26px/1 var(--points);letter-spacing:.02em}
+.tete .projet{font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--discret);padding-left:18px;border-left:1px solid var(--bord)}
+.tete nav{display:flex;gap:2px;margin-left:6px}
+.tete nav a{display:flex;align-items:center;gap:7px;font:500 11px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faible);padding:8px 13px;border-radius:8px;text-decoration:none}
+.tete nav a.on{color:var(--texte);background:rgba(255,255,255,.07)}
+.tete nav a .p{width:6px;height:6px;border-radius:50%;background:var(--attend);box-shadow:0 0 10px var(--attend)}
+.tete nav a .n{color:var(--faible)}
+.tete .pousse{flex:1}
+.tete .vif{display:flex;align-items:center;gap:8px;font:500 11px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--discret)}
+.tete .vif i{width:7px;height:7px;border-radius:50%;background:var(--en-cours);box-shadow:0 0 10px var(--en-cours)}
+.tete .demo{font:500 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faible);border:1px dashed var(--bord-fort);padding:6px 10px;border-radius:7px}

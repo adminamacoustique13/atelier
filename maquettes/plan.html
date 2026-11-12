@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Atelier · Plan</title>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@900&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="systeme.css">
+<style>
+body::before{content:"";position:absolute;inset:72px 0 0 0;background-image:radial-gradient(rgba(255,255,255,.07) 1px,transparent 1.2px);background-size:22px 22px;mask:radial-gradient(80% 80% at 40% 50%,#000 40%,transparent 100%)}
+svg#fils{position:absolute;inset:0;z-index:1}
+.noeud{position:absolute;z-index:2;width:226px;height:66px;border-radius:12px;background:linear-gradient(180deg,var(--surface-haut),var(--surface));border:1px solid var(--bord);box-shadow:0 0 0 1px rgba(0,0,0,.5),0 18px 30px -18px rgba(0,0,0,.9),inset 0 1px 0 rgba(255,255,255,.05);display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:center;padding:0 12px}
+.noeud>div{min-width:0}.noeud .ic{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;background:rgba(255,255,255,.04);border:1px solid var(--bord)}
+.noeud .t{font-size:12.5px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.noeud .t b{font:500 11.5px var(--mono);margin-right:7px;color:var(--discret)}
+.noeud .d{font:400 10.5px var(--mono);color:var(--faible);margin-top:2px;display:flex;justify-content:space-between;white-space:nowrap;gap:8px}
+.noeud.ok{border-color:rgba(255,255,255,.28)}.noeud.ok .ic{background:rgba(255,255,255,.1);border-color:rgba(255,255,255,.35)}
+.noeud.att{border-color:rgba(232,149,58,.55);box-shadow:0 0 0 1px rgba(0,0,0,.5),0 0 30px -6px rgba(232,149,58,.3),inset 0 1px 0 rgba(255,255,255,.05)}.noeud.att .ic{background:rgba(232,149,58,.12);border-color:rgba(232,149,58,.5)}
+.noeud.cours{border-color:rgba(130,151,196,.45)}
+.noeud.lancer{background:rgba(11,11,12,.6);border-style:dashed;border-color:rgba(255,255,255,.14);box-shadow:none}.noeud.lancer .t{color:var(--discret)}
+.noeud.choisi{outline:1.5px solid var(--texte);outline-offset:3px}
+.port{position:absolute;width:7px;height:7px;border-radius:50%;background:var(--fond);border:1.5px solid rgba(255,255,255,.35);top:29px}.port.g{left:-4px}.port.d{right:-4px}
+.etiq{position:absolute;z-index:2;font:500 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faible)}
+.fiche{position:absolute;z-index:3;right:26px;top:84px;bottom:22px;width:350px;border-radius:18px;background:linear-gradient(180deg,var(--surface-haut),var(--surface));border:1px solid var(--bord);box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 24px 40px -24px rgba(0,0,0,.8);padding:20px 22px;display:flex;flex-direction:column;gap:18px}
+.fiche h3{font:500 10px var(--mono);letter-spacing:.1em;text-transform:uppercase;color:var(--faible);margin-bottom:7px}
+.fiche ol{padding-left:18px;display:flex;flex-direction:column;gap:5px;color:var(--discret)}
+.fiche .f{font:400 11.5px var(--mono);color:var(--discret);display:block;padding:3px 0}
+.essai{display:grid;grid-template-columns:14px 1fr auto;gap:8px;align-items:center;font-size:12px;padding:6px 0;border-top:1px solid var(--bord)}
+.essai:first-of-type{border-top:0}
+.bas{position:absolute;left:26px;bottom:22px;z-index:2;display:flex;gap:22px;font:500 10.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--faible)}
+.bas i{display:inline-block;width:18px;height:0;border-top:2px solid;vertical-align:middle;margin-right:7px}
+</style></head><body>
+<header class="tete"><span class="mot">ATELIER</span><span class="projet">Moteur de calcul ▾</span><nav><a href="conversation.html">Conversation<span class="p"></span></a><a href="chantier.html">Chantier</a><a href="salle.html">Salle</a><a href="plan.html" class="on">Plan<span class="n">6</span></a><a href="code.html">Code</a></nav><span class="pousse"></span><span class="vif"><i></i>3 agents au travail</span><span class="demo">Démonstration</span></header>
+<svg id="fils" width="1440" height="900"><defs>
+  <filter id="lueur" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="4"/></filter>
+  <filter id="lueur2" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="2.5"/></filter>
+</defs><g id="g-glow" filter="url(#lueur)"></g><g id="g-fils"></g><g id="g-pulses"></g></svg>
+<div id="noeuds"></div>
+<span class="etiq" style="left:300px;top:150px">Étape 1 · en parallèle</span>
+<span class="etiq" style="left:574px;top:150px">Étape 2 · après l'étape 1</span>
+<span class="etiq" style="left:812px;top:478px">Contrôle et livraison</span>
+
+<div class="noeud cours" style="left:26px;top:392px;width:226px;height:94px;align-items:start;padding-top:14px">
+  <span class="ic"><svg width="16" height="16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="1.6"/><path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" fill="none" stroke="#8297c4" stroke-width="1.6" stroke-linecap="round"/></svg></span>
+  <div><div class="t">Orchestrateur</div><div class="d"><span>Fable · élevé</span></div><div style="display:flex;gap:3px;margin-top:10px" id="seg"></div></div><span class="port d" style="top:43px"></span>
+</div>
+
+<aside class="fiche">
+  <div><div style="display:flex;justify-content:space-between;align-items:baseline"><span class="points" style="font-size:34px;line-height:1">A</span><span class="lab" style="color:var(--attend)">● T'attend</span></div>
+  <p style="font-size:16px;font-weight:500;margin-top:10px">Lecture des données d'entrée</p>
+  <p class="mono" style="font-size:11px;color:var(--faible);margin-top:4px">Sonnet · effort moyen · tâche mécanique</p></div>
+  <div style="border:1px solid rgba(232,149,58,.35);background:rgba(232,149,58,.05);border-radius:12px;padding:12px 14px">
+    <p style="font-size:12.5px">Veut lancer <code>npm install left-pad</code></p>
+    <div style="display:flex;gap:6px;margin-top:10px"><span class="btn attend" style="height:28px;padding:0 10px">Une fois</span><span class="btn" style="height:28px;padding:0 10px">Toujours</span><span class="btn" style="height:28px;padding:0 10px">Refuser</span></div>
+  </div>
+  <section><h3>Pourquoi</h3><p style="color:var(--discret)">Les formules ont besoin des mesures sous une forme unique, quelle que soit la source.</p></section>
+  <section><h3>Critères de vérification</h3><ol><li>Lit les trois formats d'entrée fournis</li><li>Rejette une ligne mal formée avec un message clair</li><li>Les tests de lecture passent</li></ol></section>
+  <section><h3>Périmètre</h3><span class="f">src/entree.py</span><span class="f">tests/test_entree.py</span></section>
+  <section><h3>Tentatives</h3>
+    <div class="essai"><span style="width:7px;height:7px;border-radius:50%;background:var(--attend)"></span><span>Sonnet · moyen</span><span class="mono" style="font-size:11px;color:var(--faible)">en cours · 0,41 $</span></div>
+  </section>
+</aside>
+
+<div class="bas"><span><i style="border-color:var(--verifie)"></i>Vérifié</span><span><i style="border-color:var(--attend)"></i>T'attend</span><span><i style="border-color:var(--en-cours)"></i>En cours</span><span><i style="border-top:1px dashed var(--faible)"></i>À venir</span></div>
+<script>
+const NS="http://www.w3.org/2000/svg";const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+const C={ok:"#ffffff",att:"#e8953a",cours:"#8297c4",lancer:"rgba(255,255,255,.2)"};
+const W=226;
+const N={A:[300,180,"att","Lecture des données d'entrée","Sonnet · moyen","t'attend"],B:[300,300,"cours","Formule de la norme","Fable · max","rédige"],C:[300,420,"ok","Jeu de tests de référence","Sonnet · moyen ↑","vérifiée"],E:[300,540,"ok","Contrat entre modules","Opus · élevé","vérifiée"],
+ D:[574,180,"lancer","Liaison avec l'interface","Haiku · faible","attend A, B"],B1:[574,300,"lancer","Cas limite : valeur nulle","Sonnet · moyen","attend B"],V:[812,506,"ok","Vérificateur","Sonnet · lecture","2 reçus"],L:[812,630,"ok","Livré sur main","2 tâches",""],T:[812,96,"att","Toi","1 autorisation",""]};
+const IC={ok:'<svg width="14" height="14"><path d="M3 7.5l2.6 2.6L11 4.5" fill="none" stroke="#ffffff" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',att:'<svg width="14" height="14"><path d="M7 3v5" stroke="#e8953a" stroke-width="1.7" stroke-linecap="round"/><circle cx="7" cy="11" r="1" fill="#e8953a"/></svg>',cours:'<svg width="16" height="16"><circle cx="8" cy="8" r="5.5" fill="none" stroke="rgba(255,255,255,.15)" stroke-width="1.6"/><path d="M8 2.5a5.5 5.5 0 0 1 5.5 5.5" fill="none" stroke="#8297c4" stroke-width="1.6" stroke-linecap="round"/></svg>',lancer:'<svg width="14" height="14"><circle cx="7" cy="7" r="4.5" fill="none" stroke="rgba(255,255,255,.3)" stroke-dasharray="2 2"/></svg>',toi:'<svg width="14" height="14" viewBox="0 0 14 14"><circle cx="7" cy="5" r="2.6" fill="none" stroke="#e8953a" stroke-width="1.4"/><path d="M2.5 12.5c.6-2.4 2.4-3.6 4.5-3.6s3.9 1.2 4.5 3.6" fill="none" stroke="#e8953a" stroke-width="1.4"/></svg>'};
+const box=document.getElementById("noeuds");
+for(const k in N){const[x,y,st,t,d,e]=N[k];const id=k=="B1"?"B.1":("ABCDE".includes(k)?k:"");box.insertAdjacentHTML("beforeend",`<div class="noeud ${st}${k=="A"?" choisi":""}" style="left:${x}px;top:${y}px"><span class="ic">${k=="T"?IC.toi:IC[st]}</span><div><div class="t">${id?`<b>${id}</b>`:""}${t}</div><div class="d"><span>${d}</span><span style="color:${st=="lancer"?"var(--faible)":C[st]}">${e}</span></div></div><span class="port g"></span>${k=="T"?"":'<span class="port d"></span>'}</div>`)}
+function route(pts,r=10){let d=`M${pts[0][0]},${pts[0][1]}`;for(let i=1;i<pts.length-1;i++){const[p0,p1,p2]=[pts[i-1],pts[i],pts[i+1]];const v1=[Math.sign(p1[0]-p0[0]),Math.sign(p1[1]-p0[1])],v2=[Math.sign(p2[0]-p1[0]),Math.sign(p2[1]-p1[1])];d+=` L${p1[0]-v1[0]*r},${p1[1]-v1[1]*r} Q${p1[0]},${p1[1]} ${p1[0]+v2[0]*r},${p1[1]+v2[1]*r}`}const l=pts[pts.length-1];return d+` L${l[0]},${l[1]}`}
+const gG=document.getElementById("g-glow"),gF=document.getElementById("g-fils"),gP=document.getElementById("g-pulses");
+function fil(pts,st,pulses=[]){const d=route(pts),col=C[st];
+ if(st!="lancer")gG.append(el("path",{d,stroke:col,"stroke-width":st=="cours"?2:3,fill:"none",opacity:st=="cours"?.3:.5}));
+ const p=el("path",{d,stroke:col,"stroke-width":st=="lancer"?1:1.6,fill:"none","stroke-dasharray":st=="lancer"?"3 4":"",opacity:st=="cours"?.75:1});gF.append(p);const len=p.getTotalLength();
+ pulses.forEach(f=>{const q=p.getPointAtLength(len*f);gP.append(el("circle",{cx:q.x,cy:q.y,r:6,fill:col,opacity:.35,filter:"url(#lueur2)"}));gP.append(el("circle",{cx:q.x,cy:q.y,r:2.4,fill:"#fff"}))})}
+const R=k=>[N[k][0]+W,N[k][1]+33],L=k=>[N[k][0],N[k][1]+33];const O=[256,435],bx=278;
+fil([O,[bx,435],[bx,L("A")[1]],L("A")],"att");fil([O,[bx,435],[bx,L("B")[1]],L("B")],"cours",[.75]);
+fil([O,[bx,435],[bx,L("C")[1]],L("C")],"ok");fil([O,[bx,435],[bx,L("E")[1]],L("E")],"ok");
+fil([[460,180],[460,129],L("T")],"att",[.4,.8]);
+fil([R("B"),L("B1")],"lancer");fil([R("B"),[550,333],[550,213],L("D")],"lancer");fil([R("A"),[550,213],L("D")],"lancer");
+fil([R("C"),[784,453],[784,539],L("V")],"ok",[.55]);fil([R("E"),[784,573],[784,539],L("V")],"ok");
+fil([R("B1"),[798,333],[798,539]],"lancer");fil([R("D"),[798,213],[798,333]],"lancer");
+fil([[925,572],[925,630]],"ok",[.5]);
+document.getElementById("seg").innerHTML=["ok","ok","att","cours","lancer","lancer"].map(s=>`<i style="width:22px;height:4px;border-radius:2px;background:${s=="lancer"?"rgba(255,255,255,.1)":C[s]}"></i>`).join("");
+</script></body></html>
