@@ -18,6 +18,10 @@ from claude_agent_sdk import PermissionResultAllow  # noqa: E402
 
 from atelier import agents  # noqa: E402
 from atelier.agents import (  # noqa: E402
+    COMMANDES_DEV,
+    GIT_LECTURE,
+    LECTURE_SHELL,
+    WEB_LECTURE,
     AgentClaude,
     AgentSimule,
     Resultat,
@@ -320,10 +324,10 @@ def test_une_regle_retenue_entre_deux_messages_vaut_des_le_suivant():
     profil = {"autorisations": []}
     agent, fabrique = claude([fin()], [fin()], profil=profil)
     converser(agent)
-    assert "Bash(ls:*)" not in fabrique.clients[0].options.allowed_tools
-    profil["autorisations"] = ["Bash(ls:*)"]  # « Toujours pour ce projet », écrit à chaud
+    assert "Bash(curl:*)" not in fabrique.clients[0].options.allowed_tools
+    profil["autorisations"] = ["Bash(curl:*)"]  # « Toujours pour ce projet », écrit à chaud
     converser(agent, reprise=True)
-    assert fabrique.clients[1].options.allowed_tools[-1] == "Bash(ls:*)"
+    assert fabrique.clients[1].options.allowed_tools[-1] == "Bash(curl:*)"
 
 
 def test_la_conversation_reste_en_lecture_seule_sans_les_commandes_du_projet():
@@ -337,8 +341,10 @@ def test_la_conversation_reste_en_lecture_seule_sans_les_commandes_du_projet():
     # les commandes permises d'office aux ouvriers (ici npm), non.
     retenues = ["Bash(npm install:*)", "WebFetch(domain:docs.python.org)"]
     assert options.allowed_tools[-2:] == retenues
-    assert all(o.startswith("Bash(git ") for o in options.allowed_tools[3:-2])
+    socle = GIT_LECTURE + LECTURE_SHELL + WEB_LECTURE
+    assert options.allowed_tools[3:-2] == socle
     assert "Bash(npm:*)" not in options.allowed_tools
+    assert not set(COMMANDES_DEV) & set(options.allowed_tools)
     assert "Bash(git status:*)" in options.allowed_tools
     assert set(options.disallowed_tools) >= ECRITURE
     assert options.permission_mode == "default"
@@ -915,3 +921,55 @@ def test_les_gestes_disent_quel_fichier_et_quelle_commande():
     sous_agent = {"name": "Task", "input": {"description": "Lire les tests"}}
     assert decrire_outil(sous_agent) == "Confie à un sous-agent : Lire les tests"
     assert decrire_outil({"name": "Inconnu", "input": None}) == "Inconnu"
+
+
+# --- Le socle permis d'avance : de quoi travailler sans carte ------------------------------
+
+
+@pytest.mark.parametrize("contexte, lecture_seule", [(OUVRIER, False), (VERIFICATEUR, True)])
+def test_les_outils_courants_sont_permis_quel_que_soit_le_profil(contexte, lecture_seule):
+    agent, fabrique = claude([fin()], profil={"commandes_permises": []})
+    lancer(agent, contexte, lecture_seule)
+    allowed = set(fabrique.clients[0].options.allowed_tools)
+    attendus = {"Bash(ls:*)", "Bash(cat:*)", "Bash(pytest:*)", "Bash(ruff:*)", "Bash(node:*)"}
+    assert attendus | {"WebSearch"} <= allowed
+    assert set(COMMANDES_DEV + LECTURE_SHELL + GIT_LECTURE) <= allowed
+    assert "WebFetch" not in allowed
+
+
+def test_le_socle_ne_contient_ni_lanceur_ni_commande_qui_detruit():
+    from atelier.guichet import INTERPRETES, LANCEURS
+
+    noms = [r[len("Bash("):-len(":*)")] for r in LECTURE_SHELL + COMMANDES_DEV]
+    assert not set(noms) & LANCEURS
+    lecture = {r[len("Bash("):-len(":*)")] for r in LECTURE_SHELL}
+    assert not lecture & INTERPRETES
+    assert not lecture & {"sed", "awk", "find", "xargs", "sort", "rg", "less", "more", "echo"}
+    assert not set(noms) & {"rm", "mv", "cp", "chmod", "chown", "curl", "wget", "git"}
+
+
+@pytest.mark.parametrize("contexte, lecture_seule", [(OUVRIER, False), (VERIFICATEUR, True)])
+def test_les_regles_du_chantier_sont_donnees_a_chaque_agent(contexte, lecture_seule):
+    profil = {"autorisations": ["Bash(sed:*)"]}
+    agent, fabrique = claude([fin()], [fin()], profil=profil)
+    agent.regles_chantier = lambda: ["Bash(sed:*)", "Bash(curl:*)", "Write", "Bash(a,b)"]
+    lancer(agent, contexte, lecture_seule)
+    converser(agent)
+    for client in fabrique.clients:
+        allowed = client.options.allowed_tools
+        assert allowed.count("Bash(sed:*)") == 1 and "Bash(curl:*)" in allowed
+        assert allowed.index("Bash(curl:*)") > allowed.index("Bash(sed:*)")
+        assert "Bash(a,b)" not in allowed
+    assert ("Write" in fabrique.clients[0].options.allowed_tools) is not lecture_seule
+    assert "Write" not in fabrique.clients[1].options.allowed_tools
+
+
+def test_une_erreur_en_lisant_les_regles_du_chantier_n_en_donne_aucune():
+    agent, fabrique = claude([fin()])
+
+    def casse():
+        raise RuntimeError("état illisible")
+
+    agent.regles_chantier = casse
+    assert lancer(agent).ok
+    assert fabrique.clients[0].options.allowed_tools == agent._outils(False)

@@ -193,3 +193,73 @@ def test_la_copie_du_verificateur_montre_le_livrable_et_n_atteint_rien(tmp_path)
     seconde = controles.copie_de_verification(SimpleNamespace(id="B"), dossier)
     assert seconde == premiere and not (seconde / "reste.txt").exists()
     controles.jeter_copie(seconde)
+
+
+# --- l'intégration contrôlée avant d'entrer dans la branche principale ---------------------
+
+
+def _git(dossier, *arguments):
+    return subprocess.run(
+        ["git", *arguments], cwd=dossier, check=True, capture_output=True, text=True
+    ).stdout
+
+
+def _tache(identifiant):
+    return SimpleNamespace(id=identifiant, titre=f"Tâche {identifiant}")
+
+
+def test_une_tache_entre_seule_sans_rejouer_les_controles(tmp_path):
+    depot_d_essai(tmp_path)
+    controles = ControlesGit(tmp_path, commandes=["test -f a.py"])
+    dossier = controles.preparer(_tache("A"))
+    (dossier / "a.py").write_text("a\n", "utf-8")
+    appels = []
+    reel = controles.mecaniques
+    controles.mecaniques = lambda t, d: (appels.append(d), reel(t, d))[1]
+    assert controles.enregistrer(_tache("A"), dossier) == ""
+    assert appels == []  # la branche principale n'a pas bougé : rien à rejouer
+    assert (tmp_path / "a.py").exists() and not dossier.exists()
+
+
+def test_deux_taches_sures_seules_mais_rouges_ensemble_n_entrent_pas_toutes_deux(tmp_path):
+    depot_d_essai(tmp_path)
+    # Le contrôle ne passe que si a.py et b.py ne sont pas là en même temps.
+    controles = ControlesGit(tmp_path, commandes=["test ! -f a.py -o ! -f b.py"])
+    a, b = controles.preparer(_tache("A")), controles.preparer(_tache("B"))
+    (a / "a.py").write_text("a\n", "utf-8")
+    (b / "b.py").write_text("b\n", "utf-8")
+    assert controles.enregistrer(_tache("A"), a) == ""
+    probleme = controles.enregistrer(_tache("B"), b)
+    assert probleme.startswith("Les contrôles échouent une fois ce travail mêlé")
+    assert (tmp_path / "a.py").exists() and not (tmp_path / "b.py").exists()
+    assert "B : Tâche B" not in _git(tmp_path, "log", "--format=%s")
+    controles.annuler(_tache("B"), b)  # le moteur jette la tentative, comme pour tout refus
+    assert not b.exists()
+
+
+def test_un_conflit_avec_la_branche_principale_est_rendu_sans_rien_casser(tmp_path):
+    depot_d_essai(tmp_path)
+    controles = ControlesGit(tmp_path)
+    a, b = controles.preparer(_tache("A")), controles.preparer(_tache("B"))
+    (a / "LISEZMOI.md").write_text("version A\n", "utf-8")
+    (b / "LISEZMOI.md").write_text("version B\n", "utf-8")
+    assert controles.enregistrer(_tache("A"), a) == ""
+    probleme = controles.enregistrer(_tache("B"), b)
+    assert probleme.startswith("Conflit avec la branche principale")
+    assert (tmp_path / "LISEZMOI.md").read_text("utf-8") == "version A\n"
+    assert _git(b, "status", "--porcelain").strip() == ""  # la fusion ratée est défaite
+    assert _git(tmp_path, "status", "--porcelain", "--untracked-files=no").strip() == ""
+
+
+def test_la_branche_principale_se_controle_dans_une_copie_propre(tmp_path):
+    depot_d_essai(tmp_path)
+    commandes = ["test ! -f brouillon.txt", "test -f LISEZMOI.md"]
+    controles = ControlesGit(tmp_path, commandes=commandes)
+    (tmp_path / "brouillon.txt").write_text("pas enregistré\n", "utf-8")
+    assert controles.controler_principale()[0] is True  # le brouillon non enregistré n'y est pas
+    controles.commandes = ["test -f absent.txt"]
+    passe, sortie = controles.controler_principale()
+    assert not passe and "$ test -f absent.txt" in sortie
+    assert not (tmp_path / ".atelier" / "arbres" / "_principale").exists()
+    assert "arbres/_principale" not in _git(tmp_path, "worktree", "list")
+    assert ControlesGit(tmp_path).controler_principale() == (True, "")  # sans commande

@@ -89,7 +89,8 @@ const portLibre = () => new Promise((r) => { const s = net.createServer(); s.lis
     await post('/api/carte/analyser');
     await page.goto(base + '/#code');
     await page.locator('#explorateur .ligne-arbre').first().waitFor({ timeout: 30000 });
-    ok('l\'explorateur et le plan du code se voient ensemble', await page.locator('#explorateur').isVisible() && await page.locator('#plan').isVisible());
+    await page.locator('#code-page .cd-chaine').waitFor({ timeout: 30000 });
+    ok('l\'explorateur et la chaîne du code se voient ensemble', await page.locator('#explorateur').isVisible() && await page.locator('#code-page .cd-chaine').isVisible());
     await page.screenshot({ path: path.join(CAPTURES, 'VISUEL-code.png') });
 
     // Fenêtre étroite : rien ne déborde sur le côté.

@@ -17,6 +17,8 @@ from pathlib import Path
 
 TOUJOURS_PERMIS = ("chantier/relais/*",)
 CAHIER = "chantier/CAHIER.md"
+# Combien de fois une tâche rejoue la branche principale qui a bougé pendant ses contrôles.
+ESSAIS_INTEGRATION = 3
 
 
 def expliquer_refus_git(message: str) -> str:
@@ -93,8 +95,11 @@ class ControlesSimules:
     def mecaniques(self, tache, dossier) -> tuple[bool, str]:
         return True, ""
 
-    def enregistrer(self, tache, dossier) -> None:
-        return None
+    def enregistrer(self, tache, dossier) -> str:
+        return ""
+
+    def controler_principale(self) -> tuple[bool, str]:
+        return True, ""
 
     def annuler(self, tache, dossier) -> None:
         return None
@@ -216,17 +221,89 @@ class ControlesGit:
                 return False, "\n".join(journal)
         return True, "\n".join(journal)
 
-    def enregistrer(self, tache, dossier) -> None:
-        """Enregistre le travail vérifié et le fait entrer dans la branche principale."""
-        self._git("add", "-A", dossier=dossier)
-        if self._git("status", "--porcelain", dossier=dossier).strip():
-            self._git("commit", "-q", "-m", f"{tache.id} : {tache.titre}", dossier=dossier)
-        with self.verrou_fusion:
-            self._git("merge", "-q", "--no-edit", f"tache/{tache.id}")
-            self._git("worktree", "remove", "--force", str(dossier))
-            self._git("branch", "-q", "-D", f"tache/{tache.id}")
-            self.enregistrer_cahier(f"Cahier : {tache.id} enregistrée")
+    def enregistrer(self, tache, dossier) -> str:
+        """Fait entrer le travail vérifié dans la branche principale ; rend "" ou le problème.
+
+        Si la branche principale a avancé depuis la préparation (une autre tâche est entrée),
+        elle est d'abord fusionnée dans la copie de la tâche, et les commandes du projet y sont
+        relancées : on n'enregistre que ce qui a été contrôlé tel quel. Un conflit ou un contrôle
+        qui échoue rend le problème, et rien n'entre dans la branche principale.
+        """
+        try:
+            self._git("add", "-A", dossier=dossier)
+            if self._git("status", "--porcelain", dossier=dossier).strip():
+                self._git("commit", "-q", "-m", f"{tache.id} : {tache.titre}", dossier=dossier)
+            for _ in range(ESSAIS_INTEGRATION):
+                base = self._git("rev-parse", "HEAD").strip()
+                probleme = self._integrer(base, dossier)
+                if probleme:
+                    return probleme
+                with self.verrou_fusion:
+                    if self._git("rev-parse", "HEAD").strip() != base:
+                        continue  # une autre tâche est entrée pendant les contrôles : on rejoue
+                    self._git("merge", "-q", "--ff-only", f"tache/{tache.id}")
+                    self._git("worktree", "remove", "--force", str(dossier))
+                    self._git("branch", "-q", "-D", f"tache/{tache.id}")
+                    self.enregistrer_cahier(f"Cahier : {tache.id} enregistrée")
+                break
+            else:
+                return "La branche principale a bougé à chaque contrôle : je recommence plus tard."
+        except RuntimeError as erreur:
+            return f"L'enregistrement dans git a échoué : {erreur}"
         self.envoyer()
+        return ""
+
+    def _integrer(self, base: str, dossier) -> str:
+        """Fusionne `base` dans la copie de la tâche et relance les contrôles ; rend le problème."""
+        if self._ancetre(base, dossier):
+            return ""  # rien de neuf : les contrôles ont déjà porté sur ce code
+        try:
+            self._git("merge", "-q", "--no-edit", base, dossier=dossier)
+        except RuntimeError:
+            with suppress(RuntimeError):
+                self._git("merge", "--abort", dossier=dossier)
+            return (
+                "Conflit avec la branche principale, où d'autres tâches sont entrées entre-temps : "
+                "la tentative suivante repart de la branche principale actuelle."
+            )
+        passe, sortie = self.mecaniques(None, dossier)
+        if passe:
+            return ""
+        return (
+            "Les contrôles échouent une fois ce travail mêlé à la branche principale actuelle :\n"
+            + sortie[-1500:]
+        )
+
+    def _ancetre(self, base: str, dossier) -> bool:
+        """Dit si `base` est déjà contenu dans la branche de la copie de travail."""
+        resultat = subprocess.run(
+            ["git", "merge-base", "--is-ancestor", base, "HEAD"],
+            cwd=dossier, capture_output=True, text=True,
+        )  # fmt: skip
+        return resultat.returncode == 0
+
+    def controler_principale(self) -> tuple[bool, str]:
+        """Lance les commandes du projet sur la branche principale, dans une copie propre.
+
+        Une copie à part, et non le dossier du projet : ni fichier en cours d'édition, ni
+        copies de travail des tâches (rangées sous .atelier/) ne se mêlent aux contrôles.
+        """
+        if not self.commandes:
+            return True, ""
+        copie = self.depot / ".atelier" / "arbres" / "_principale"
+        try:
+            with self.verrou_fusion:
+                if copie.exists():
+                    self._git("worktree", "remove", "--force", str(copie))
+                copie.parent.mkdir(parents=True, exist_ok=True)
+                self._git("worktree", "add", "-q", "--detach", str(copie), "HEAD")
+            return self.mecaniques(None, copie)
+        except RuntimeError as erreur:
+            return False, f"Impossible de préparer la copie de contrôle : {erreur}"
+        finally:
+            if copie.exists():
+                with self.verrou_fusion, suppress(RuntimeError):
+                    self._git("worktree", "remove", "--force", str(copie))
 
     def enregistrer_cahier(self, message: str) -> None:
         """Fait entrer le cahier du chantier dans l'historique, et lui seul."""

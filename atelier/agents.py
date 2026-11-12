@@ -48,6 +48,31 @@ GIT_LECTURE = [
     )
 ]
 
+# Des commandes qui lisent sans rien changer ni rien lancer d'autre, permises à tous les agents.
+# Écartées exprès : sed, awk, find, xargs, sort et rg, qui savent exécuter une autre commande
+# (sed e, system(), -exec, --compress-program, --pre), et less ou more (commande « ! »).
+LECTURE_SHELL = [
+    f"Bash({c}:*)"
+    for c in (
+        "ls", "cat", "head", "tail", "wc", "grep", "diff", "cmp", "uniq", "cut", "tr", "nl",
+        "column", "file", "stat", "du", "pwd", "which", "tree", "basename", "dirname",
+        "realpath", "jq", "md5sum", "shasum", "sha256sum",
+    )
+]  # fmt: skip
+# Les outils courants du développement, permis d'avance aux ouvriers et aux vérificateurs, quel
+# que soit le profil : sans eux, chaque tâche ouvrait des cartes et s'arrêtait en ton absence.
+# rm, mv et cp n'y sont pas : le mode « Accepter les modifications » les laisse passer dans la
+# copie de travail, et seulement là.
+COMMANDES_DEV = [
+    f"Bash({c}:*)"
+    for c in (
+        "python", "pip", "pip3", "pytest", "ruff", "mypy", "black", "node", "tsc", "pnpm",
+        "yarn", "make", "go", "rustc", "mkdir", "touch",
+    )
+]  # fmt: skip
+# Chercher sur le web ne touche à rien ; lire une page (WebFetch) passe toujours par une carte.
+WEB_LECTURE = ["WebSearch"]
+
 # Les cinq modes que la personne responsable peut choisir pour les ouvriers. Le mode
 # « bypassPermissions » n'en fait pas partie : il n'est accepté nulle part.
 MODES_OUVRIERS = ("default", "acceptEdits", "plan", "dontAsk", "auto")
@@ -66,6 +91,7 @@ DEMANDE_SIMULEE = {"command": "npm install left-pad"}
 CHOIX_LUS = {
     "une_fois": "autorisé une fois",
     "toujours": "autorisé pour ce projet",
+    "chantier": "autorisé pour ce chantier",
     "non": "refusé",
 }
 
@@ -253,17 +279,29 @@ class AgentClaude(_ModeDesOuvriers):
         self.guichet = None
         self.sur_evenement = None
         self.source_connexion = ""
+        # Rend les règles retenues pour le chantier en cours ; le serveur la branche sur son état.
+        self.regles_chantier = list
         self._postes = _Postes(lire_mode(self.profil.get("mode_ouvriers")))
 
     def _outils(self, lecture_seule: bool) -> list[str]:
         """Rend la liste des outils permis : lecture, commandes du projet, écriture si permise."""
         commandes = [f"Bash({c}:*)" for c in self.profil.get("commandes_permises", [])]
-        outils = OUTILS_LECTURE + commandes + GIT_LECTURE
+        outils = OUTILS_LECTURE + commandes + COMMANDES_DEV + GIT_LECTURE + LECTURE_SHELL
+        outils += WEB_LECTURE
         return outils if lecture_seule else outils + OUTILS_ECRITURE
 
     def _autorisations(self, lecture_seule: bool) -> list[str]:
-        """Les règles simples retenues du profil ; en lecture seule, sans celles qui écrivent."""
+        """Les règles simples retenues, du profil puis du chantier en cours, sans doublon.
+
+        En lecture seule, sans celles qui écrivent. Une erreur en lisant celles du chantier
+        n'en donne aucune : l'outil repassera par le guichet.
+        """
+        try:
+            du_chantier = self.regles_chantier()
+        except Exception:
+            du_chantier = []
         regles = _regles_simples(self.profil.get("autorisations"))
+        regles += [r for r in _regles_simples(du_chantier) if r not in regles]
         return [r for r in regles if not (lecture_seule and _ecrit(r))]
 
     def _alias(self, modele: str) -> str:
@@ -322,7 +360,8 @@ class AgentClaude(_ModeDesOuvriers):
             # En conversation : lecture seule, sans les commandes permises d'office aux ouvriers ;
             # mais les règles que la personne a retenues (« Toujours pour ce projet ») valent aussi
             # ici, sauf celles qui écrivent : sinon la même carte reviendrait à chaque message.
-            outils_permis=OUTILS_LECTURE + GIT_LECTURE + self._autorisations(lecture_seule=True),
+            outils_permis=OUTILS_LECTURE + GIT_LECTURE + LECTURE_SHELL + WEB_LECTURE
+            + self._autorisations(lecture_seule=True),
             outils_interdits=list(ECRITURE),
             mode_permission="default", role_ajoute=ROLE_ORCHESTRATEUR,
             session=session, reprise=reprise,
