@@ -6,8 +6,8 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 |---|---|---|---|---|---|
 | F1. Fichiers partagés et leur fusion | en vérification | Opus | complète, Opus | 1 | |
 | F2. V3f : six places, vérificateur hors place, réveil, régulateur | en cours | Opus | complète, Opus | 1 | |
-| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | en cours | Sonnet | mécanique, tests qui échouent avant | 1 | |
-| F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | reprise à chaud (consigne de l'ouvrier sur « EMPÊCHÉ ») | Opus | bornée, Opus | 1 | |
+| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | prête, entre derrière F1 | Sonnet | mécanique : 3 tests qui échouaient avant | 1 | 4 tests ; suite F1+F3+F4 réunies : 1 712 verts, ruff propre |
+| F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | en vérification (après une reprise à chaud) | Opus | bornée, Opus | 1 + 1 reprise | |
 
 ## F1. Fichiers partagés et leur fusion
 Périmètre : `atelier/controles.py`, `atelier/plan.py`, `atelier/consignes.py` (`REGLES_DECOUPAGE`, message de reprise après conflit), `atelier/moteur.py` (`_prochaine`, `_enregistrer`, la reprise après conflit), tests nouveaux.
