@@ -4,9 +4,10 @@ Contrat : `chantier/CONTRAT.md`. Les trois tâches partent ensemble, chacune dan
 
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| F1. Fichiers partagés et leur fusion | en cours | Opus | complète, Opus | 1 | |
+| F1. Fichiers partagés et leur fusion | en vérification | Opus | complète, Opus | 1 | |
 | F2. V3f : six places, vérificateur hors place, réveil, régulateur | en cours | Opus | complète, Opus | 1 | |
-| F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | en cours | Opus | bornée, Opus | 1 | |
+| F4. Un chemin à crochets se reconnaît lui-même dans un périmètre (relevé par F1) | en cours | Sonnet | mécanique, tests qui échouent avant | 1 | |
+| F3. V3b.1 : pas de blocage sur un outil refusé sans rapport ; relance par une méthode nommée | reprise à chaud (consigne de l'ouvrier sur « EMPÊCHÉ ») | Opus | bornée, Opus | 1 | |
 
 ## F1. Fichiers partagés et leur fusion
 Périmètre : `atelier/controles.py`, `atelier/plan.py`, `atelier/consignes.py` (`REGLES_DECOUPAGE`, message de reprise après conflit), `atelier/moteur.py` (`_prochaine`, `_enregistrer`, la reprise après conflit), tests nouveaux.
@@ -35,3 +36,10 @@ Périmètre : `atelier/moteur.py` (`_avec_empechements`, `_cause_de_blocage`, la
 5. `Moteur.relancer_au_meme_niveau(demande_id) -> bool`, utilisée par le serveur à la place de `options[0]`.
 6. La question d'un blocage pour refus répété dit le vrai nombre de refus.
 7. Suite et essais inchangés.
+
+## F4. Un chemin à crochets se reconnaît lui-même dans un périmètre
+Ajoutée en route : défaut antérieur relevé par F1. `fnmatch` lit `[slug]` comme une classe de caractères, donc `app/[slug]/page.tsx` est déclaré hors de son propre périmètre, et deux tâches sur ce fichier partent ensemble. Périmètre : trois fonctions de `atelier/controles.py`, tests nouveaux. Part sur la base F1 non encore vérifiée.
+
+## Écarts acceptés en route
+- F1, critère 5 : la copie de la tâche reçoit le résultat de la fusion, marqueurs compris, comme un changement non enregistré posé sur la branche principale actuelle, au lieu d'une fusion git restée en cours (le test existant qui veut qu'une fusion ratée soit défaite reste vert ; le périmètre et le vérificateur ne voient que le travail de la tâche).
+- F3 : la consigne générale de l'ouvrier (`EMPECHE_OUVRIER`) entre dans son périmètre, pour qu'un outil refusé sans rapport ne soit plus signalé « EMPÊCHÉ ».
