@@ -6,6 +6,7 @@ Aucun appel réel : des agents simulés, un guichet de l'atelier, et le vrai ser
 
 import json
 import pathlib
+import shutil
 import sys
 import threading
 import time
@@ -16,6 +17,7 @@ from argparse import Namespace
 import pytest
 
 from atelier import mise_a_jour as mise_a_jour_module
+from atelier import modele as modele_module
 from atelier.__main__ import commande_instantanes, projet_simule
 from atelier.agents import AgentClaude, AgentSimule, Resultat
 from atelier.controles import ControlesSimules
@@ -27,6 +29,7 @@ from atelier.moteur import Moteur
 from atelier.projets import Projets
 from atelier.serveur import (
     ACCEPTER_OUTILS,
+    REFUSER_OUTILS,
     Activite,
     Atelier,
     SuiviMiseAJour,
@@ -1010,14 +1013,14 @@ def test_un_reglage_d_outils_sur_un_profil_inutilisable_n_applique_rien_et_le_di
     atelier._proposer_outils({"commandes_permises": ["make"], "commandes": ["make test"]})
     demande = atelier.moteur.chantier.demandes[0]
     if ecriture_refusee:
-        ecrire = pathlib.Path.write_text
+        remplacer = modele_module.os.replace
 
-        def refuser_le_profil(soi, *arguments, **options):
-            if soi == chemin:
+        def refuser_le_profil(source, cible):
+            if pathlib.Path(cible) == chemin:
                 raise PermissionError("écriture refusée")
-            return ecrire(soi, *arguments, **options)
+            return remplacer(source, cible)
 
-        monkeypatch.setattr(pathlib.Path, "write_text", refuser_le_profil)
+        monkeypatch.setattr(modele_module.os, "replace", refuser_le_profil)
 
     atelier.decider(demande["id"], ACCEPTER_OUTILS)
 
@@ -2240,3 +2243,258 @@ def test_un_etat_d_avant_se_relit_sans_regles_de_chantier(tmp_path):
     donnees = chantier([]).en_dict()
     del donnees["autorisations_chantier"]
     assert Chantier.depuis_dict(donnees).autorisations_chantier == []
+
+
+# --- le profil écrit d'un seul geste, le réglage d'outils qu'on peut réessayer ---------------
+
+PROFIL_D_AVANT = '{"nom": "Café", "commandes_permises": ["ls"], "autorisations": ["Read"]}'
+REESSAYER = "La demande reste ouverte : accepte-la à nouveau une fois le profil corrigé."
+
+
+def ecrire_sans_lever(ecriture):
+    """Lance une écriture du profil ; une erreur levée ne compte pas, seul le fichier compte."""
+    try:
+        ecriture()
+    except (ValueError, OSError):
+        pass
+
+
+def par_les_outils(atelier, texte):
+    atelier._proposer_outils({"commandes_permises": [texte]})
+    atelier.decider(atelier.moteur.chantier.demandes[-1]["id"], ACCEPTER_OUTILS)
+
+
+ECRITURES_DU_PROFIL = {
+    "_regler_outils": par_les_outils,
+    "_inscrire_regle": lambda atelier, texte: atelier._inscrire_regle(f"Bash({texte}:*)"),
+    "_ecrire_au_profil": lambda atelier, texte: atelier._ecrire_au_profil("mode_ouvriers", texte),
+}
+
+
+@pytest.mark.parametrize("ecriture", sorted(ECRITURES_DU_PROFIL))
+@pytest.mark.parametrize("coupure", ["en_ecrivant", "en_mettant_en_place"])
+def test_une_ecriture_du_profil_interrompue_laisse_le_profil_d_avant_intact(
+    tmp_path, monkeypatch, ecriture, coupure
+):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text(PROFIL_D_AVANT, "utf-8")
+    atelier = atelier_simule(tmp_path, profil={"commandes_permises": ["ls"]})
+    texte = "make"
+    if coupure == "en_ecrivant":
+        texte = "make \udcff"  # un caractère impossible à écrire : l'écriture s'arrête en route
+    else:
+        remplacer = modele_module.os.replace
+
+        def arret_de_la_machine(source, cible):
+            if pathlib.Path(cible) == chemin:
+                raise OSError("arrêt de la machine")
+            return remplacer(source, cible)
+
+        monkeypatch.setattr(modele_module.os, "replace", arret_de_la_machine)
+
+    ecrire_sans_lever(lambda: ECRITURES_DU_PROFIL[ecriture](atelier, texte))
+
+    assert chemin.read_bytes() == PROFIL_D_AVANT.encode("utf-8")
+    assert [f.name for f in chemin.parent.iterdir() if f.name.startswith("profil")] == [
+        "profil.json"
+    ]
+
+
+def reglage_propose(depot, contenu, **outils):
+    """Un profil écrit tel quel, un réglage d'outils proposé : rend ce qu'il faut pour le régler."""
+    chemin = depot / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(contenu, "utf-8")
+    controles = ControlesQuiNotent()
+    atelier = atelier_simule(depot, profil={"commandes_permises": ["ls"]}, controles=controles)
+    atelier._proposer_outils({"commandes_permises": ["make"], **outils})
+    return atelier, chemin, controles, atelier.moteur.chantier.demandes[0]
+
+
+def demande_montree(vue, demande):
+    (montree,) = [d for d in vue["demandes"] if d["id"] == demande["id"]]
+    return montree
+
+
+def deux_lignes_dans_l_ordre(textes, raison):
+    rang = textes.index(f"Réglage des outils non appliqué : {raison}")
+    return textes[rang + 1] == REESSAYER
+
+
+@pytest.mark.parametrize("contenu", ["[1, 2]", "pas du json"])
+def test_un_reglage_non_applique_redevient_en_attente_et_s_applique_au_second_clic(
+    tableau, tmp_path, contenu
+):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, contenu, commandes=["make t"])
+    serveur = tableau(atelier)
+    decision = {"id": demande["id"], "choix": ACCEPTER_OUTILS}
+
+    _, vue = serveur.appeler("/api/decision", decision)
+
+    montree = demande_montree(vue, demande)
+    assert montree["reponse"] is None
+    assert montree["options"] == [ACCEPTER_OUTILS, REFUSER_OUTILS]
+    assert deux_lignes_dans_l_ordre([e["texte"] for e in vue["evenements"]], ILLISIBLE)
+    assert chemin.read_text("utf-8") == contenu and controles.reglages == []
+
+    chemin.write_text('{"nom": "Café"}', "utf-8")  # la personne responsable corrige le profil
+    _, vue = serveur.appeler("/api/decision", decision)
+
+    assert demande_montree(vue, demande)["reponse"] == ACCEPTER_OUTILS
+    attendu = {"nom": "Café", "commandes_permises": ["ls", "make"], "commandes": ["make t"]}
+    assert json.loads(chemin.read_text("utf-8")) == attendu
+    assert controles.reglages == [attendu]
+    assert atelier.moteur.profil == {"commandes_permises": ["ls", "make"], "commandes": ["make t"]}
+    textes = [e["texte"] for e in vue["evenements"]]
+    assert sum(t.startswith("Outils réglés.") for t in textes) == 1
+
+
+def test_un_reglage_non_ecrit_redevient_en_attente_et_s_applique_au_second_clic(
+    tmp_path, monkeypatch
+):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, '{"nom": "Café"}')
+    remplacer, pannes = modele_module.os.replace, [OSError("disque plein")]
+
+    def disque_plein(source, cible):
+        if pathlib.Path(cible) == chemin and pannes:
+            raise pannes.pop()
+        return remplacer(source, cible)
+
+    monkeypatch.setattr(modele_module.os, "replace", disque_plein)
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert demande["reponse"] is None
+    assert deux_lignes_dans_l_ordre(textes_du_fil(atelier), NON_ECRIT)
+    assert chemin.read_text("utf-8") == '{"nom": "Café"}' and controles.reglages == []
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert demande["reponse"] == ACCEPTER_OUTILS
+    assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["ls", "make"]
+    assert len(controles.reglages) == 1
+
+
+def test_un_reglage_ecarte_reste_repondu(tmp_path):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, '{"nom": "Café"}')
+    atelier.decider(demande["id"], REFUSER_OUTILS)
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+    assert demande["reponse"] == REFUSER_OUTILS
+    assert chemin.read_text("utf-8") == '{"nom": "Café"}' and controles.reglages == []
+    assert REESSAYER not in textes_du_fil(atelier)
+
+
+def test_deux_clics_en_meme_temps_n_appliquent_le_reglage_qu_une_fois(tmp_path):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, '{"nom": "Café"}')
+    depart = threading.Barrier(2)
+
+    def cliquer():
+        depart.wait()
+        atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    fils = [threading.Thread(target=cliquer) for _ in range(2)]
+    for fil in fils:
+        fil.start()
+    for fil in fils:
+        fil.join(5)
+    assert len(controles.reglages) == 1
+    assert sum(t.startswith("Outils réglés.") for t in textes_du_fil(atelier)) == 1
+
+
+@pytest.mark.parametrize(
+    "contenu",
+    [
+        '{"commandes_permises": "make"}',
+        '{"commandes_permises": 5}',
+        '{"commandes_permises": null}',
+        '{"commandes_permises": ["ls", 3]}',
+        '{"commandes": "make test"}',
+        '{"commandes": [1]}',
+        '{"commandes": {"a": "b"}}',
+    ],
+)
+def test_une_liste_de_commandes_mal_formee_rend_le_profil_illisible(tmp_path, contenu):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, contenu)
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert chemin.read_text("utf-8") == contenu
+    assert atelier.moteur.profil == {"commandes_permises": ["ls"]}
+    assert controles.reglages == []
+    assert demande["reponse"] is None
+    assert deux_lignes_dans_l_ordre(textes_du_fil(atelier), ILLISIBLE)
+    assert not any(t.startswith("Outils réglés.") for t in textes_du_fil(atelier))
+
+
+def test_une_regle_deja_au_profil_ne_le_reecrit_pas(tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    contenu = '{"autorisations": ["Bash(npm install:*)"]}'
+    chemin.write_text(contenu, "utf-8")
+    atelier_simule(tmp_path)._inscrire_regle(REGLE_SIMULEE)
+    assert chemin.read_text("utf-8") == contenu
+
+
+def test_une_regle_deja_au_profil_vaut_quand_meme_a_chaud(tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text('{"autorisations": ["Bash(npm install:*)"]}', "utf-8")
+    profil = {"autorisations": ["Read"]}
+    agent = AgentSimule()
+    agent.profil = profil
+    atelier = atelier_simule(tmp_path, agent=agent, profil=profil)
+    atelier._inscrire_regle(REGLE_SIMULEE)
+    assert atelier.moteur.profil["autorisations"] == [REGLE_SIMULEE]
+
+
+def test_le_profil_est_ecrit_en_deux_espaces_avec_les_accents_en_clair(tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text('{"nom": "Café"}', "utf-8")
+    atelier = atelier_simule(tmp_path)
+    atelier._ecrire_au_profil("mode_ouvriers", "auto")
+    attendu = '{\n  "nom": "Café",\n  "mode_ouvriers": "auto"\n}\n'
+    assert chemin.read_bytes() == attendu.encode("utf-8")
+    atelier._inscrire_regle("Bash(échafaud:*)")
+    attendu = (
+        '{\n  "nom": "Café",\n  "mode_ouvriers": "auto",\n'
+        '  "autorisations": [\n    "Bash(échafaud:*)"\n  ]\n}\n'
+    )
+    assert chemin.read_bytes() == attendu.encode("utf-8")
+
+
+def test_le_dossier_chantier_est_cree_quand_il_manque(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    shutil.rmtree(tmp_path / "chantier", ignore_errors=True)
+    atelier._inscrire_regle(REGLE_SIMULEE)
+    chemin = tmp_path / "chantier" / "profil.json"
+    assert json.loads(chemin.read_text("utf-8")) == {"autorisations": [REGLE_SIMULEE]}
+
+
+@pytest.mark.parametrize("valeur", ["make", 5, None, ["ls", 3]])
+def test_une_valeur_mal_formee_en_memoire_compte_comme_absente_au_second_clic(
+    tableau, tmp_path, valeur
+):
+    from atelier.projets import creer_depot, ouvrir_depot
+
+    depot = tmp_path / "projet"
+    creer_depot(depot, "Projet")
+    chemin = depot / "chantier" / "profil.json"
+    chemin.write_text(json.dumps({"nom": "Projet", "commandes_permises": valeur}), "utf-8")
+    atelier = ouvrir_depot(depot)  # le profil en mémoire porte la valeur mal formée
+    serveur = tableau(atelier)
+    atelier._proposer_outils({"commandes_permises": ["pytest"]})
+    decision = {"id": atelier.moteur.chantier.demandes[-1]["id"], "choix": ACCEPTER_OUTILS}
+
+    statut, vue = serveur.appeler("/api/decision", decision)
+    assert statut == 200
+    assert deux_lignes_dans_l_ordre([e["texte"] for e in vue["evenements"]], ILLISIBLE)
+
+    chemin.write_text('{"nom": "Projet"}', "utf-8")  # la personne retire la clé du fichier
+    statut, vue = serveur.appeler("/api/decision", decision)
+
+    assert statut == 200
+    assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["pytest"]
+    assert atelier.moteur.profil["commandes_permises"] == ["pytest"]
+    textes = [e["texte"] for e in vue["evenements"]]
+    assert sum(t.startswith("Outils réglés.") for t in textes) == 1

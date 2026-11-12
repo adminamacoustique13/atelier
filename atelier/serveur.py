@@ -29,7 +29,14 @@ from atelier.consignes import (
 )
 from atelier.guichet import ARRETE, CHOIX, Guichet
 from atelier.mise_a_jour import Etat, Resultat
-from atelier.modele import ETATS_FR, Chantier, Contrat, ProjetImpossible, ecrire_cahier
+from atelier.modele import (
+    ETATS_FR,
+    Chantier,
+    Contrat,
+    ProjetImpossible,
+    ecrire_cahier,
+    ecrire_d_un_seul_geste,
+)
 from atelier.moteur import ARRETEE, Moteur, taches_du_plan
 from atelier.rythme import TRANCHE_S, Rythmes, poste
 
@@ -151,6 +158,11 @@ CHOIX_MODES = [
 def _avant_balises(texte: str) -> str:
     """Rend le texte de l'orchestrateur coupé à la première balise de plan ou d'outils."""
     return texte.split(BALISE_PLAN)[0].split(BALISE_OUTILS)[0]
+
+
+def _liste_de_textes(valeur) -> bool:
+    """Dit si une valeur lue dans le profil est une liste dont chaque élément est un texte."""
+    return isinstance(valeur, list) and all(isinstance(v, str) for v in valeur)
 
 
 def libelle_mode(mode) -> str:
@@ -292,6 +304,7 @@ LIGNES_PAR_GENRE = {
 ETAPE = re.compile(r"^[*_#\s]*[ÉéEe]tape\s*(\d+\s*(?:/\s*\d+)?)?\s*[:：]\s*[*_]*\s*(.+?)[*_]*$")
 PROFIL_ILLISIBLE = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
 PROFIL_NON_ECRIT = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+REESSAYER_OUTILS = "La demande reste ouverte : accepte-la à nouveau une fois le profil corrigé."
 LIGNES_MAX = 30  # lignes d'activité gardées par agent
 LARGEUR_MAX = 300  # caractères par ligne d'activité
 MORCEAU_MAX = LIGNES_MAX * LARGEUR_MAX  # de quoi remplir toutes les lignes : le reste est perdu
@@ -708,7 +721,11 @@ class Atelier:
             )
 
     def _regler_outils(self, demande: dict, choix: str) -> None:
-        """Applique (ou écarte) un réglage d'outils, l'écrit dans le profil et le fait valoir."""
+        """Applique (ou écarte) un réglage d'outils, l'écrit dans le profil et le fait valoir.
+
+        Un réglage accepté mais non appliqué (profil illisible ou non écrit) redevient en
+        attente : l'accepter à nouveau, une fois le profil corrigé, l'applique.
+        """
         with self.moteur.verrou:
             if demande["reponse"] is not None:
                 return
@@ -717,16 +734,7 @@ class Atelier:
             return self._dire("Réglage des outils écarté : rien n'a changé.")
         with self._verrou_profil:  # le même verrou que pour une règle « toujours »
             try:
-                fichier = self._lire_profil()
-                actuelles = fichier.get(
-                    "commandes_permises", self.moteur.profil.get("commandes_permises", [])
-                )
-                permises = list(
-                    dict.fromkeys([*actuelles, *(demande["outils"]["commandes_permises"] or [])])
-                )
-                fichier["commandes_permises"] = permises
-                if demande["outils"]["commandes"] is not None:
-                    fichier["commandes"] = demande["outils"]["commandes"]
+                fichier = self._profil_avec_outils(demande["outils"])
                 self._ecrire_profil(fichier)
             except ValueError:
                 raison = PROFIL_ILLISIBLE
@@ -734,19 +742,49 @@ class Atelier:
                 raison = PROFIL_NON_ECRIT
             else:
                 raison = ""
-                valeurs = {"commandes_permises": permises}
-                if "commandes" in fichier:
-                    valeurs["commandes"] = fichier["commandes"]
-                self._propager(valeurs)
+                cles = ("commandes_permises", "commandes")
+                self._propager({cle: fichier[cle] for cle in cles if cle in fichier})
         if raison:
-            return self._dire(f"Réglage des outils non appliqué : {raison}")
+            return self._rouvrir_reglage(demande, raison)
         if hasattr(self.moteur.controles, "regler_outils"):
             self.moteur.controles.regler_outils(fichier)
         self._dire(
-            "Outils réglés. Commandes permises aux agents : " + ", ".join(permises) + ". "
-            "Une tâche revenue vers toi peut maintenant être relancée."
+            "Outils réglés. Commandes permises aux agents : "
+            + ", ".join(fichier["commandes_permises"])
+            + ". Une tâche revenue vers toi peut maintenant être relancée."
         )
         self._sauver()
+
+    def _profil_avec_outils(self, outils: dict) -> dict:
+        """Sous `_verrou_profil` : le profil lu, avec le réglage d'outils ajouté.
+
+        Lève `ValueError` si le profil est illisible, ou si `commandes_permises` ou `commandes`
+        y sont présentes sans être des listes de textes ; `OSError` s'il ne peut pas être lu.
+        Sans `commandes_permises` dans le fichier, celles du profil en mémoire valent, si elles
+        forment une liste de textes ; sinon on part d'une liste vide.
+        """
+        fichier = self._lire_profil()
+        for cle in ("commandes_permises", "commandes"):
+            if cle in fichier and not _liste_de_textes(fichier[cle]):
+                raise ValueError(f"« {cle} » n'est pas une liste de textes")
+        repli = self.moteur.profil.get("commandes_permises", [])
+        if not _liste_de_textes(repli):  # une valeur en mémoire mal formée compte comme absente
+            repli = []
+        actuelles = fichier.get("commandes_permises", repli)
+        fichier["commandes_permises"] = list(
+            dict.fromkeys([*actuelles, *(outils["commandes_permises"] or [])])
+        )
+        if outils["commandes"] is not None:
+            fichier["commandes"] = outils["commandes"]
+        return fichier
+
+    def _rouvrir_reglage(self, demande: dict, raison: str) -> None:
+        """Remet en attente un réglage accepté mais non appliqué, et le dit au fil."""
+        with self.moteur.verrou:  # les deux lignes se suivent, la demande redevient cliquable
+            demande["reponse"] = None
+            chantier = self.moteur.chantier
+            chantier.noter(f"Réglage des outils non appliqué : {raison}", auteur="orchestrateur")
+            chantier.noter(REESSAYER_OUTILS, auteur="orchestrateur")
 
     def _propager(self, valeurs: dict) -> None:
         """Met à jour à chaud les profils lus par l'atelier, le moteur et les agents."""
@@ -864,11 +902,11 @@ class Atelier:
     def _ecrire_profil(self, fichier: dict) -> None:
         """Écrit `chantier/profil.json` en entier ; à appeler sous `_verrou_profil`.
 
-        Crée le dossier `chantier` au besoin. Lève `OSError` si l'écriture échoue.
+        D'un seul geste : une écriture interrompue laisse l'ancien profil intact. Crée le
+        dossier `chantier` au besoin. Lève `OSError` si l'écriture échoue.
         """
-        chemin = self.depot / "chantier" / "profil.json"
-        chemin.parent.mkdir(parents=True, exist_ok=True)
-        chemin.write_text(json.dumps(fichier, ensure_ascii=False, indent=2) + "\n", "utf-8")
+        texte = json.dumps(fichier, ensure_ascii=False, indent=2) + "\n"
+        ecrire_d_un_seul_geste(self.depot / "chantier" / "profil.json", texte)
 
     # --- le mode des ouvriers -----------------------------------------------------
 
