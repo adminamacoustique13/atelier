@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Atelier · Salle</title>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@900&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="systeme.css">
+<style>
+:root{--teal:var(--verifie)}
+body::before{content:"";position:absolute;inset:0;background:radial-gradient(45% 40% at 55% 62%,rgba(60,80,140,.12),transparent 70%)}
+svg#sol{position:absolute;inset:0}
+.verre{position:absolute;border-radius:18px;background:linear-gradient(180deg,rgba(21,27,45,.78),rgba(12,16,28,.78));border:1px solid var(--bord);border-top-color:rgba(255,255,255,.14);backdrop-filter:blur(14px);box-shadow:0 30px 60px -30px rgba(0,0,0,.85)}
+.tag{position:absolute;transform:translateY(-50%);padding:8px 11px 9px;border-radius:11px;background:rgba(14,18,32,.85);border:1px solid var(--bord);backdrop-filter:blur(8px);white-space:nowrap;box-shadow:0 12px 24px -12px rgba(0,0,0,.9)}
+.tag .t{font-size:12.5px;font-weight:500}.tag .t b{font:500 11px var(--mono);color:var(--discret);margin-right:6px}
+.tag .d{font:400 10.5px var(--mono);color:var(--faible);margin-top:2px}
+.tag.g{transform:translate(-100%,-50%)}.tag::after{content:"";position:absolute;top:50%;width:18px;height:1px;background:rgba(220,220,220,.3)}.tag.d::after{left:-19px}.tag.g::after{right:-19px}
+.tag.att{border-color:rgba(232,149,58,.5)}.tag.ok .d span{color:var(--teal)}.tag.att .d span{color:var(--ambre)}
+.dock{position:absolute;left:50%;bottom:22px;transform:translateX(-50%);display:flex;gap:4px;padding:6px;border-radius:16px}
+.dock a{display:flex;flex-direction:column;align-items:center;gap:4px;width:98px;padding:8px 0 7px;border-radius:11px;color:var(--faible);text-decoration:none;font-size:11.5px;position:relative}
+.dock a.on{background:rgba(255,255,255,.1);color:var(--texte)}
+.dock a.on svg{stroke:var(--teal)}
+.dock svg{stroke:currentColor;fill:none;stroke-width:1.5}
+.dock a i{position:absolute;top:7px;right:30px;width:6px;height:6px;border-radius:50%;background:var(--ambre);box-shadow:0 0 8px var(--ambre)}
+.compteur{display:flex;flex-direction:column;gap:3px}.compteur .v{font:400 20px var(--mono);letter-spacing:-.02em}.compteur .v small{font-size:12px;color:var(--faible)}
+</style></head><body>
+<svg id="sol" width="1440" height="900"><defs>
+  <filter id="flou" x="-50%" y="-50%" width="200%" height="200%"><feGaussianBlur stdDeviation="5"/></filter>
+  <filter id="flou2" x="-100%" y="-100%" width="300%" height="300%"><feGaussianBlur stdDeviation="12"/></filter>
+  <radialGradient id="fondu" cx="50%" cy="58%" r="55%"><stop offset="0" stop-color="#fff"/><stop offset=".7" stop-color="#fff" stop-opacity=".5"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+  <mask id="m"><rect width="1440" height="900" fill="url(#fondu)"/></mask>
+</defs><g id="grille" mask="url(#m)"></g><g id="routes"></g><g id="piliers"></g></svg>
+<div id="tags"></div>
+
+<header class="tete"><span class="mot">ATELIER</span><span class="projet">Moteur de calcul ▾</span><nav><a href="conversation.html">Conversation<span class="p"></span></a><a href="chantier.html">Chantier</a><a href="salle.html" class="on">Salle</a><a href="plan.html">Plan<span class="n">6</span></a><a href="code.html">Code</a></nav><span class="pousse"></span><span class="vif"><i></i>3 agents au travail</span><span class="demo">Démonstration</span></header>
+<div style="position:absolute;right:28px;top:92px;display:flex;gap:30px">
+  <div class="compteur"><span class="lab">Agents</span><span class="v">5<small> / 12</small></span></div>
+  <div class="compteur"><span class="lab">Montées</span><span class="v">1<small> / 2</small></span></div>
+  <div class="compteur"><span class="lab">Coût équiv.</span><span class="v">3,42<small> $</small></span></div>
+  <div class="compteur"><span class="lab">Tokens</span><span class="v">1,28<small> M</small></span></div>
+</div>
+
+<!-- orchestrateur -->
+<div class="verre" style="left:26px;top:88px;width:318px;padding:18px 20px">
+  <div style="display:flex;align-items:center;gap:14px">
+    <svg width="64" height="64" viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="4"/>
+      <circle cx="32" cy="32" r="27" fill="none" stroke="#ffffff" stroke-width="4" stroke-linecap="round" stroke-dasharray="${0}" id="arc"/>
+      <text x="32" y="37" text-anchor="middle" fill="#ffffff" font-family=var(--mono) font-size="15">2/6</text></svg>
+    <div><span class="lab">Orchestrateur · Fable élevé</span><p style="font-size:15px;font-weight:500;line-height:1.3;margin-top:5px">2 tâches vérifiées. Une autorisation t'attend.</p></div>
+  </div>
+  <p style="margin-top:12px;color:var(--discret);font-size:12.5px">Moteur de calcul : formules de la norme, validées sur les cas de référence.</p>
+  <div style="display:flex;gap:6px;margin-top:14px"><span class="btn" style="height:28px">Écrire à l'orchestrateur</span><span class="btn" style="height:28px">Plan</span></div>
+</div>
+
+<!-- décision -->
+<div class="verre" style="right:26px;top:160px;width:350px;padding:18px 20px;border-color:rgba(232,149,58,.32)">
+  <div style="display:flex;justify-content:space-between"><span class="lab" style="color:var(--ambre)">● Ce qui t'attend</span><span class="lab">07:41</span></div>
+  <p style="font-size:14.5px;font-weight:500;margin-top:12px;line-height:1.4">A · ouvrier 1 veut lancer<br><code style="font-size:13px">npm install left-pad</code></p>
+  <p style="color:var(--discret);font-size:12px;margin-top:9px;line-height:1.45">« Toujours » retient <code>Bash(npm install:*)</code> : toute commande qui commence ainsi passera sans redemander.</p>
+  <div style="display:flex;gap:6px;margin-top:14px;flex-wrap:nowrap"><span class="btn attend" style="padding:0 10px">Autoriser une fois</span><span class="btn" style="padding:0 10px">Toujours</span><span class="btn" style="padding:0 10px">Refuser</span></div>
+</div>
+
+<!-- légende -->
+<div style="position:absolute;left:26px;bottom:26px;display:flex;flex-direction:column;gap:7px" class="mono">
+  <span class="lab">Lecture</span>
+  <span style="font-size:11px;color:var(--discret)">▮ hauteur = effort · couleur = état</span>
+  <span style="font-size:11px;color:var(--discret)"><span style="color:var(--teal)">━</span> vérifié &nbsp; <span style="color:var(--ambre)">━</span> t'attend &nbsp; <span style="color:var(--faible)">┄</span> à venir</span>
+</div>
+<div style="position:absolute;right:26px;bottom:26px;width:300px;display:flex;flex-direction:column;gap:6px;font-size:11.5px;color:var(--discret)">
+  <span class="lab">Fil</span>
+  <div style="display:grid;grid-template-columns:52px 26px 1fr" class=""><span class="mono" style="color:var(--faible);font-size:10.5px">07:41</span><b class="mono" style="font-size:10.5px">A</b><span>Demande une autorisation</span></div>
+  <div style="display:grid;grid-template-columns:52px 26px 1fr"><span class="mono" style="color:var(--faible);font-size:10.5px">07:40</span><b class="mono" style="font-size:10.5px">C</b><span style="color:var(--teal)">Vérifiée après montée en gamme</span></div>
+  <div style="display:grid;grid-template-columns:52px 26px 1fr"><span class="mono" style="color:var(--faible);font-size:10.5px">07:38</span><b class="mono" style="font-size:10.5px">C</b><span>↺ Livrable refusé, 2 cas échouent</span></div>
+</div>
+
+<script>
+const NS="http://www.w3.org/2000/svg";const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+const S=40,CX=760,CY=282;
+const P=(x,y,z=0)=>[CX+(x-y)*S*.866,CY+(x+y)*S*.5-z*S];
+const fromUV=(u,v)=>[(u+v)/2,(v-u)/2];
+// grille
+const g=document.getElementById("grille");for(let i=-6;i<=22;i++){const a=P(i,-6),b=P(i,22),c=P(-6,i),d=P(22,i);for(const[p,q] of [[a,b],[c,d]])g.append(el("line",{x1:p[0],y1:p[1],x2:q[0],y2:q[1],stroke:"rgba(255,255,255,.055)","stroke-width":1}))}
+// postes : u = étape (horizontal écran), v = couloir (vertical écran)
+const COL={ok:"#ffffff",att:"#e8953a",cours:"#8297c4",lancer:"#dcdcdc"};
+const EFF={faible:.8,moyen:1.3,"élevé":1.8,max:2.4};
+const ST=[["O",-13.5,14,"cours","Orchestrateur","Fable · élevé","suit 3 agents","élevé",1.1,"g"],
+["A",-5,7,"att","Lecture des données","Sonnet · moyen","t'attend","moyen",0,"g"],["B",-1.5,11,"cours","Formule de la norme","Fable · max","rédige","max",0,"d"],["C",-5,15,"ok","Jeu de tests","Sonnet · moyen ↑","vérifiée","moyen",0,"g"],["E",-1.5,19,"ok","Contrat entre modules","Opus · élevé","vérifiée","élevé",0,"d"],
+["D",4,8.5,"lancer","Liaison interface","Haiku · faible","attend A, B","faible",0,"d"],["B.1",5.5,13.5,"lancer","Cas limite : valeur nulle","Sonnet · moyen","attend B","moyen",0,"d"],
+["V",7,20,"ok","Vérificateur","Sonnet · lecture","2 reçus","moyen",.8,"d"],["L",13.5,23.5,"ok","Livré sur main","2 tâches","","faible",.5,"d"]];
+const pos={};ST.forEach(s=>pos[s[0]]=fromUV(s[1],s[2]));
+// routes au sol, en L le long des axes
+const R=document.getElementById("routes");
+function route(a,b,st,via="x"){const[p,q]=[pos[a],pos[b]];const m=via=="x"?[q[0],p[1]]:[p[0],q[1]];const pts=[p,m,q].map(t=>P(t[0],t[1]).join(",")).join(" ");const c=st=="lancer"?"rgba(220,220,220,.25)":COL[st];
+ if(st!="lancer")R.append(el("polyline",{points:pts,fill:"none",stroke:c,"stroke-width":6,opacity:.35,filter:"url(#flou)"}));
+ R.append(el("polyline",{points:pts,fill:"none",stroke:c,"stroke-width":st=="lancer"?1.2:2,"stroke-dasharray":st=="lancer"?"4 5":"",opacity:st=="cours"?.6:.95,"stroke-linejoin":"round"}));
+ if(st!="lancer"){const mm=P(m[0],m[1]);R.append(el("circle",{cx:mm[0],cy:mm[1],r:3,fill:c}))}}
+route("O","A","att","y");route("O","B","cours","y");route("O","C","ok","x");route("O","E","ok","x");
+route("A","D","lancer","x");route("B","D","lancer","y");route("B","B.1","lancer","x");
+route("C","V","ok","y");route("E","V","ok","x");route("B.1","V","lancer","x");route("V","L","ok","y");
+// piliers
+const G=document.getElementById("piliers");const T=document.getElementById("tags");
+const order=[...ST].sort((a,b)=>(pos[a[0]][0]+pos[a[0]][1])-(pos[b[0]][0]+pos[b[0]][1]));
+order.forEach(([id,u,v,st,nom,dos,etat,eff,hOver,cote])=>{const[x,y]=pos[id];const h=hOver||EFF[eff];const w=.42,c=COL[st];
+ // anneau au sol, coupé en deux : l'arc arrière passe derrière la colonne, l'arc avant devant
+ const [cx,cy]=P(x,y);const rx=.95*S*1.22,ry=rx*.577;
+ const demi=(k,avant)=>`M${cx-rx*k},${cy} A${rx*k},${ry*k} 0 0 ${avant?0:1} ${cx+rx*k},${cy}`;
+ const anneaux=(avant)=>{
+  G.append(el("path",{d:demi(1,avant),fill:"none",stroke:c,"stroke-width":st=="lancer"?1:1.5,opacity:st=="lancer"?.3:.8,"stroke-dasharray":st=="lancer"?"3 4":""}));
+  G.append(el("path",{d:demi(.68,avant),fill:"none",stroke:c,"stroke-width":st=="att"||st=="cours"?3:1,opacity:st=="lancer"?.15:.5,"stroke-dasharray":st=="cours"?"14 8":""}))};
+ G.append(el("ellipse",{cx,cy,rx:rx*1.25,ry:ry*1.25,fill:c,opacity:st=="lancer"?0:.12,filter:"url(#flou2)"}));
+ anneaux(false);
+ // colonne opaque : faces teintées par mélange avec le bleu nuit, le sommet garde la couleur pleine
+ const melange=(hex,t)=>{const f=n=>parseInt(hex.slice(n,n+2),16),bg=[14,18,32];return `rgb(${[1,3,5].map((n,i)=>Math.round(bg[i]+(f(n)-bg[i])*t)).join(",")})`};
+ const p=(dx,dy,z)=>P(x+dx,y+dy,z).join(",");
+ const top=[p(-w,-w,h),p(w,-w,h),p(w,w,h),p(-w,w,h)].join(" ");
+ const gauche=[p(-w,w,0),p(w,w,0),p(w,w,h),p(-w,w,h)].join(" ");
+ const droite=[p(w,-w,0),p(w,w,0),p(w,w,h),p(w,-w,h)].join(" ");
+ if(st=="lancer"){[gauche,droite,top].forEach(f=>G.append(el("polygon",{points:f,fill:"#0e1220",stroke:"rgba(220,220,220,.32)","stroke-width":1,"stroke-dasharray":"3 3"})))}
+ else{G.append(el("polygon",{points:gauche,fill:melange(c,.42)}));G.append(el("polygon",{points:droite,fill:melange(c,.26)}));
+  G.append(el("polygon",{points:top,fill:c,opacity:.55,filter:"url(#flou)"}));G.append(el("polygon",{points:top,fill:c}));
+  G.append(el("line",{x1:P(x+w,y+w,0)[0],y1:P(x+w,y+w,0)[1],x2:P(x+w,y+w,h)[0],y2:P(x+w,y+w,h)[1],stroke:"#fff","stroke-opacity":.45,"stroke-width":1}))}
+ anneaux(true);
+ // étiquette
+ const [tx,ty]=P(x,y,h);const label=id.length<=3&&id!="O"&&id!="V"&&id!="L"?`<b>${id}</b>`:"";
+ T.insertAdjacentHTML("beforeend",`<div class="tag ${st} ${cote}" style="left:${cote=="g"?tx-30:tx+30}px;top:${ty+2}px"><div class="t">${label}${nom}</div><div class="d">${dos}${etat?` · <span>${etat}</span>`:""}</div></div>`)});
+// arc anneau
+const a=document.getElementById("arc"),L=2*Math.PI*27;a.setAttribute("stroke-dasharray",`${L*2/6} ${L}`);a.setAttribute("transform","rotate(-90 32 32)");
+</script></body></html>

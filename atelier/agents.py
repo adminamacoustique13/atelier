@@ -391,6 +391,14 @@ def decrire_outil(bloc: dict) -> str:
     return f"{verbe} {objet}".strip()[:120]
 
 
+# Ce que les agents simulés font en patientant (démonstration), et l'écart entre deux gestes.
+GESTES_SIMULES = (
+    "Lit le périmètre", "Cherche les appels", "Lit les tests", "Écrit le code", "Écrit le code",
+    "Lance les contrôles", "Relit le changement", "Écrit les tests", "Lance les tests",
+)
+RYTHME_GESTES = (0.4, 0.3, 1.6, 0.5, 0.2, 0.3, 2.2, 0.6, 0.4, 1.1, 0.3, 0.8)
+
+
 @dataclass
 class AgentSimule(_ModeDesOuvriers):
     """Joue un scénario écrit d'avance : pour la démonstration et les tests.
@@ -403,6 +411,9 @@ class AgentSimule(_ModeDesOuvriers):
     Les ouvriers suivent le mode choisi, même en marche. En mode auto, le premier ouvrier
     joue un refus de l'arbitre ; avec `pause_arbitre`, trois refus puis une demande au guichet
     (l'arbitre en pause) ; avec `retombee`, l'ouvrier retombe ensuite en mode « default ».
+
+    Avec `gestes_s` (la démonstration), un agent qui patiente joue un geste de travail toutes les
+    `gestes_s` secondes environ, pour que la courbe d'activité du tableau de bord vive.
     """
 
     scenario: dict[str, list[str]] = field(default_factory=dict)
@@ -415,6 +426,7 @@ class AgentSimule(_ModeDesOuvriers):
     source_connexion: str = ""
     retombee: bool = False
     pause_arbitre: bool = False
+    gestes_s: float = 0.0
     _postes: _Postes = field(default_factory=_Postes, init=False, repr=False, compare=False)
     _demandes: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     _refus: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
@@ -469,15 +481,25 @@ class AgentSimule(_ModeDesOuvriers):
 
     def _patienter(self, marche: _Marche) -> bool:
         """Attend le délai de l'agent ; rend True dès un arrêt. Rejoue un changement de mode."""
-        limite = time.monotonic() + self.delai_s
+        debut = time.monotonic()
+        limite, geste = debut + self.delai_s, 0
         while not marche.arret.is_set():
-            reste = limite - time.monotonic()
+            maintenant = time.monotonic()
+            reste = limite - maintenant
             if reste <= 0:
                 return False
+            if self.gestes_s and maintenant - debut >= self._prochain_geste(geste):
+                texte = GESTES_SIMULES[geste % len(GESTES_SIMULES)]
+                _emettre(self.sur_evenement, marche.nom, "outil", texte)
+                geste += 1
             if marche.change.wait(min(reste, 0.02)):
                 marche.change.clear()
                 self._jouer_mode(marche)
         return True
+
+    def _prochain_geste(self, rang: int) -> float:
+        """L'instant du geste `rang`, irrégulier mais reproductible : des rafales et des pauses."""
+        return sum(self.gestes_s * RYTHME_GESTES[i % len(RYTHME_GESTES)] for i in range(rang + 1))
 
     def _jouer_mode(self, marche: _Marche) -> None:
         """Joue le mode choisi pour cet ouvrier, une fois par changement de mode."""

@@ -119,9 +119,9 @@ async function main() {
     verifier("le titre de la carte est « Mode des ouvriers »", (await page.locator("#carte-mode h2").textContent()) === "Mode des ouvriers");
     const libelles = await page.locator("#mode-ouvriers button.mode-btn").allInnerTexts();
     verifier("cinq choix, dans l'ordre, avec les libellés du serveur", libelles.join("|") === MODES.map((m) => m[1]).join("|") && libelles.join("|") === base.mode_ouvriers.choix.map((c) => c.libelle).join("|"), libelles);
-    verifier("la carte est entre la grille du haut et « La salle »", await page.evaluate(() => {
+    verifier("la carte est entre les cadrans du haut (Enveloppe) et « La salle »", await page.evaluate(() => {
       const c = document.getElementById("carte-mode");
-      return c.previousElementSibling.classList.contains("grille") && /La salle/.test(c.nextElementSibling.textContent);
+      return /Enveloppe/.test(c.previousElementSibling.textContent) && /La salle/.test(c.nextElementSibling.textContent);
     }));
     verifier("au départ, « Accepter les modifications » est en vigueur et seul en vigueur", (await enVigueur(page)).join("|") === "Accepter les modifications", await enVigueur(page));
     const attendue = base.mode_ouvriers.choix.find((c) => c.mode === "acceptEdits").explication;
@@ -223,7 +223,7 @@ async function main() {
     verifier("la requête partie porte le mode cliqué", etatFaux.mode && etatFaux.mode.mode === "dontAsk", etatFaux.mode);
     verifier("fait: false : la phrase du serveur s'affiche", (await page.locator("#mode-ouvriers-etat").innerText()) === refus);
     verifier("fait: false : le choix en vigueur reste l'ancien", (await enVigueur(page)).join("|") === "Accepter les modifications");
-    verifier("fait: false : la phrase est dans la couleur de l'attention", await page.locator("#mode-ouvriers-etat p").evaluate((e) => getComputedStyle(e).color === "rgb(255, 167, 110)"));
+    verifier("fait: false : la phrase est dans la couleur de l'attention", await page.locator("#mode-ouvriers-etat p").evaluate((e) => getComputedStyle(e).color === "rgb(232, 149, 58)"));
 
     // fait: true mais la vue ne confirme pas : le choix affiché suit la vue, pas la réponse
     etatFaux.reponseMode = (route) => route.fulfill({ json: { ...vue, changement_mode: { fait: true, phrase: "Mode des ouvriers : « Laisser un arbitre décider »." } } });
@@ -290,7 +290,7 @@ async function main() {
     verifier("une ligne par agent dont le mode diffère", lignes.length === 2, lignes);
     verifier("la ligne dit le nom de l'agent et le mode réellement appliqué", lignes[0] === "B-ouvrier-1 travaille en mode « Me demander », pas dans le mode choisi.", lignes[0]);
     verifier("un agent et un mode hostiles restent du texte", lignes[1] === `${mal} travaille en mode « <b>${mal}</b> », pas dans le mode choisi.`, lignes[1]);
-    verifier("les lignes de mode réel sont dans l'orange de l'attention", await page.locator("#mode-ouvriers-etat .mode-reel").first().evaluate((e) => getComputedStyle(e).color === "rgb(255, 167, 110)"));
+    verifier("les lignes de mode réel sont dans l'ambre de l'attention", await page.locator("#mode-ouvriers-etat .mode-reel").first().evaluate((e) => getComputedStyle(e).color === "rgb(232, 149, 58)"));
     const dom = await page.evaluate(() => ({ xss: window.__xss, images: document.querySelectorAll('img[src="x"]').length, scripts: document.querySelectorAll("#carte-mode script, #carte-mode img, #mode-ouvriers button i, #mode-ouvriers-etat b, #mode-ouvriers-etat i").length }));
     verifier("rien n'est exécuté ni interprété dans le menu (libellé, explication, agent)", dom.xss === undefined && dom.images === 0 && dom.scripts === 0, dom);
     const hostile = await bouton(page, "Refuser <i>" + mal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).count();

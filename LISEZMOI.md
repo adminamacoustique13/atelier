@@ -119,7 +119,7 @@ La clé `commandes_permises` reste lue comme avant. En lecture seule (l'orchestr
 
 ## Le mode des ouvriers
 
-Dans l'onglet Chantier, la carte « Mode des ouvriers » te laisse choisir, en cinq boutons, ce que les ouvriers (les agents qui écrivent le code d'une tâche) font sans te demander. Le bouton en vigueur est en blanc, avec son explication dessous ; pour lire celle d'un autre, passe la souris dessus ou atteins-le à la touche Tab. Un clic envoie le choix : l'Atelier l'inscrit dans `chantier/profil.json` (clé `mode_ouvriers`), l'applique tout de suite aux ouvriers en marche, et affiche la phrase qu'il renvoie. Le bouton en vigueur ne change que lorsque l'Atelier confirme le choix. Si un ouvrier travaille en fait dans un autre mode que celui choisi (Claude Code a refusé le changement, ou l'ouvrier a fini sa répétition), une ligne orange sous les boutons donne son nom et le mode réellement appliqué.
+Dans l'onglet Chantier, la carte « Mode des ouvriers » te laisse choisir, en cinq boutons, ce que les ouvriers (les agents qui écrivent le code d'une tâche) font sans te demander. Le bouton en vigueur est en blanc, avec son explication dessous ; pour lire celle d'un autre, passe la souris dessus ou atteins-le à la touche Tab. Un clic envoie le choix : l'Atelier l'inscrit dans `chantier/profil.json` (clé `mode_ouvriers`), l'applique tout de suite aux ouvriers en marche, et affiche la phrase qu'il renvoie. Le bouton en vigueur ne change que lorsque l'Atelier confirme le choix. Si un ouvrier travaille en fait dans un autre mode que celui choisi (Claude Code a refusé le changement, ou l'ouvrier a fini sa répétition), une ligne ambre sous les boutons donne son nom et le mode réellement appliqué.
 
 Un ouvrier a toujours, permis d'avance : la lecture, les modifications de fichiers de sa copie de travail, les commandes permises du profil, et git en lecture. C'est un choix fait pour ne pas multiplier les cartes. Il vaut dans tous les modes : même en « Me demander », un ouvrier modifie les fichiers de sa copie sans carte. Les modes ne portent donc que sur le reste, les commandes surtout.
 
@@ -190,7 +190,7 @@ L'orchestrateur lit l'historique git (journal, branches, adresse du dépôt en l
 
 L'Atelier s'ouvre sur l'accueil (onglet « Accueil », ou un clic sur « Atelier » en haut à gauche). Il montre tous tes projets, du plus récemment touché au plus ancien, sans en démarrer aucun. Chaque carte dit :
 
-- le nom du chantier en cours, une barre avec une case par tâche (turquoise : livrée, blanche : en cours, orange : revenue vers toi) et où il en est : « Plan à valider », « Agents au travail », « Une question t'attend », « Terminé »… ;
+- le nom du chantier en cours, une barre avec une case par tâche (blanche : livrée, bleu acier : en cours, contour clair : revenue vers toi) et où il en est : « Plan à valider », « Agents au travail », « Une question t'attend », « Terminé »… ;
 - quand le projet a été touché pour la dernière fois, combien de chantiers passés il a, combien de fichiers sa carte du code compte, et son dépôt en ligne s'il en a un.
 
 Deux boutons par projet :
@@ -203,27 +203,34 @@ En haut, « Nouveau projet » crée un projet, et « Récupérer un dépôt » (
 ## Les onglets d'un projet
 
 - **Conversation** : tu écris à l'orchestrateur. C'est une session Claude (modèle le plus capable, effort élevé) que l'atelier garde ouverte d'un message à l'autre et dont il affiche la réponse pendant qu'elle s'écrit. Elle lit le dépôt, elle n'écrit rien. Quand ton objectif est clair, elle rend un découpage, que l'atelier transforme en contrat à valider. Tant que le contrat n'est pas validé, tu peux lui demander de corriger le plan.
-- **Chantier** : le tableau de bord (point d'étape, ce qui t'attend, dosage, enveloppe, tâches, fil).
-- **Plan** : le graphe des tâches et de ce qui attend quoi. Un clic sur une tâche montre ses critères, son périmètre et ses tentatives.
+- **Chantier** : le tableau de bord, en modules numérotés comme les cadrans d'un appareil : 01 l'orchestrateur et son anneau de tâches vérifiées, 02 ce qui t'attend, 03 l'enveloppe, 04 la salle (un poste par tâche), 05 le dosage, 06 le détail des tâches, 07 le fil.
+- **Salle** : le chantier vu d'en haut, en perspective. Chaque poste est une colonne posée dans un anneau au sol : sa hauteur dit l'effort, sa couleur l'état. Des routes au sol relient l'orchestrateur aux tâches, les tâches entre elles et les dernières à la livraison. Ce qui t'attend reste ouvert dans un panneau à droite ; un clic sur l'étiquette d'une tâche l'ouvre dans le Plan.
+- **Plan** : le câblage des tâches. À gauche l'orchestrateur, puis une colonne par étape (ce qui peut partir ensemble), à droite la livraison sur main. Un fil blanc a été vérifié, un fil bleu acier est en cours, un fil en pointillés est à venir ; une tâche qui t'attend tire un fil ambre jusqu'au nœud « Toi ». Un clic sur une tâche montre ses critères, son périmètre, ses tentatives et, si elle t'attend, sa demande d'autorisation.
 - **Code** : la carte du code du projet, décrite plus bas.
+
+### Les couleurs et les courbes
+
+Le tableau de bord n'a que cinq couleurs : noir et bleu nuit pour le fond, gris clair et blanc pour le texte, et l'ambre, réservé à ce qui t'attend (une autorisation, une décision, un contrat à valider). Le blanc dit « vérifié », un bleu acier (le bleu nuit éclairci) dit « en cours » ; un livrable refusé se reconnaît à ses points creux, sans couleur de plus. Les polices (Geist, Geist Mono et Doto, la police en points) sont livrées avec l'Atelier : le tableau marche sans connexion.
+
+Chaque poste de la salle du Chantier porte une courbe en points : une colonne par tranche de 15 secondes, sur les 5 dernières minutes, d'autant plus haute que l'agent a agi pendant ces 15 secondes (un outil lancé compte pour un, du texte écrit pour un par 120 caractères). Tant qu'une demande attend ta réponse, les dernières colonnes passent en ambre, à plat : tu vois depuis combien de temps l'agent est bloqué. Quand la tâche est finie, sa courbe résume toute la marche de son ouvrier. Dans la démonstration, où un agent simulé ne travaille que quelques secondes, une colonne vaut une demi-seconde.
 
 ## La carte du code
 
-L'onglet Code montre le code du projet de trois façons :
+L'onglet Code montre le code du projet de trois façons. L'explorateur reste toujours à gauche ; au milieu, deux boutons passent du plan à la vue d'un fichier :
 
-- **L'explorateur**, comme dans un éditeur de code : les dossiers et les fichiers. Un clic déroule un fichier et dit, en français, à quoi il sert et à quoi servent ses parties (fonctions, classes).
-- **Le plan**, rangé en étages : en haut ce qui se sert des autres, en bas les fondations dont les autres se servent. Une flèche va de celui qui se sert vers celui qui sert ; plus elle est épaisse, plus il y a de liens. Le plan s'ouvre sur un bloc par dossier ; un clic sur un dossier montre ses fichiers, rangés de la même façon, et le fil d'Ariane remonte. Les éléments sans lien sont cachés, un bouton les montre. Deux fichiers qui dépendent l'un de l'autre sont reliés en rose et signalés : c'est un point fragile du code.
+- **L'explorateur**, comme dans un éditeur de code : les dossiers et les fichiers, avec dix points pour la taille de chacun. Un clic déroule un fichier et dit, en français, à quoi il sert et à quoi servent ses parties (fonctions, classes).
+- **Le plan**, rangé en étages : en haut ce qui se sert des autres, en bas les fondations dont les autres se servent. Une flèche va de celui qui se sert vers celui qui sert ; plus elle est épaisse, plus il y a de liens. Le plan s'ouvre sur un bloc par dossier ; un clic sur un dossier montre ses fichiers, rangés de la même façon, et le fil d'Ariane remonte. Les éléments sans lien sont cachés, un bouton les montre. Deux fichiers qui dépendent l'un de l'autre sont reliés en pointillés blancs et signalés : c'est un point fragile du code.
 - **La vue d'un fichier** (« Fichier », ou « Voir ses dépendances » dans la fiche) : le fichier au milieu, à gauche ceux qui se servent de lui, à droite ceux dont il se sert, sur deux niveaux. Elle répond à la question « si je touche à ce fichier, qu'est-ce qui peut être touché ? », et le dit en une phrase. Un clic sur un voisin le met au milieu ; « Précédent » revient.
 
 Dans toutes les vues, la fiche à droite dit à quoi sert le fichier choisi, de quels fichiers il se sert et lesquels se servent de lui.
 
 **Construire la carte.** Le bouton « Analyser le code » estime d'abord le travail : combien de fichiers, combien d'appels à Claude (Sonnet, effort faible, sur ton abonnement). Rien ne part avant « Lancer l'analyse ». Les dépendances et les parties sont lues dans le code lui-même, sans Claude ; seules les explications en français demandent Claude, par lots de huit fichiers. Pendant qu'elles arrivent, chaque fichier montre une explication provisoire tirée de ses commentaires. La carte est gardée dans `.atelier/carte.json`.
 
-**La carte suit le code.** Elle ne repart jamais de zéro : chaque fichier est reconnu à son empreinte git. Quand une nouvelle version arrive sur la branche du projet (une tâche fusionnée par l'Atelier, ou un commit fait ailleurs), un fil de fond la compare à la précédente en quinze secondes au plus, et seuls les fichiers nouveaux ou modifiés sont réexpliqués. Ils portent un point jaune et un badge « Nouveau » ou « Modifié » ; les fichiers supprimés sont listés dans la fiche.
+**La carte suit le code.** Elle ne repart jamais de zéro : chaque fichier est reconnu à son empreinte git. Quand une nouvelle version arrive sur la branche du projet (une tâche fusionnée par l'Atelier, ou un commit fait ailleurs), un fil de fond la compare à la précédente en quinze secondes au plus, et seuls les fichiers nouveaux ou modifiés sont réexpliqués. Ils portent un rond creux et un badge « Nouveau » ou « Modifié » ; les fichiers supprimés sont listés dans la fiche.
 
-**Ce qui est en train de changer clignote.** Les fichiers qu'un agent modifie dans sa copie de travail clignotent en orange, dans l'explorateur, le plan (le dossier qui les contient aussi) et la vue d'un fichier, et la fiche dit quel agent y travaille. Le point orange de l'onglet Code s'allume tant qu'un agent travaille.
+**Ce qui est en train de changer clignote.** Les fichiers qu'un agent modifie dans sa copie de travail clignotent en bleu acier, dans l'explorateur, le plan (le dossier qui les contient aussi) et la vue d'un fichier, et la fiche dit quel agent y travaille. Le point bleu de l'onglet Code s'allume tant qu'un agent travaille.
 
-**Ce qu'un agent écrit apparaît en brouillon.** Avant même la vérification, l'Atelier lit le code de la copie de travail de chaque agent, sans appeler Claude. Un fichier qu'il crée apparaît comme un bloc en pointillés orange, marqué « Brouillon » ; un lien qu'il ajoute entre deux fichiers apparaît comme une flèche orange en pointillés qui avance. Si le vérificateur refuse la tâche, ils disparaissent ; s'il l'accepte, ils entrent dans la carte pour de bon. Deux fichiers qui dépendent l'un de l'autre sont, eux, reliés en rose.
+**Ce qu'un agent écrit apparaît en brouillon.** Avant même la vérification, l'Atelier lit le code de la copie de travail de chaque agent, sans appeler Claude. Un fichier qu'il crée apparaît comme un bloc en pointillés bleus, marqué « Brouillon » ; un lien qu'il ajoute entre deux fichiers apparaît comme une flèche bleue en pointillés qui avance. Si le vérificateur refuse la tâche, ils disparaissent ; s'il l'accepte, ils entrent dans la carte pour de bon. Deux fichiers qui dépendent l'un de l'autre sont, eux, reliés en pointillés blancs.
 
 Dans la démonstration, la carte montre le code de l'Atelier lui-même, expliqué par ses seuls commentaires : aucun appel à Claude. Les explications de Claude n'ont pas encore été essayées pour de vrai.
 

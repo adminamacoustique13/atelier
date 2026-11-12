@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Atelier · Chantier</title>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@900&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="systeme.css">
+<style>
+:root{--tuile:var(--surface);--tuile2:var(--surface-haut);--trait:rgba(255,255,255,.07);--signal:var(--attend);--ok:var(--verifie)}
+body{padding:84px 26px 22px}
+.mono{font-family:"Geist Mono",monospace}
+.dot{font-family:Doto,monospace;font-weight:900;letter-spacing:.02em}
+.grille{display:grid;grid-template-columns:repeat(12,1fr);grid-template-rows:240px 236px 1fr;height:790px;gap:12px}
+.t{background:linear-gradient(180deg,var(--tuile2),var(--tuile));border-radius:18px;padding:16px 18px;position:relative;box-shadow:inset 0 1px 0 rgba(255,255,255,.06),0 1px 0 rgba(0,0,0,.6),0 24px 40px -24px rgba(0,0,0,.8);overflow:hidden;display:flex;flex-direction:column}
+.lab{display:flex;justify-content:space-between;font:500 10.5px "Geist Mono";letter-spacing:.08em;text-transform:uppercase;color:var(--discret)}
+.lab i{font-style:normal;color:var(--faible)}
+.lab .sig{color:var(--signal)}
+.s3{grid-column:span 3}.s4{grid-column:span 4}.s5{grid-column:span 5}.s6{grid-column:span 6}.s7{grid-column:span 7}.s8{grid-column:span 8}.s9{grid-column:span 9}
+.grand{font-size:64px;line-height:.9;margin-top:auto}
+.sous{font:500 10px "Geist Mono";color:var(--faible);letter-spacing:.08em;text-transform:uppercase;margin-bottom:3px}
+.val{font:400 19px "Geist Mono";letter-spacing:-.01em}
+.row{display:flex;gap:22px;align-items:flex-end}
+.sep{width:1px;height:28px;background:var(--trait)}
+.phrase{font-size:15px;line-height:1.4;font-weight:500;max-width:330px;text-wrap:balance}
+.calme{color:var(--discret)}
+.bouton{display:inline-flex;align-items:center;height:30px;padding:0 14px;border-radius:8px;font:500 11px "Geist Mono";letter-spacing:.06em;text-transform:uppercase;border:1px solid rgba(255,255,255,.12);color:var(--texte)}
+.bouton.plein{background:var(--texte);color:#121212;border-color:transparent}
+.bouton.sig{background:var(--attend);color:#1c0f00;border-color:transparent}
+code{font:400 12px "Geist Mono";background:rgba(255,255,255,.06);padding:2px 6px;border-radius:5px}
+.poste{border-top:1px solid var(--trait);display:grid;grid-template-columns:34px 1fr 150px 112px 74px;align-items:center;gap:12px;height:31px}
+.poste:first-of-type{border-top:0}
+.poste .id{font:500 12px "Geist Mono";color:var(--texte)}
+.poste .nom{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.poste .dos{font:400 11px "Geist Mono";color:var(--discret)}
+.poste .et{font:500 10.5px "Geist Mono";letter-spacing:.06em;text-transform:uppercase;text-align:right}
+.ev{display:grid;grid-template-columns:54px 30px 1fr;gap:8px;font-size:12px;padding:5px 0;border-top:1px solid var(--trait);color:var(--discret)}
+.ev:first-of-type{border-top:0}.ev time,.ev b{font:400 11px "Geist Mono";color:var(--faible)}.ev b{color:var(--texte);font-weight:500}
+footer{position:absolute;left:26px;right:26px;bottom:18px;display:flex;justify-content:space-between;font:500 10px "Geist Mono";letter-spacing:.1em;color:var(--faible);text-transform:uppercase}
+</style></head><body>
+<header class="tete"><span class="mot">ATELIER</span><span class="projet">Moteur de calcul ▾</span><nav><a href="conversation.html">Conversation<span class="p"></span></a><a href="chantier.html" class="on">Chantier</a><a href="salle.html">Salle</a><a href="plan.html">Plan<span class="n">6</span></a><a href="code.html">Code</a></nav><span class="pousse"></span><span class="vif"><i></i>3 agents au travail</span><span class="demo">Démonstration</span></header>
+<main class="grille">
+  <!-- 01 -->
+  <section class="t s4">
+    <div class="lab">01 Orchestrateur <i>Fable · élevé</i></div>
+    <div style="display:flex;gap:18px;align-items:center;margin-top:14px">
+      <svg id="anneau" width="132" height="132" viewBox="0 0 132 132"></svg>
+      <div><p class="phrase">2 tâches vérifiées sur 6. J'ai besoin de toi pour une autorisation.</p></div>
+    </div>
+    <div class="row" style="margin-top:auto">
+      <div><p class="sous">En cours</p><p class="val">2</p></div><div class="sep"></div>
+      <div><p class="sous">À lancer</p><p class="val">2</p></div><div class="sep"></div>
+      <div><p class="sous">Revenues</p><p class="val" style="color:var(--discret)">1</p></div>
+    </div>
+  </section>
+  <!-- 02 -->
+  <section class="t s5" style="background:linear-gradient(180deg,#221a14,#121624)">
+    <div class="lab"><span>02 Ce qui t'attend</span><span class="sig">● Autorisation</span></div>
+    <p style="font-size:17px;font-weight:500;margin-top:18px;line-height:1.35">A·ouvrier·1 veut lancer<br><code style="font-size:15px">npm install left-pad</code></p>
+    <p class="calme" style="margin-top:10px;max-width:440px">« Toujours » retiendra <code>Bash(npm install:*)</code> : toute commande qui commence ainsi passera sans redemander.</p>
+    <div style="display:flex;gap:8px;margin-top:auto"><span class="bouton sig">Autoriser une fois</span><span class="bouton">Toujours pour ce projet</span><span class="bouton">Refuser</span></div>
+  </section>
+  <!-- 03 -->
+  <section class="t s3">
+    <div class="lab">03 Enveloppe <i>contrat</i></div>
+    <div style="margin-top:16px"><p class="sous" style="display:flex;justify-content:space-between">Agents lancés <span style="color:var(--texte)">5 / 12</span></p><svg class="barre" data-v="5" data-max="12" width="100%" height="10"></svg></div>
+    <div style="margin-top:14px"><p class="sous" style="display:flex;justify-content:space-between">Montées en gamme <span style="color:var(--texte)">1 / 2</span></p><svg class="barre" data-v="1" data-max="2" width="100%" height="10"></svg></div>
+    <div class="row" style="margin-top:auto">
+      <div><p class="sous">Coût équiv.</p><p class="points" style="font-size:34px;line-height:1">3,42$</p></div>
+      <div><p class="sous">Tokens</p><p class="points" style="font-size:34px;line-height:1">1,2M</p></div>
+    </div>
+  </section>
+  <!-- 04 la salle -->
+  <section class="t s8">
+    <div class="lab">04 La salle <i>3 agents au travail</i></div>
+    <div id="salle" style="display:grid;grid-template-columns:repeat(6,1fr);gap:10px;margin-top:14px;flex:1"></div>
+  </section>
+  <!-- 05 dosage -->
+  <section class="t s4">
+    <div class="lab">05 Dosage <i>par type de tâche</i></div>
+    <div id="dosage" style="margin-top:14px;display:flex;flex-direction:column;gap:11px"></div>
+    <div style="display:flex;gap:16px;margin-top:auto;font:500 10px var(--mono);color:var(--faible);letter-spacing:.06em;text-transform:uppercase">
+      <span><span style="color:var(--verifie)">●</span> Vérifiée du premier coup</span><span><span style="color:var(--texte)">○</span> Refusée puis reprise</span></div>
+  </section>
+  <!-- 06 tâches -->
+  <section class="t s7">
+    <div class="lab">06 Détail des tâches <i>6 au contrat</i></div>
+    <div style="margin-top:8px" id="postes"></div>
+  </section>
+  <!-- 07 fil -->
+  <section class="t s5">
+    <div class="lab">07 Fil du chantier <i>en direct</i></div>
+    <div style="margin-top:8px">
+      <div class="ev"><time>07:41:12</time><b>A</b><span>Demande à lancer <span class="mono">npm install left-pad</span></span></div>
+      <div class="ev"><time>07:40:58</time><b>C</b><span>Vérifiée après une montée en gamme (Sonnet)</span></div>
+      <div class="ev"><time>07:38:20</time><b>C</b><span style="color:var(--discret)">↺ Livrable refusé : 2 cas de référence échouent</span></div>
+      <div class="ev"><time>07:36:04</time><b>B</b><span>Lit la consigne et le périmètre</span></div>
+      <div class="ev"><time>07:35:47</time><b>E</b><span>Vérifiée du premier coup</span></div>
+      <div class="ev"><time>07:31:10</time><b>—</b><span>Contrat validé. 6 tâches, 12 agents au plus.</span></div>
+    </div>
+  </section>
+</main>
+<script>
+const NS="http://www.w3.org/2000/svg";const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+// anneau de points
+(()=>{const s=document.getElementById("anneau"),n=60;for(let i=0;i<n;i++){const a=-Math.PI/2+i*2*Math.PI/n;for(const [r,rr] of [[60,1.9],[52,1.5]]){const on=i<n*2/6,att=i>=n*2/6&&i<n*2/6+3;s.append(el("circle",{cx:66+r*Math.cos(a),cy:66+r*Math.sin(a),r:rr,fill:att?"#e8953a":on?"#ffffff":"rgba(220,220,220,.14)"}))}}
+const t=el("text",{x:66,y:72,"text-anchor":"middle",fill:"#dcdcdc","font-family":"Doto","font-weight":900,"font-size":38});t.textContent="2/6";s.append(t);
+const u=el("text",{x:66,y:90,"text-anchor":"middle",fill:"rgba(220,220,220,.4)","font-family":"Geist Mono","font-size":8.5,"letter-spacing":"1.4"});u.textContent="VÉRIFIÉES";s.append(u)})();
+// barres de points
+document.querySelectorAll(".barre").forEach(s=>{const w=s.getBoundingClientRect().width,n=Math.floor(w/7),v=+s.dataset.v/ +s.dataset.max;for(let i=0;i<n;i++)s.append(el("circle",{cx:3+i*7,cy:5,r:2.2,fill:i<n*v?(s.dataset.sig?"#e8953a":"#dcdcdc"):"rgba(220,220,220,.12)"}))});
+// salle
+const T=[["A","Lecture des données d'entrée","Sonnet","moyen","attente"],["B","Formule de la norme","Fable","max","cours"],["B.1","Cas limite : valeur nulle","Sonnet","moyen","lancer"],["C","Jeu de tests de référence","Sonnet","moyen","ok",1],["D","Liaison avec l'interface","Haiku","faible","lancer"],["E","Contrat entre modules","Opus","élevé","ok"]];
+const ET={attente:["T'attend","#e8953a"],cours:["En cours","#8297c4"],lancer:["À lancer","rgba(220,220,220,.36)"],ok:["Vérifiée","#ffffff"]};
+let seed=7;const rnd=()=>(seed=(seed*9301+49297)%233280)/233280;
+const salle=document.getElementById("salle");
+T.forEach(([id,nom,m,e,st])=>{const d=document.createElement("div");d.style.cssText="background:rgba(255,255,255,.025);border:1px solid rgba(255,255,255,.05);border-radius:12px;padding:12px;display:flex;flex-direction:column;gap:8px";
+const s=el("svg",{width:"100%",height:70,viewBox:"0 0 140 70",preserveAspectRatio:"none"});
+const cols=20;for(let c=0;c<cols;c++){let h=st=="lancer"?1:st=="ok"?(c%5==0?3:2):Math.max(1,Math.round((st=="attente"?1+rnd()*3:2+rnd()*4)*(Math.sin(c/2.4)+1.25)));if(st=="attente"&&c>14)h=1;h=Math.min(h,9);
+for(let r=0;r<9;r++){const on=r<h;s.append(el("circle",{cx:4+c*6.9,cy:66-r*7.4,r:1.7,fill:on?(st=="attente"&&c>=12?"#e8953a":ET[st][1]):"rgba(220,220,220,.07)"}))}}
+d.innerHTML=`<div style="display:flex;justify-content:space-between;align-items:baseline"><span class="points" style="font-size:24px;line-height:1">${id}</span><span style="font:500 9.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:${ET[st][1]}">${ET[st][0]}</span></div>`;
+d.append(s);d.insertAdjacentHTML("beforeend",`<p style="font-size:12px;line-height:1.3;height:32px">${nom}</p><p style="font:400 10.5px var(--mono);color:var(--discret)">${m} · ${e}</p>`);salle.append(d)});
+// postes
+const P=document.getElementById("postes");T.forEach(([id,nom,m,e,st,rev])=>{P.insertAdjacentHTML("beforeend",`<div class="poste"><span class="id">${id}</span><span class="nom">${nom}</span><span class="dos">${m} · ${e}${rev?' <span style="color:var(--faible)">↑</span>':''}</span><span class="dos" style="text-align:right">${st=="lancer"?"—":(rev?"2 tentatives":"1 tentative")}</span><span class="et" style="color:${ET[st][1]}">${ET[st][0]}</span></div>`)});
+// dosage : une ligne par type, un point par tentative
+(()=>{const D=[["Mécanique","Haiku · faible",[1,1,0]],["Raisonnement","Sonnet · moyen",[1,2,0]],["Conception","Opus · élevé",[1,0]],["Calcul fin","Fable · max",[0]]];const box=document.getElementById("dosage");
+D.forEach(([n,dos,ts])=>{const r=document.createElement("div");r.style.cssText="display:grid;grid-template-columns:96px 1fr 92px;align-items:center;gap:10px";
+const s=el("svg",{width:"100%",height:14});ts.forEach((v,i)=>{for(let k=0;k<3;k++)for(let j=0;j<2;j++)s.append(el("circle",{cx:4+i*30+k*6.5,cy:3.5+j*6.5,r:2.2,fill:v==1?"#ffffff":v==2?"none":"rgba(220,220,220,.16)",stroke:v==2?"#dcdcdc":"none","stroke-width":1}))});
+r.innerHTML=`<span style="font:500 10px var(--mono);letter-spacing:.06em;text-transform:uppercase;color:var(--discret)">${n}</span>`;r.append(s);r.insertAdjacentHTML("beforeend",`<span style="font:400 10.5px var(--mono);color:var(--faible);text-align:right">${dos}</span>`);box.append(r)})})();
+</script></body></html>
