@@ -586,7 +586,7 @@ def test_l_accueil_resume_chaque_projet_sans_le_demarrer(tmp_path):
     fiches = {f["id"]: f for f in autres.accueil()}
     assert set(fiches) == {"ancien", "recent"} and not autres.ateliers
     recent = fiches["recent"]
-    assert recent["nom"] == "Récent" and recent["ouvert"] is False
+    assert recent["nom"] == "Récent"
     assert recent["chantier"]["nom"] == "Un calcul de charpente"
     assert recent["chantier"]["phrase"] == "1 tâche livrée sur 2."
     assert recent["chantier"]["taches"] == ["verifie", "a_lancer"]

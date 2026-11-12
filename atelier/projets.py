@@ -319,7 +319,7 @@ class Projets:
                 carte = carte_du_code.charger(dossier)
             moment = _activite(dossier)
             fiches.append({
-                "id": cle, "nom": nom, "courant": cle == self.courant, "ouvert": bool(atelier),
+                "id": cle, "nom": nom, "courant": cle == self.courant,
                 "chantier": resume, "archives": passes,
                 "fichiers": len(carte["fichiers"]) if carte else 0,
                 "en_ligne": depot_en_ligne(dossier),

@@ -36,7 +36,6 @@ _SANS_REPONSE = "le dépôt en ligne ne répond pas"
 class Etat:
     disponible: bool
     phrase: str
-    verifie: bool  # faux tant qu'aucune interrogation du dépôt en ligne n'a réussi
 
 
 @dataclass(frozen=True)
@@ -93,7 +92,7 @@ class MiseAJour:
         self.horloge = horloge
         self._verrou = threading.Lock()
         self._derniere: float | None = None
-        self._etat = Etat(False, "La vérification n'a pas encore eu lieu.", False)
+        self._etat = Etat(False, "La vérification n'a pas encore eu lieu.")
 
     def verifier(self) -> Etat:
         """Rend la dernière réponse connue ; interroge le dépôt en ligne au plus une fois
@@ -115,15 +114,14 @@ class MiseAJour:
         code, sortie, erreur = _git(self.dossier, "ls-remote", "origin", f"refs/heads/{BRANCHE}")
         if code != 0 or not sortie:
             cause = _cause(code, erreur) if code != 0 else "la branche main n'existe pas en ligne"
-            return Etat(avant.disponible, f"Impossible de vérifier pour l'instant : {cause}.",
-                        avant.verifie)
+            return Etat(avant.disponible, f"Impossible de vérifier pour l'instant : {cause}.")
         en_ligne = sortie.split()[0]
         # Rien n'est écrit : le dépôt en ligne a avancé si son commit n'est pas déjà dans le nôtre.
         present = _git(self.dossier, "cat-file", "-e", f"{en_ligne}^{{commit}}")[0] == 0
         ancetre = _git(self.dossier, "merge-base", "--is-ancestor", en_ligne, "HEAD")
         if present and ancetre[0] == 0:
-            return Etat(False, "Atelier est à jour.", True)
-        return Etat(True, "Une mise à jour d'Atelier est disponible.", True)
+            return Etat(False, "Atelier est à jour.")
+        return Etat(True, "Une mise à jour d'Atelier est disponible.")
 
     def mettre_a_jour(self, agent_au_travail: bool) -> Resultat:
         """`git pull --ff-only origin main` dans le dossier d'Atelier, après les refus."""
@@ -167,7 +165,7 @@ class MiseAJour:
         if _git(self.dossier, "rev-parse", "HEAD")[1] == avant:
             return Resultat(False, "Atelier est déjà à jour.", detail)
         with self._verrou:
-            self._etat = Etat(False, "Atelier est à jour.", True)
+            self._etat = Etat(False, "Atelier est à jour.")
         return Resultat(True, "Atelier a été mis à jour. Il va redémarrer.", detail)
 
 
@@ -175,7 +173,7 @@ class MiseAJourSimulee:
     """Double pour la démonstration : même interface, ni git ni réseau."""
 
     def verifier(self) -> Etat:
-        return Etat(True, "Une mise à jour d'Atelier est disponible.", True)
+        return Etat(True, "Une mise à jour d'Atelier est disponible.")
 
     def mettre_a_jour(self, agent_au_travail: bool) -> Resultat:
         if agent_au_travail:

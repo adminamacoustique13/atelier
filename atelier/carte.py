@@ -760,8 +760,6 @@ def vue(carte: dict, en_cours: dict[str, list[str]] | None = None, depot=None) -
         "portrait_a_jour": a_jour_synthese,
         "lisezmoi": premier_paragraphe(depot, carte) if depot else "",
         "dossiers": synthese.get("dossiers", {}),
-        "supprimes": carte["changements"]["supprimes"],
-        "nouveaux_absents": sorted(c for c in en_cours if c not in carte["fichiers"]),
     }
 
 

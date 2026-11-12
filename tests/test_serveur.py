@@ -1585,7 +1585,7 @@ class FausseMiseAJour:
 
     def verifier(self):
         self.verifications.append(threading.current_thread())
-        return Etat(self.disponible, "Une mise à jour d'Atelier est disponible.", True)
+        return Etat(self.disponible, "Une mise à jour d'Atelier est disponible.")
 
     def mettre_a_jour(self, agent_au_travail):
         self.mises_a_jour.append(agent_au_travail)
@@ -1658,7 +1658,7 @@ def test_la_vue_porte_la_mise_a_jour_lue_dans_l_etat_garde(maj_servie):
         "disponible": True,
         "phrase": "Une mise à jour d'Atelier est disponible.",
     }
-    suivi.etat = Etat(False, "Atelier est à jour.", True)
+    suivi.etat = Etat(False, "Atelier est à jour.")
     assert tableau.etat()["mise_a_jour"] == {"disponible": False, "phrase": "Atelier est à jour."}
 
 
@@ -2164,7 +2164,7 @@ def test_creer_un_projet_et_lire_l_accueil_par_le_tableau(tmp_path):
 
         tableau.serveur.RequestHandlerClass.projets._creer = creer
         code, vue = tableau.appeler("/api/projets/creer", {"nom": "Deuxième"})
-        assert code == 200 and vue["projet_cree"] == "deuxieme" and vue["projet"] == "Deuxième"
+        assert code == 200 and vue["projet"] == "Deuxième"
         code, vue = tableau.appeler("/api/accueil")
         assert code == 200 and {p["id"] for p in vue["accueil"]} == {"premier", "deuxieme"}
         code, vue = tableau.appeler("/api/projets/nouvelle-session", {"id": "premier"})

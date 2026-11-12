@@ -198,7 +198,6 @@ def test_la_vue_montre_l_explication_a_jour_sinon_le_commentaire(tmp_path):
     assert fiches["app/outils.py"]["en_cours"] == ["A-ouvrier-1"]
     assert fiches["app/__init__.py"]["resume"] == "Un fichier de code Python, de 0 lignes."
     assert fiches["pyproject.toml"]["resume"].startswith("Un fichier de réglages")
-    assert v["nouveaux_absents"] == ["app/futur.py"]
     assert fiches["app/calcul.py"]["pieces"][0] == {
         "nom": "total",
         "ligne": 6,

@@ -1389,14 +1389,24 @@ class Requetes(BaseHTTPRequestHandler):
             self.apres()
 
 
+def _creer_projet(requete, corps) -> None:
+    """Crée le projet ; la réponse est la vue, déjà celle du nouveau projet."""
+    requete.projets.creer(corps["nom"])
+
+
+def _cloner_projet(requete, corps) -> None:
+    """Récupère le dépôt ; la réponse est la vue, déjà celle du nouveau projet."""
+    requete.projets.cloner(corps["adresse"])
+
+
 # Chaque route reçoit la requête et le corps lu ; elle peut rendre des champs de plus pour la
 # réponse, qui est sinon la vue du tableau de bord.
 ROUTES = {
     "/api/contrat/valider": lambda r, c: r.atelier.valider_contrat(),
     "/api/decision": lambda r, c: r.atelier.decider(c["id"], c["choix"]),
     "/api/message": lambda r, c: r.atelier.message(c["texte"]),
-    "/api/projets/creer": lambda r, c: {"projet_cree": r.projets.creer(c["nom"])},
-    "/api/projets/cloner": lambda r, c: {"projet_cree": r.projets.cloner(c["adresse"])},
+    "/api/projets/creer": _creer_projet,
+    "/api/projets/cloner": _cloner_projet,
     "/api/projet/relier": lambda r, c: r.atelier.relier(c["adresse"]),
     "/api/projets/ouvrir": lambda r, c: r.projets.ouvrir(c["id"]),
     "/api/accueil": lambda r, c: {"accueil": r.projets.accueil()},
