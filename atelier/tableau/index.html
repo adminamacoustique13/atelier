@@ -384,6 +384,7 @@ td.droite, th.droite { text-align: right; }
 .salle-vide { position: absolute; left: 50%; top: 55%; transform: translate(-50%, -50%); max-width: 380px; text-align: center; color: var(--discret); line-height: 1.5; }
 .s-pulse { animation: battre 1.6s ease-in-out infinite; }
 
+
 /* Autorisations, arrêts, mises à jour, archives */
 button.discret { height: 26px; padding: 0 10px; font-size: 11.5px; color: var(--discret); }
 .maj-phrase { flex: none; margin: -6px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
@@ -1478,43 +1479,99 @@ function afficherPlan(vue) {
 
 /* ---------- Salle : le chantier vu d'en haut, en perspective isométrique ----------
    Une colonne de lumière par poste, posée dans un anneau au sol : sa hauteur dit l'effort, sa couleur l'état.
-   Des routes au sol relient l'orchestrateur aux tâches, les tâches entre elles, et les dernières à la livraison.
+   Une route en lacets mène de l'orchestrateur à la livraison, étape après étape.
    Le plan se recalcule à la taille de la fenêtre. */
 const HAUTEUR_EFFORT = { low: 0.8, medium: 1.3, high: 1.8, xhigh: 2.1, max: 2.4 };
 function melange(hex, t) {
   const fond = [14, 18, 32], c = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16));
   return `rgb(${c.map((v, i) => Math.round(fond[i] + (v - fond[i]) * t)).join(",")})`;
 }
-function stationsDe(vue) {
-  const { couches, parents } = disposer(vue.taches), attend = attendDe(vue), PAS_U = 9, PAS_V = 5.2;
-  const stations = [];
-  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
-  stations.push({ cle: "@orchestrateur", u: -PAS_U, v: 0, etat: vue.occupe || actifs ? "en_cours" : "repos", h: 1.1, cote: "g",
-    titre: "Orchestrateur", detail: "Fable · élevé", mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
-  couches.forEach((couche, c) => couche.forEach((t, i) => {
-    const etat = etatVu(t, attend);
-    stations.push({ cle: t.id, tache: t, u: c * PAS_U + (i % 2) * 3.5, v: (i - (couche.length - 1) / 2) * PAS_V, etat,
-      h: HAUTEUR_EFFORT[t.effort] || 1.3, cote: c === 0 && i % 2 === 0 ? "g" : "d", id: t.id, titre: t.titre, detail: doseCourte(t), mot: motEtat(t, etat) });
-  }));
-  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
-  stations.push({ cle: "@livre", u: couches.length * PAS_U + 1, v: PAS_V * 0.7, etat: verifiees ? "verifie" : "a_lancer", h: 0.5, cote: "d",
-    titre: "Livré sur main", detail: `${verifiees} / ${vue.taches.length} tâches`, mot: "" });
-  const routes = [], parId = Object.fromEntries(vue.taches.map((t) => [t.id, t])), enfants = new Set(vue.taches.flatMap((t) => parents(t)));
-  for (const t of vue.taches) {
-    const etat = etatVu(t, attend), amont = parents(t);
-    if (!amont.length) routes.push(["@orchestrateur", t.id, vue.contrat.valide ? etatFil(etat) : "a_venir"]);
-    amont.forEach((id) => routes.push([id, t.id, parId[id].etat === "verifie" ? "verifie" : "a_venir"]));
-    if (!enfants.has(t.id)) routes.push([t.id, "@livre", etat === "attend" ? "a_venir" : etatFil(etat)]);
+/* Les étapes se suivent sur une route en lacets : quelques places par rangée, puis un virage, et la rangée
+   suivante repart dans l'autre sens. Les tâches parallèles d'une étape se posent de part et d'autre de la
+   route, au bout d'un court embranchement. Chaque tronçon prend la couleur de l'étape où il mène. */
+function etatEtape(taches, attend) {
+  const etats = taches.map((t) => etatVu(t, attend));
+  if (etats.includes("attend")) return "attend";
+  if (etats.some((e) => e === "en_cours" || e === "en_verification")) return "en_cours";
+  return etats.length && etats.every((e) => e === "verifie") ? "verifie" : "a_venir";
+}
+/* Arrondit les coins d'un tracé du sol (segments parallèles aux axes) en quarts de cercle. */
+function arrondir(points, rayon) {
+  const sortie = [points[0]];
+  for (let i = 1; i < points.length - 1; i++) {
+    const [a, b, c] = [points[i - 1], points[i], points[i + 1]];
+    const l1 = Math.hypot(b[0] - a[0], b[1] - a[1]), l2 = Math.hypot(c[0] - b[0], c[1] - b[1]);
+    const r = Math.min(rayon, l1 / 2, l2 / 2);
+    if (!r) { sortie.push(b); continue; }
+    const d1 = [(b[0] - a[0]) / l1, (b[1] - a[1]) / l1], d2 = [(c[0] - b[0]) / l2, (c[1] - b[1]) / l2];
+    const debut = [b[0] - d1[0] * r, b[1] - d1[1] * r], fin = [b[0] + d2[0] * r, b[1] + d2[1] * r];
+    for (let k = 0; k <= 6; k++) { // une courbe de Bézier quadratique, échantillonnée
+      const t = k / 6, u = 1 - t;
+      sortie.push([u * u * debut[0] + 2 * u * t * b[0] + t * t * fin[0], u * u * debut[1] + 2 * u * t * b[1] + t * t * fin[1]]);
+    }
   }
-  return { stations, routes };
+  sortie.push(points[points.length - 1]);
+  return sortie;
+}
+function stationsDe(vue) {
+  const { couches } = disposer(vue.taches), attend = attendDe(vue);
+  // Les arrêts, dans l'ordre : l'orchestrateur, les tâches étape par étape, la livraison.
+  const arrets = [{ etape: -1 }, ...couches.flatMap((couche, c) => couche.map((t, i) => ({ etape: c, tache: t, rang: i, groupe: couche.length }))), { etape: couches.length }];
+  const N = arrets.length, parRangee = N <= 3 ? N : N <= 6 ? 2 : N <= 12 ? 3 : 4;
+  // Coordonnées « écran » : u le long d'une rangée (horizontal à l'écran), v d'une rangée à l'autre (vers le bas).
+  // Les tâches parallèles d'une étape s'étalent le long de la route, en quinconce de part et d'autre.
+  const parallele = Math.max(1, ...couches.map((c) => c.length)), ETALE = 2.4;
+  const PAS = Math.max(8, parallele * ETALE + 3), ZIGZAG = 1.6, RANG = 8, TOUR = 2.4;
+  const sol = ([u, v]) => [(u + v) / 2, (v - u) / 2];
+  const lieu = (k) => {
+    const r = Math.floor(k / parRangee), i = k % parRangee, u = (r % 2 ? parRangee - 1 - i : i) * PAS, v = r * RANG;
+    const [x, y] = sol([u, v]);
+    return { u, v, x, y, rangee: r };
+  };
+  const stations = [], embranchements = [];
+  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
+  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  arrets.forEach((a, k) => {
+    const l = lieu(k);
+    if (a.etape < 0) {
+      stations.push({ cle: "@orchestrateur", x: l.x, y: l.y, etat: vue.occupe || actifs ? "en_cours" : "repos", h: 1.1, cote: "g",
+        titre: "Orchestrateur", detail: "Fable · élevé", mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
+      return;
+    }
+    if (!a.tache) {
+      stations.push({ cle: "@livre", x: l.x, y: l.y, etat: verifiees ? "verifie" : "a_lancer", h: 0.5, cote: "d",
+        titre: "Livré sur main", detail: `${verifiees} / ${vue.taches.length} tâches`, mot: "" });
+      return;
+    }
+    const t = a.tache, etat = etatVu(t, attend);
+    // Les tâches parallèles d'une étape se décalent de part et d'autre de la route, au bout d'un embranchement.
+    const decale = a.groupe > 1 ? (a.rang % 2 ? ZIGZAG : -ZIGZAG) : 0;
+    const sensRangee = l.rangee % 2 ? -1 : 1, glisse = a.groupe > 1 ? (a.rang - (a.groupe - 1) / 2) * ETALE * sensRangee : 0;
+    const [x, y] = sol([l.u + glisse, l.v + decale]);
+    stations.push({ cle: t.id, tache: t, x, y, etat, h: HAUTEUR_EFFORT[t.effort] || 1.3, cote: "d",
+      id: t.id, titre: t.titre, detail: doseCourte(t), mot: motEtat(t, etat) });
+    if (decale) embranchements.push({ points: [sol([l.u + glisse, l.v]), [x, y]], etat: etatFil(etat) });
+  });
+  // La route : d'un arrêt au suivant, tout droit dans une rangée, par un virage au bout.
+  const etatArret = (a) => (a.etape < 0 ? "verifie" : a.tache ? etatEtape(couches[a.etape], attend)
+    : verifiees && verifiees === vue.taches.length ? "verifie" : "a_venir");
+  const troncons = [];
+  for (let k = 0; k < N - 1; k++) {
+    const a = lieu(k), b = lieu(k + 1), sens = a.rangee % 2 ? -1 : 1;
+    const points = a.rangee === b.rangee ? [[a.u, a.v], [b.u, b.v]]
+      : [[a.u, a.v], [a.u + sens * TOUR, a.v], [a.u + sens * TOUR, b.v], [b.u, b.v]];
+    const etat = !vue.contrat.valide ? "a_venir" : etatArret(arrets[k + 1]);
+    troncons.push({ points: arrondir(points, TOUR * 0.9).map(sol), etat, coude: points.length > 2 ? sol(points[1]) : null });
+  }
+  return { stations, troncons, embranchements };
 }
 function solHtml(vue, largeur, hauteur) {
-  const { stations, routes } = stationsDe(vue);
+  const { stations, troncons, embranchements } = stationsDe(vue);
   // L'échelle : tout le chantier tient dans la zone libre, entre les panneaux, étiquettes comprises.
-  const us = stations.map((s) => s.u), vs = stations.map((s) => s.v), hMax = Math.max(...stations.map((s) => s.h));
+  const us = stations.map((s) => s.x - s.y), vs = stations.map((s) => s.x + s.y), hMax = Math.max(...stations.map((s) => s.h));
   // À droite, le panneau « Ce qui t'attend » prend sa place quand il est ouvert.
   // Sous les panneaux du haut ; un peu à gauche quand « Ce qui t'attend » est ouvert à droite.
-  const panneau = ilFautRepondre(vue) && largeur > 900 ? 190 : 0;
+  const panneau = ilFautRepondre(vue) && largeur > 900 ? 380 : 0;
   // Sur un petit écran, les panneaux passent dessous : le sol a toute sa boîte.
   const large = largeur > 900;
   const zone = large ? { x: 40, y: largeur > 1100 ? 230 : 150, l: largeur - 80 - panneau, h: hauteur - (largeur > 1100 ? 300 : 210) }
@@ -1524,27 +1581,30 @@ function solHtml(vue, largeur, hauteur) {
   const cx = zone.x + zone.l / 2 - ((Math.max(...us) + Math.min(...us)) / 2) * 0.866 * S;
   const cy = zone.y + zone.h / 2 - ((Math.max(...vs) + Math.min(...vs)) / 2) * 0.5 * S + (hMax * S) / 2 - 0.4 * S;
   const P = (x, y, z = 0) => [cx + (x - y) * S * 0.866, cy + (x + y) * S * 0.5 - z * S];
-  const sol = (s) => [(s.u + s.v) / 2, (s.v - s.u) / 2];
-  const parCle = Object.fromEntries(stations.map((s) => [s.cle, s]));
+  const sol = (s) => [s.x, s.y];
   // La grille du sol, effacée vers les bords
-  const [x0, y0] = sol(stations[0]);
+  const x0 = Math.round(stations.reduce((t, s) => t + s.x, 0) / stations.length), y0 = Math.round(stations.reduce((t, s) => t + s.y, 0) / stations.length);
   let grille = "";
   for (let i = -16; i <= 16; i++) {
     const a = P(x0 + i, y0 - 16), b = P(x0 + i, y0 + 16), c = P(x0 - 16, y0 + i), d = P(x0 + 16, y0 + i);
     grille += `<line x1="${a[0].toFixed(1)}" y1="${a[1].toFixed(1)}" x2="${b[0].toFixed(1)}" y2="${b[1].toFixed(1)}"/><line x1="${c[0].toFixed(1)}" y1="${c[1].toFixed(1)}" x2="${d[0].toFixed(1)}" y2="${d[1].toFixed(1)}"/>`;
   }
-  // Les routes, en L le long des axes du sol
+  // La route en lacets, puis les embranchements vers les tâches parallèles
   let lignes = "";
-  for (const [de, vers, etat] of routes) {
-    const a = sol(parCle[de]), b = sol(parCle[vers]), coude = parCle[vers].v < parCle[de].v ? [a[0], b[1]] : [b[0], a[1]];
-    const points = [a, coude, b].map((p) => P(p[0], p[1]).map((n) => n.toFixed(1)).join(",")).join(" "), c = COULEURS[etat];
-    if (etat !== "a_venir") lignes += `<polyline points="${points}" fill="none" stroke="${c}" stroke-width="6" opacity="0.32" filter="url(#flou-sol)"/>`;
-    lignes += `<polyline points="${points}" fill="none" stroke="${c}" stroke-width="${etat === "a_venir" ? 1.2 : 2}" ${etat === "a_venir" ? 'stroke-dasharray="4 5"' : ""} stroke-linejoin="round"/>`;
-    if (etat !== "a_venir") { const m = P(coude[0], coude[1]); lignes += `<circle cx="${m[0].toFixed(1)}" cy="${m[1].toFixed(1)}" r="3" fill="${c}"/>`; }
+  const tracer = ({ points, etat }, epaisseur) => {
+    const pts = points.map((p) => P(p[0], p[1]).map((n) => n.toFixed(1)).join(",")).join(" "), c = COULEURS[etat];
+    if (etat !== "a_venir") lignes += `<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="${epaisseur * 3}" opacity="0.32" filter="url(#flou-sol)"/>`;
+    lignes += `<polyline points="${pts}" fill="none" stroke="${c}" stroke-width="${etat === "a_venir" ? 1.2 : epaisseur}" ${etat === "a_venir" ? 'stroke-dasharray="4 5"' : ""} stroke-linejoin="round" stroke-linecap="round"/>`;
+  };
+  troncons.forEach((t) => tracer(t, 2.2));
+  embranchements.forEach((e) => tracer(e, 1.5));
+  for (const t of troncons.filter((t) => t.coude && t.etat !== "a_venir")) {
+    const m = P(t.coude[0], t.coude[1]);
+    lignes += `<circle cx="${m[0].toFixed(1)}" cy="${m[1].toFixed(1)}" r="3" fill="${COULEURS[t.etat]}"/>`;
   }
   // Les colonnes, des plus lointaines aux plus proches ; l'anneau au sol passe derrière puis devant chacune.
   let colonnes = "", etiquettes = "";
-  for (const s of [...stations].sort((a, b) => a.v - b.v)) {
+  for (const s of [...stations].sort((a, b) => a.x + a.y - (b.x + b.y))) {
     const [x, y] = sol(s), [px, py] = P(x, y), w = 0.42, h = s.h;
     const vide = s.etat === "a_lancer" || s.etat === "abandonnee" || s.etat === "repos";
     const c = s.etat === "repos" ? "#dcdcdc" : COULEURS[s.etat] && COULEURS[s.etat].startsWith("#") ? COULEURS[s.etat] : "#dcdcdc";
