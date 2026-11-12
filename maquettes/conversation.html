@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="fr"><head><meta charset="utf-8"><title>Atelier · Conversation</title>
+<link href="https://fonts.googleapis.com/css2?family=Doto:wght@900&family=Geist+Mono:wght@400;500&family=Geist:wght@400;500;600&display=swap" rel="stylesheet"><link rel="stylesheet" href="systeme.css">
+<style>
+.vue{position:absolute;top:84px;left:26px;right:26px;bottom:22px;display:grid;grid-template-columns:1fr 330px;gap:12px}
+.discussion{position:relative;display:flex;flex-direction:column;min-height:0}
+.fil{flex:1;overflow:hidden;padding:18px 0 0;mask:linear-gradient(180deg,transparent 0,#000 24px)}
+.col{max-width:760px;margin:0 auto;display:flex;flex-direction:column;gap:22px}
+.qui{display:flex;align-items:center;gap:10px;font:500 10.5px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--discret);margin-bottom:7px}
+.qui .m{width:11px;height:11px;background-image:radial-gradient(circle,var(--texte) 1.1px,transparent 1.4px);background-size:4px 4px;background-position:-0.5px -0.5px}
+.qui time{color:var(--faible)}
+.prose{font-size:14.5px;line-height:1.6;color:var(--texte)}
+.prose b{font-weight:600}
+.toi{align-self:flex-end;max-width:78%;background:var(--surface-haut);border:1px solid var(--bord);border-radius:16px 16px 4px 16px;padding:11px 16px;font-size:14px;line-height:1.55}
+.journal{border-left:1px solid var(--bord-fort);padding:2px 0 2px 16px;display:flex;flex-direction:column;gap:5px}
+.journal p{font:500 10px var(--mono);letter-spacing:.08em;text-transform:uppercase;color:var(--faible);margin-bottom:3px}
+.journal div{display:grid;grid-template-columns:66px 34px 1fr;font-size:12.5px;color:var(--discret)}
+.journal time,.journal b{font:400 11px var(--mono);color:var(--faible)}.journal b{color:var(--texte);font-weight:500}
+.demande{border-radius:16px;background:linear-gradient(180deg,#211a15,#12151f);border:1px solid rgba(232,149,58,.35);padding:16px 18px;display:flex;flex-direction:column;gap:10px}
+.demande pre{font:400 13px var(--mono);background:rgba(0,0,0,.35);border:1px solid var(--bord);border-radius:9px;padding:10px 12px}
+.reflexion{display:flex;align-items:center;gap:12px;font-size:13px;color:var(--discret)}
+.saisie{padding:14px 0 0}
+.boite{max-width:760px;margin:0 auto;display:flex;align-items:center;gap:8px;padding:8px 8px 8px 18px;border-radius:14px;background:var(--surface-haut);border:1px solid var(--bord-fort);box-shadow:0 20px 40px -24px rgba(0,0,0,.9)}
+.boite span.ph{flex:1;color:var(--faible);font-size:14px}
+.sous{max-width:760px;margin:8px auto 0;padding-left:18px;font:400 10.5px var(--mono);color:var(--faible);letter-spacing:.04em}
+.rail{padding:18px 20px;display:flex;flex-direction:column;gap:26px;overflow:hidden}
+.rail section{display:flex;flex-direction:column;gap:10px}
+.tache{display:grid;grid-template-columns:34px 1fr 64px;align-items:center;padding:7px 0;border-top:1px solid var(--bord);font-size:12.5px}
+.tache:first-of-type{border-top:0}
+.tache b{font:500 11.5px var(--mono)}.tache .e{font:500 9.5px var(--mono);letter-spacing:.06em;text-transform:uppercase;text-align:right}
+</style></head><body>
+<header class="tete"><span class="mot">ATELIER</span><span class="projet">Moteur de calcul ▾</span><nav><a href="conversation.html" class="on">Conversation<span class="p"></span></a><a href="chantier.html">Chantier</a><a href="salle.html">Salle</a><a href="plan.html">Plan<span class="n">6</span></a><a href="code.html">Code</a></nav><span class="pousse"></span><span class="vif"><i></i>3 agents au travail</span><span class="demo">Démonstration</span></header>
+<main class="vue">
+ <div class="discussion">
+  <div class="fil"><div class="col">
+   <div><div class="qui"><span class="m"></span>Orchestrateur<time>19:31</time></div><p class="prose">Bonjour. Dis-moi ce que tu veux construire, je te proposerai un découpage.</p></div>
+   <div class="toi">Moteur de calcul : formules de la norme, validées sur les cas de référence.</div>
+   <div><div class="qui"><span class="m"></span>Orchestrateur<time>19:32</time></div><p class="prose">J'ai découpé ton objectif en <b>6 tâches</b>. Relis le contrat et l'onglet Plan, puis valide quand ça te convient : rien ne démarre avant.</p></div>
+   <div class="journal"><p>Dans l'onglet Chantier</p>
+    <div><time>19:32:05</time><b>A</b><span>Ouvrier lancé · Sonnet, effort moyen · tentative 1</span></div>
+    <div><time>19:32:05</time><b>C</b><span>Ouvrier lancé · Haiku, effort faible · tentative 1</span></div>
+    <div><time>19:32:05</time><b>B</b><span>Ouvrier lancé · Fable, effort max · tentative 1</span></div></div>
+   <div class="demande">
+    <div style="display:flex;justify-content:space-between"><span class="lab" style="color:var(--attend)">● J'ai besoin de ton autorisation</span><span class="lab" style="color:var(--faible)">Tâche A</span></div>
+    <p style="font-size:14px">A · ouvrier 1 veut lancer la commande :</p>
+    <pre>npm install left-pad</pre>
+    <p style="font-size:12.5px;color:var(--discret)">« Toujours pour ce projet » retient la règle <code>Bash(npm install:*)</code> : toute commande qui commence par « npm install » sera permise sans redemander.</p>
+    <div style="display:flex;gap:8px;margin-top:4px"><span class="btn attend">Autoriser une fois</span><span class="btn">Toujours pour ce projet</span><span class="btn">Refuser</span></div>
+   </div>
+   <div class="reflexion"><svg id="onde" width="64" height="18"></svg>L'orchestrateur relit le livrable de C</div>
+  </div></div>
+  <div class="saisie"><div class="boite"><span class="ph">Écris à l'orchestrateur</span><span class="btn">Arrêter</span><span class="btn plein">Envoyer</span></div>
+   <p class="sous">Démonstration : réponses et agents simulés, aucun appel à Claude.</p></div>
+ </div>
+ <aside class="rail panneau">
+  <section><span class="lab">Point d'étape</span>
+   <div style="display:flex;gap:14px;align-items:center"><svg id="anneau" width="74" height="74" viewBox="0 0 74 74" style="flex:none"></svg><p style="font-size:14px;font-weight:500;line-height:1.4">2 tâches vérifiées sur 6. J'ai besoin de toi pour une autorisation.</p></div></section>
+  <section><span class="lab">Enveloppe</span>
+   <div><p class="lab" style="display:flex;justify-content:space-between;color:var(--faible);font-size:10px">Agents lancés <span style="color:var(--texte)">5 / 12</span></p><svg class="barre" data-v="5" data-max="12" width="100%" height="10" style="margin-top:6px"></svg></div>
+   <div><p class="lab" style="display:flex;justify-content:space-between;color:var(--faible);font-size:10px">Montées en gamme <span style="color:var(--texte)">1 / 2</span></p><svg class="barre" data-v="1" data-max="2" width="100%" height="10" style="margin-top:6px"></svg></div>
+  </section>
+  <section><span class="lab">Tâches</span><div id="taches"></div></section>
+ </aside>
+</main>
+<script>
+const NS="http://www.w3.org/2000/svg";const el=(t,a)=>{const e=document.createElementNS(NS,t);for(const k in a)e.setAttribute(k,a[k]);return e};
+const COUL={ok:"#ffffff",att:"#e8953a",cours:"#8297c4",lancer:"rgba(220,220,220,.36)"};
+(()=>{const s=document.getElementById("anneau"),n=40;for(let i=0;i<n;i++){const a=-Math.PI/2+i*2*Math.PI/n;const on=i<n*2/6,att=i>=n*2/6&&i<n*2/6+3;s.append(el("circle",{cx:37+33*Math.cos(a),cy:37+33*Math.sin(a),r:1.7,fill:att?COUL.att:on?COUL.ok:"rgba(220,220,220,.14)"}))}
+ const t=el("text",{x:37,y:43,"text-anchor":"middle",fill:"#fff","font-family":"Doto","font-weight":900,"font-size":19});t.textContent="2/6";s.append(t)})();
+document.querySelectorAll(".barre").forEach(s=>{const w=s.getBoundingClientRect().width,n=Math.floor(w/7),v=+s.dataset.v/ +s.dataset.max;for(let i=0;i<n;i++)s.append(el("circle",{cx:3+i*7,cy:5,r:2.1,fill:i<n*v?"#fff":"rgba(220,220,220,.12)"}))});
+const T=[["A","Lecture des données d'entrée","att","T'attend"],["B","Formule de la norme","cours","En cours"],["B.1","Cas limite : valeur nulle","lancer","À lancer"],["C","Jeu de tests de référence","ok","Vérifiée"],["D","Liaison avec l'interface","lancer","À lancer"],["E","Contrat entre modules","ok","Vérifiée"]];
+document.getElementById("taches").innerHTML=T.map(([i,n,s,e])=>`<div class="tache"><b>${i}</b><span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--discret)">${n}</span><span class="e" style="color:${COUL[s]}">${e}</span></div>`).join("");
+(()=>{const s=document.getElementById("onde");const h=[1,2,3,2,4,3,2,1,2,3];h.forEach((v,c)=>{for(let r=0;r<4;r++)s.append(el("circle",{cx:3+c*6.3,cy:16-r*4.3,r:1.4,fill:r<v?"#8297c4":"rgba(220,220,220,.08)"}))})})();
+</script></body></html>
