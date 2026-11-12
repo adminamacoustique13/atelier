@@ -201,6 +201,7 @@ class Reponse:
     choix: object
     message: object = ""
     regle: object = ""
+    regles: object = ()
 
 
 class FauxGuichet:
@@ -477,6 +478,20 @@ def test_traduire_reponse_toujours_avec_regle():
     assert regles_de(traduire_reponse(Reponse("toujours", regle="Read")))[0]["rules"] == [
         {"toolName": "Read", "ruleContent": None}
     ]
+
+
+def test_traduire_reponse_chantier_ajoute_toutes_ses_regles_a_la_session():
+    reponse = Reponse("chantier", regles=("Bash(make test:*)", "Bash(sed:*)"))
+    assert regles_de(traduire_reponse(reponse)) == [{
+        "type": "addRules", "destination": "session", "behavior": "allow",
+        "rules": [{"toolName": "Bash", "ruleContent": "make test:*"},
+                  {"toolName": "Bash", "ruleContent": "sed:*"}],
+    }]  # fmt: skip
+
+
+@pytest.mark.parametrize("regles", [(), ("Bash(sed:*)", "Bash("), None, "Bash(sed:*)", (42,)])
+def test_traduire_reponse_chantier_douteux_permet_cette_fois_seulement(regles):
+    assert traduire_reponse(Reponse("chantier", regles=regles)) == PermissionResultAllow()
 
 
 @pytest.mark.parametrize(

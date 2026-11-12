@@ -86,6 +86,8 @@ class Chantier:
     demandes: list[dict] = field(default_factory=list)
     termine: bool = False
     session: str = ""
+    # Les règles retenues par « Toujours pendant ce chantier » : elles partent avec lui.
+    autorisations_chantier: list[str] = field(default_factory=list)
     ouvert_le: str = field(default_factory=lambda: datetime.now().isoformat(timespec="minutes"))
 
     def tache(self, identifiant: str) -> Tache:

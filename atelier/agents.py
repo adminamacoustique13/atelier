@@ -89,6 +89,7 @@ DEMANDE_SIMULEE = {"command": "npm install left-pad"}
 CHOIX_LUS = {
     "une_fois": "autorisé une fois",
     "toujours": "autorisé pour ce projet",
+    "chantier": "autorisé pour ce chantier",
     "non": "refusé",
 }
 
@@ -276,6 +277,8 @@ class AgentClaude(_ModeDesOuvriers):
         self.guichet = None
         self.sur_evenement = None
         self.source_connexion = ""
+        # Rend les règles retenues pour le chantier en cours ; le serveur la branche sur son état.
+        self.regles_chantier = list
         self._postes = _Postes(lire_mode(self.profil.get("mode_ouvriers")))
 
     def _outils(self, lecture_seule: bool) -> list[str]:
@@ -286,8 +289,17 @@ class AgentClaude(_ModeDesOuvriers):
         return outils if lecture_seule else outils + OUTILS_ECRITURE
 
     def _autorisations(self, lecture_seule: bool) -> list[str]:
-        """Les règles simples retenues du profil ; en lecture seule, sans celles qui écrivent."""
+        """Les règles simples retenues, du profil puis du chantier en cours, sans doublon.
+
+        En lecture seule, sans celles qui écrivent. Une erreur en lisant celles du chantier
+        n'en donne aucune : l'outil repassera par le guichet.
+        """
+        try:
+            du_chantier = self.regles_chantier()
+        except Exception:
+            du_chantier = []
         regles = _regles_simples(self.profil.get("autorisations"))
+        regles += [r for r in _regles_simples(du_chantier) if r not in regles]
         return [r for r in regles if not (lecture_seule and _ecrit(r))]
 
     def _alias(self, modele: str) -> str:

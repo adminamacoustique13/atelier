@@ -912,3 +912,30 @@ def test_le_socle_ne_contient_ni_lanceur_ni_commande_qui_detruit():
     assert not lecture & INTERPRETES
     assert not lecture & {"sed", "awk", "find", "xargs", "sort", "rg", "less", "more", "echo"}
     assert not set(noms) & {"rm", "mv", "cp", "chmod", "chown", "curl", "wget", "git"}
+
+
+@pytest.mark.parametrize("contexte, lecture_seule", [(OUVRIER, False), (VERIFICATEUR, True)])
+def test_les_regles_du_chantier_sont_donnees_a_chaque_agent(contexte, lecture_seule):
+    profil = {"autorisations": ["Bash(sed:*)"]}
+    agent, fabrique = claude([fin()], [fin()], profil=profil)
+    agent.regles_chantier = lambda: ["Bash(sed:*)", "Bash(curl:*)", "Write", "Bash(a,b)"]
+    lancer(agent, contexte, lecture_seule)
+    converser(agent)
+    for client in fabrique.clients:
+        allowed = client.options.allowed_tools
+        assert allowed.count("Bash(sed:*)") == 1 and "Bash(curl:*)" in allowed
+        assert allowed.index("Bash(curl:*)") > allowed.index("Bash(sed:*)")
+        assert "Bash(a,b)" not in allowed
+    assert ("Write" in fabrique.clients[0].options.allowed_tools) is not lecture_seule
+    assert "Write" not in fabrique.clients[1].options.allowed_tools
+
+
+def test_une_erreur_en_lisant_les_regles_du_chantier_n_en_donne_aucune():
+    agent, fabrique = claude([fin()])
+
+    def casse():
+        raise RuntimeError("état illisible")
+
+    agent.regles_chantier = casse
+    assert lancer(agent).ok
+    assert fabrique.clients[0].options.allowed_tools == agent._outils(False)

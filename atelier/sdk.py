@@ -135,13 +135,19 @@ def traduire_reponse(reponse):
     from claude_agent_sdk import PermissionResultAllow, PermissionResultDeny, PermissionUpdate
 
     choix = getattr(reponse, "choix", None)
-    regle = regle_sdk(getattr(reponse, "regle", None)) if choix == "toujours" else None
-    if regle is not None:
+    if choix == "toujours":
+        regles = [regle_sdk(getattr(reponse, "regle", None))]
+    elif choix == "chantier":
+        lues = getattr(reponse, "regles", ())
+        regles = [regle_sdk(r) for r in lues] if isinstance(lues, (list, tuple)) else []
+    else:
+        regles = []
+    if regles and None not in regles:  # une seule règle douteuse, et aucune n'est retenue
         mise_a_jour = PermissionUpdate(
-            type="addRules", rules=[regle], behavior="allow", destination="session"
+            type="addRules", rules=regles, behavior="allow", destination="session"
         )
         return PermissionResultAllow(updated_permissions=[mise_a_jour])
-    if choix in ("une_fois", "toujours"):  # « toujours » sans règle sûre : cette fois seulement
+    if choix in ("une_fois", "toujours", "chantier"):  # sans règle sûre : cette fois seulement
         return PermissionResultAllow()
     if choix == "non":
         message = getattr(reponse, "message", "")

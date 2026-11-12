@@ -2,7 +2,8 @@
 
 Chaque demande bloque seulement le fil de l'agent qui l'a faite. La personne responsable
 voit les demandes ouvertes sur le tableau de bord et répond : une fois, toujours pour ce
-projet, ou non avec une indication. Sans réponse dans le délai, la demande se ferme sur « non ».
+projet, toujours pendant ce chantier (quand aucune règle n'est assez étroite pour le projet), ou
+non avec une indication. Sans réponse dans le délai, la demande se ferme sur « non ».
 """
 
 import itertools
@@ -13,7 +14,7 @@ import threading
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
-CHOIX = ("une_fois", "toujours", "non")
+CHOIX = ("une_fois", "toujours", "chantier", "non")
 SANS_REPONSE = "Pas de réponse de la personne responsable."
 ARRETE = "Arrêté par la personne responsable."
 SCENARIO_EPUISE = "Le scénario de démonstration ne prévoit pas cette demande."
@@ -50,6 +51,17 @@ INTERPRETES = {
     "luajit", "rscript", "r", "julia", "tclsh", "wish", "expect", "osascript", "awk", "gawk",
     "mawk", "nawk", "guile", "racket", "jshell", "ghci", "runghc",
 }
+# Des lanceurs purs : une règle sur leur premier mot permettrait n'importe quelle commande, même
+# pour la durée d'un chantier. find et les lanceurs de paquets (npx...) en sont retirés : leur
+# règle large reste à la portée d'un clic, la carte la montre avant.
+LANCEURS_PURS = LANCEURS - {"find", "npx", "bunx", "uvx", "ts-node", "tsx"}
+# Après ces commandes, une règle sur le seul premier mot ouvrirait trop (git -c lance une commande).
+JAMAIS_LARGES = {"git"}
+# Ce qui substitue une commande ou un fichier dans une autre : aucune règle de chantier n'est sûre.
+SUBSTITUTION = re.compile(r"\$\(|`|<\(|>\(|[\x00-\x1f\x7f]")
+# Ce qui sépare les commandes d'une chaîne, et les redirections, ignorées pour lire leurs débuts.
+CHAINE = re.compile(r"&&|\|\||;|\|&?|&")
+REDIRECTION = re.compile(r"\d*(>>?|<)&?\s*[^\s;&|]*")
 OPTIONS_LONGUES = {"--eval", "--command", "--exec", "--execute", "--print", "--run"}
 LIGNE = re.compile(r"\r\n|\r|\n")
 CONTROLE = re.compile(r"[\x00-\x1f\x7f]")
@@ -80,6 +92,7 @@ class Reponse:
     choix: str
     message: str = ""
     regle: str = ""
+    regles: tuple[str, ...] = ()  # les règles d'un « chantier »
 
 
 def _texte(entree, cle: str) -> str:
@@ -124,6 +137,40 @@ def _debut_risque(debut: list[str]) -> bool:
     if (noms[0], debut[1].lower()) in PAIRES or noms[1] in INTERPRETES:
         return True
     return _option_risquee(debut[1], debut[0])
+
+
+def _regle_large(mots: list[str]) -> str:
+    """La règle sur le seul premier mot d'une commande, ou "" pour un lanceur pur ou un doute."""
+    premier = mots[0]
+    if not MOT_SUR.fullmatch(premier) or _nom(premier) in LANCEURS_PURS | JAMAIS_LARGES:
+        return ""
+    return f"Bash({premier}:*)"
+
+
+def regles_chantier_pour(outil, entree) -> list[str]:
+    """Les règles qui couvriraient la demande pendant le chantier, ou [] si aucune n'est sûre.
+
+    Seulement pour une commande que la règle « toujours » ne couvre pas. Chaque commande d'une
+    chaîne reçoit sa règle : la plus étroite si elle existe, sinon celle de son premier mot ;
+    un « cd » de tête n'en reçoit pas. Une seule commande sans règle possible (un lanceur pur,
+    une substitution, un mot douteux) et il n'y en a aucune : la demande reste au cas par cas.
+    """
+    if outil != "Bash" or regle_pour(outil, entree):
+        return []
+    commande = _texte(entree, "command")
+    if not commande.strip() or SUBSTITUTION.search(commande):
+        return []
+    regles: list[str] = []
+    for morceau in CHAINE.split(REDIRECTION.sub(" ", commande)):
+        mots = morceau.split()
+        if not mots or (_nom(mots[0]) == "cd" and len(mots) <= 2):
+            continue
+        regle = _regle_bash(morceau) or _regle_large(mots)
+        if not regle:
+            return []
+        if regle not in regles:
+            regles.append(regle)
+    return regles
 
 
 def _domaine(url: str) -> str:
@@ -182,7 +229,7 @@ def _couper(texte: str) -> str:
     return coupe + " [...]"
 
 
-def phrase_pour(agent, outil, entree, regle: str = "") -> str:
+def phrase_pour(agent, outil, entree, regle: str = "", pour_chantier: bool = False) -> str:
     """Dit en une phrase française ce que l'agent veut faire."""
     outil = outil if isinstance(outil, str) else str(outil)
     if outil == FIN_DE_REPETITION:
@@ -197,7 +244,9 @@ def phrase_pour(agent, outil, entree, regle: str = "") -> str:
     if not objet:
         return f"{agent} veut utiliser l'outil {_couper(outil)}."
     phrase = f"{agent} veut {verbe} « {objet} »."
-    if outil == "Bash" and not regle:
+    if outil == "Bash" and not regle and pour_chantier:
+        phrase += " Cette commande peut être autorisée pour ce chantier, pas pour de bon."
+    elif outil == "Bash" and not regle:
         phrase += " Cette commande ne peut être autorisée qu'au cas par cas."
     return phrase
 
@@ -207,14 +256,16 @@ class _Demande:
         self.id, self.agent = identifiant, str(agent)
         self.outil = outil if isinstance(outil, str) else str(outil)
         self.regle = regle_pour(outil, entree)
-        self.phrase = phrase_pour(self.agent, outil, entree, self.regle)
+        self.regles_chantier = regles_chantier_pour(outil, entree)
+        self.phrase = phrase_pour(self.agent, outil, entree, self.regle, bool(self.regles_chantier))
         self.detail = detail_pour(outil, entree)
         self.reponse: Reponse | None = None
         self.reglee = threading.Event()
 
     def fiche(self) -> dict:
         return {"id": self.id, "agent": self.agent, "outil": self.outil,
-                "phrase": self.phrase, "regle": self.regle, "detail": self.detail}
+                "phrase": self.phrase, "regle": self.regle, "detail": self.detail,
+                "regles_chantier": list(self.regles_chantier)}
 
 
 class Guichet:
@@ -266,8 +317,11 @@ class Guichet:
             demande = self._ouvertes.get(identifiant)
             if demande is None or (choix == "toujours" and not demande.regle):
                 return False
+            if choix == "chantier" and not demande.regles_chantier:
+                return False
             regle = demande.regle if choix == "toujours" else ""
-            self._fermer(demande, Reponse(choix, message, regle))
+            regles = tuple(demande.regles_chantier) if choix == "chantier" else ()
+            self._fermer(demande, Reponse(choix, message, regle, regles))
         return True
 
     def annuler(self, agent: str) -> int:
@@ -282,11 +336,13 @@ class Guichet:
 class GuichetSimule(Guichet):
     """Pour la démonstration : répond tout de suite, selon un scénario écrit d'avance.
 
-    Le scénario est une liste de choix (« une_fois », « toujours », « non ») ou de Reponse,
+    Le scénario est une liste de choix (« une_fois », « toujours », « chantier », « non ») ou de
+    Reponse,
     consommée dans l'ordre. Une fois épuisé, le guichet répond « non ». La règle d'un
     « toujours » est toujours celle que le vrai guichet proposerait, jamais celle du scénario.
     Quand cette règle manque, le vrai guichet refuserait « toujours » et laisserait la demande
-    ouverte ; le guichet simulé, qui doit répondre tout de suite, répond alors « une_fois ».
+    ouverte ; le guichet simulé, qui doit répondre tout de suite, répond alors « une_fois ». De
+    même pour « chantier », dont les règles sont toujours celles du vrai guichet.
     """
 
     def __init__(self, scenario=()):
@@ -301,6 +357,10 @@ class GuichetSimule(Guichet):
             demande = _Demande(self._nouvel_identifiant(), agent, outil, entree)
             self.demandes.append(demande.fiche())
             prevue = self._scenario.pop(0) if self._scenario else Reponse("non", SCENARIO_EPUISE)
+        if prevue.choix == "chantier":
+            if not demande.regles_chantier:
+                return Reponse("une_fois", prevue.message, "")
+            return Reponse("chantier", prevue.message, "", tuple(demande.regles_chantier))
         if prevue.choix != "toujours":
             return Reponse(prevue.choix, prevue.message, "")
         if not demande.regle:
