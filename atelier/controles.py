@@ -16,9 +16,6 @@ from pathlib import Path
 
 TOUJOURS_PERMIS = ("chantier/relais/*",)
 CAHIER = "chantier/CAHIER.md"
-# Le temps laissé à chaque commande de contrôle du profil avant de l'arrêter : une suite de tests
-# qui ne rend pas la main ne retient pas sa tâche pour toujours. Clé `delai_controles_s` du profil.
-DELAI_CONTROLES_S = 1800
 
 
 def expliquer_refus_git(message: str) -> str:
@@ -50,6 +47,11 @@ def hors_perimetre(fichiers: list[str], perimetre: list[str]) -> list[str]:
 def se_chevauchent(a: list[str], b: list[str]) -> bool:
     """Dit si deux périmètres peuvent toucher un même fichier."""
     return any(fnmatch(x, y) or fnmatch(y, x) for x in a for y in b)
+
+
+# Le temps laissé à chaque commande de contrôle du profil avant de l'arrêter : une suite de tests
+# qui ne rend pas la main ne retient pas sa tâche pour toujours. Clé `delai_controles_s` du profil.
+DELAI_CONTROLES_S = 1800
 
 
 def lire_delai(valeur) -> float:

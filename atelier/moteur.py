@@ -25,12 +25,6 @@ from atelier.guichet import ARRETE
 from atelier.modele import Chantier, Tache
 
 ACTIFS = ("en_cours", "en_verification")
-RELANCER, ABANDONNER = "Relancer un cran plus haut", "Abandonner cette tâche"
-RELANCER_TEL = "Relancer au même niveau"
-# Le motif d'une tâche que la personne responsable a arrêtée : ni seconde chance, ni montée.
-ARRETEE = "arretee"
-MOTIF_ARRET = "arrêtée par toi."
-DETAIL_ARRET = "Arrêtée par la personne responsable."
 # L'issue d'une tentative coupée par une panne de l'Atelier lui-même (git, disque, redémarrage) :
 # la tâche revient à la personne responsable, sans seconde chance ni montée.
 PANNE = "panne"
@@ -39,6 +33,12 @@ MOTIF_REDEMARRAGE = (
     "l'agent avait fait sans l'enregistrer est perdu."
 )
 DETAIL_REDEMARRAGE = "Interrompue par un arrêt de l'Atelier."
+RELANCER, ABANDONNER = "Relancer un cran plus haut", "Abandonner cette tâche"
+RELANCER_TEL = "Relancer au même niveau"
+# Le motif d'une tâche que la personne responsable a arrêtée : ni seconde chance, ni montée.
+ARRETEE = "arretee"
+MOTIF_ARRET = "arrêtée par toi."
+DETAIL_ARRET = "Arrêtée par la personne responsable."
 
 
 class ContratNonValide(Exception):
