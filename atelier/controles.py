@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import signal
 import subprocess
 import threading
 from contextlib import suppress
@@ -83,6 +84,42 @@ def se_chevauchent(a: list[str], b: list[str]) -> bool:
     return any(fnmatch(x, y) or fnmatch(y, x) for x in a for y in b)
 
 
+# Le temps laissé à chaque commande de contrôle du profil avant de l'arrêter : une suite de tests
+# qui ne rend pas la main ne retient pas sa tâche pour toujours. Clé `delai_controles_s` du profil.
+DELAI_CONTROLES_S = 1800
+
+
+def lire_delai(valeur) -> float:
+    """Le délai des contrôles lu dans un profil : un nombre de secondes positif, sinon 30 min."""
+    correct = isinstance(valeur, (int, float)) and not isinstance(valeur, bool) and valeur > 0
+    return float(valeur) if correct else float(DELAI_CONTROLES_S)
+
+
+def lancer_commande(commande: str, dossier, delai_s: float) -> tuple[int | None, str]:
+    """Lance une commande du profil ; rend (code de sortie, ce qu'elle a affiché).
+
+    Le code est None si elle n'a pas fini dans le délai : elle est alors arrêtée avec tout ce
+    qu'elle avait lancé (son propre groupe de processus, là où le système en a).
+    """
+    processus = subprocess.Popen(
+        commande, shell=True, cwd=dossier, text=True, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )  # fmt: skip
+    try:
+        sortie, erreurs = processus.communicate(timeout=delai_s)
+        return processus.returncode, f"{sortie}{erreurs}"
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(processus.pid, signal.SIGKILL)
+        except (AttributeError, OSError):  # pas de groupe sur ce système, ou déjà fini
+            processus.kill()
+        try:
+            sortie, erreurs = processus.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            sortie, erreurs = "", ""
+        return None, f"{sortie}{erreurs}"
+
+
 class ControlesSimules:
     """Contrôles sans git ni commandes : pour la démonstration et les tests du moteur."""
 
@@ -108,9 +145,10 @@ class ControlesSimules:
 class ControlesGit:
     """Contrôles réels : un arbre de travail par tâche, commandes du profil, fusion après accord."""
 
-    def __init__(self, depot: Path, commandes: list[str] | None = None):
+    def __init__(self, depot: Path, commandes: list[str] | None = None, delai_s=None):
         self.depot = Path(depot)
         self.commandes = commandes or []
+        self.delai_s = lire_delai(delai_s)
         self.verrou_fusion = threading.Lock()
         self.envoi = ""  # dernier problème d'envoi vers le dépôt en ligne, vide si tout va bien
         self._distant: str | None = None
@@ -210,14 +248,17 @@ class ControlesGit:
         return [ligne[3:].split(" -> ")[-1].strip('"') for ligne in sortie.splitlines() if ligne]
 
     def mecaniques(self, tache, dossier) -> tuple[bool, str]:
-        """Lance les commandes du profil. S'arrête à la première qui échoue."""
+        """Lance les commandes du profil. S'arrête à la première qui échoue ou qui ne finit pas."""
         journal = []
         for commande in self.commandes:
-            resultat = subprocess.run(
-                commande, shell=True, cwd=dossier, capture_output=True, text=True
-            )
-            journal.append(f"$ {commande}\n{resultat.stdout}{resultat.stderr}")
-            if resultat.returncode != 0:
+            code, sortie = lancer_commande(commande, dossier, self.delai_s)
+            journal.append(f"$ {commande}\n{sortie}")
+            if code is None:
+                journal.append(
+                    f"Pas de réponse après {self.delai_s:g} secondes : la commande a été arrêtée "
+                    "(réglage « delai_controles_s » du profil)."
+                )
+            if code != 0:
                 return False, "\n".join(journal)
         return True, "\n".join(journal)
 
@@ -320,6 +361,7 @@ class ControlesGit:
     def regler_outils(self, profil: dict) -> None:
         """Prend en compte un nouveau profil et l'enregistre, puis l'envoie s'il y a lieu."""
         self.commandes = list(profil.get("commandes", []))
+        self.delai_s = lire_delai(profil.get("delai_controles_s"))
         with self.verrou_fusion:
             self.enregistrer_fichier("chantier/profil.json", "Outils du projet")
         self.envoyer()

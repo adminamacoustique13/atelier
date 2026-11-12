@@ -11,6 +11,7 @@ import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+from contextlib import suppress
 
 from atelier import dosage
 from atelier.consignes import (
@@ -25,6 +26,14 @@ from atelier.guichet import ARRETE
 from atelier.modele import Chantier, Tache
 
 ACTIFS = ("en_cours", "en_verification")
+# L'issue d'une tentative coupée par une panne de l'Atelier lui-même (git, disque, redémarrage) :
+# la tâche revient à la personne responsable, sans seconde chance ni montée.
+PANNE = "panne"
+MOTIF_REDEMARRAGE = (
+    "l'Atelier s'est arrêté pendant qu'elle était en cours (redémarrage ou panne). Ce que "
+    "l'agent avait fait sans l'enregistrer est perdu."
+)
+DETAIL_REDEMARRAGE = "Interrompue par un arrêt de l'Atelier."
 RELANCER, ABANDONNER = "Relancer un cran plus haut", "Abandonner cette tâche"
 RELANCER_TEL = "Relancer au même niveau"
 # Le motif d'une tâche que la personne responsable a arrêtée : ni seconde chance, ni montée.
@@ -110,6 +119,7 @@ class Moteur:
         for tache in chantier.taches:
             if not tache.modele:
                 tache.modele, tache.effort = dosage.depart(tache.type, self.profil.get("dosage"))
+        self._reprendre()
 
     # --- petits outils -------------------------------------------------------------
 
@@ -157,6 +167,62 @@ class Moteur:
                 }
             )
         self._noter(f"J'ai besoin de toi : {raison}", tache)
+
+    # --- les pannes de l'Atelier lui-même ------------------------------------------
+
+    def _demander(self, tache: Tache, raison: str, detail: str) -> None:
+        """Sous le verrou : rend la tâche après une panne, avec sa trace et sa décision."""
+        tache.etat = "revenu"
+        tache.historique.append(
+            {
+                "tentative": tache.tentatives,
+                "modele": tache.modele,
+                "effort": tache.effort,
+                "issue": PANNE,
+                "detail": detail,
+            }
+        )
+        self.chantier.demandes.append(
+            {
+                "id": f"{tache.id}-{len(self.chantier.demandes) + 1}",
+                "tache": tache.id,
+                "question": f"Tâche {tache.id}, « {tache.titre} » : {raison}",
+                "options": [RELANCER_TEL, RELANCER, ABANDONNER],
+                "reponse": None,
+            }
+        )
+        self.chantier.noter(f"J'ai besoin de toi : {raison}", tache.id)
+
+    def _reprendre(self) -> None:
+        """Au chargement : rend les tâches qu'un arrêt de l'Atelier a laissées actives.
+
+        Un moteur neuf n'a encore lancé aucun agent : une tâche « en cours » ou « en
+        vérification » vient donc d'un état relu, et plus rien ne travaille pour elle. Sans cela
+        elle ne repartirait jamais, et retiendrait celles qui dépendent d'elle ou partagent son
+        périmètre. Rien n'est sauvé ici : celui qui monte le moteur sauve ensuite.
+        """
+        with self.verrou:
+            for tache in self.chantier.taches:
+                if tache.etat in ACTIFS:
+                    self._demander(tache, MOTIF_REDEMARRAGE, DETAIL_REDEMARRAGE)
+
+    def _panne(self, tache: Tache, erreur: Exception) -> None:
+        """Rend à la personne responsable une tâche coupée par une erreur de l'Atelier.
+
+        Une étape git qui échoue, un disque plein, un agent qui lève : la tâche revient avec
+        l'erreur écrite en clair, et les autres tâches continuent. Une tâche déjà vérifiée ou
+        déjà rendue garde son état : l'erreur (souvent la sauvegarde) est seulement écrite au fil.
+        """
+        detail = " ".join(f"{type(erreur).__name__} : {erreur}".split())[:500]
+        raison = f"une erreur de l'Atelier l'a interrompue, pas l'agent. {detail}"
+        with self.verrou:
+            if tache.etat in ACTIFS:
+                self._demander(tache, raison, detail)
+            else:
+                texte = f"Une erreur de l'Atelier a suivi cette tâche. {detail}"
+                self.chantier.noter(texte, tache.id)
+        with suppress(Exception):  # la sauvegarde peut être la panne elle-même
+            self.sur_changement()
 
     # --- l'arrêt d'une tâche -------------------------------------------------------
 
@@ -244,6 +310,8 @@ class Moteur:
     def _traiter(self, tache: Tache) -> None:
         try:
             self._boucle(tache)
+        except Exception as erreur:  # une panne ne fait tomber ni le moteur ni les autres tâches
+            self._panne(tache, erreur)
         finally:  # rien de ce qui précède ne pèse sur un lancement suivant
             with self.verrou:
                 self._arretees.discard(tache.id)

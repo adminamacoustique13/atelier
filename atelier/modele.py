@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -105,9 +106,16 @@ class Chantier:
         return asdict(self)
 
     def sauver(self, chemin: Path) -> None:
-        """Écrit l'état du chantier dans un fichier JSON."""
+        """Écrit l'état du chantier dans un fichier JSON, d'un seul geste.
+
+        Le texte part dans un fichier voisin, qui prend la place de l'ancien une fois écrit en
+        entier : un arrêt en pleine écriture laisse l'ancien état lisible, jamais un fichier
+        tronqué.
+        """
         chemin.parent.mkdir(parents=True, exist_ok=True)
-        chemin.write_text(json.dumps(self.en_dict(), ensure_ascii=False, indent=2), "utf-8")
+        provisoire = chemin.with_name(chemin.name + ".tmp")
+        provisoire.write_text(json.dumps(self.en_dict(), ensure_ascii=False, indent=2), "utf-8")
+        os.replace(provisoire, chemin)
 
     @classmethod
     def depuis_dict(cls, donnees: dict) -> Chantier:

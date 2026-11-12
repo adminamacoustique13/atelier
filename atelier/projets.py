@@ -70,16 +70,40 @@ def exclure_etat(depot: Path) -> None:
         exclusions.write_text(debut + "\n".join(manquent) + "\n", "utf-8")
 
 
+def lire_etat(depot: Path, nom: str) -> Chantier:
+    """Relit l'état du chantier d'un dépôt ; sans état, ou s'il est illisible, un chantier vide.
+
+    Un état illisible (fichier tronqué ou abîmé) n'est pas effacé : il est mis de côté sous un
+    autre nom dans `.atelier/`, et le fil du chantier neuf le dit. Sans cela le projet ne
+    s'ouvrirait plus, et l'Atelier ne démarrerait plus si c'est son premier projet.
+    """
+    etat = depot / ".atelier" / "etat.json"
+    neuf = Chantier(projet=nom, contrat=Contrat(objectif=""))
+    if not etat.exists():
+        return neuf
+    try:
+        return Chantier.charger(etat)
+    except (ValueError, TypeError, KeyError, AttributeError) as erreur:
+        ecarte = etat.with_name(f"etat-illisible-{datetime.now():%Y%m%d-%H%M%S}.json")
+        os.replace(etat, ecarte)
+        raison = " ".join(f"{type(erreur).__name__} : {erreur}".split())[:200]
+        neuf.noter(
+            f"L'état de ce chantier était illisible ({raison}). Je l'ai mis de côté dans "
+            f".atelier/{ecarte.name} et je repars d'un chantier vide. Le code du projet, son "
+            "historique git et les chantiers archivés ne sont pas touchés.",
+            auteur="orchestrateur",
+        )
+        return neuf
+
+
 def ouvrir_depot(depot: Path) -> Atelier:
     """Monte l'atelier d'un dépôt existant, avec de vrais agents Claude Code."""
     exclure_etat(depot)
     profil = lire_profil(depot)
-    etat = depot / ".atelier" / "etat.json"
-    if etat.exists():
-        chantier = Chantier.charger(etat)
-    else:
-        chantier = Chantier(projet=profil.get("nom", depot.name), contrat=Contrat(objectif=""))
-    controles = ControlesGit(depot, profil.get("commandes", []))
+    chantier = lire_etat(depot, profil.get("nom", depot.name))
+    controles = ControlesGit(
+        depot, profil.get("commandes", []), delai_s=profil.get("delai_controles_s")
+    )
     return Atelier(depot, chantier, AgentClaude(profil), controles, profil)
 
 
