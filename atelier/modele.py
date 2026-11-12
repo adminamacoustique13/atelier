@@ -87,6 +87,7 @@ class Chantier:
     demandes: list[dict] = field(default_factory=list)
     termine: bool = False
     session: str = ""
+    ouvert_le: str = field(default_factory=lambda: datetime.now().isoformat(timespec="minutes"))
 
     def tache(self, identifiant: str) -> Tache:
         """Rend la tâche portant cet identifiant."""
@@ -110,6 +111,7 @@ class Chantier:
     def depuis_dict(cls, donnees: dict) -> Chantier:
         """Reconstruit un chantier à partir d'un dictionnaire."""
         donnees = dict(donnees)
+        donnees.setdefault("ouvert_le", "")  # un état d'avant cette date : inconnue
         contrat = Contrat(**donnees.pop("contrat"))
         taches = [Tache(**t) for t in donnees.pop("taches", [])]
         return cls(contrat=contrat, taches=taches, **donnees)

@@ -145,9 +145,24 @@ Les nouveaux dossiers sont créés à côté du dépôt servi (dans son dossier 
 
 ### Un nouveau chantier dans le même projet
 
-Un projet garde un seul chantier à la fois, avec sa conversation, son contrat et ses tâches, et l'orchestrateur se souvient de tout ce qui s'y est dit. Quand un chantier est fini et que tu veux en commencer un autre dans le même projet, ouvre l'onglet Chantier et clique « Nouveau chantier », puis « Confirmer le nouveau chantier ».
+Un projet garde un seul chantier à la fois, avec sa conversation, son contrat et ses tâches, et l'orchestrateur se souvient de tout ce qui s'y est dit. Un redémarrage ou une mise à jour de l'Atelier reprend ce chantier tel quel. Quand il est fini et que tu veux en commencer un autre dans le même projet, ouvre l'onglet Chantier et clique « Nouveau chantier ».
 
-Le chantier en cours est alors archivé dans le dossier `.atelier/archives/` du projet (son état dans `etat.json`, son cahier dans `CAHIER.md`), et tu repars d'une page blanche : plus de tâches, un contrat vide, et un orchestrateur qui ne se souvient de rien. Le code du projet n'est pas touché. Le bouton refuse tant qu'un agent travaille ou que l'orchestrateur répond.
+Un petit formulaire te demande le nom du chantier qui se termine ; l'Atelier en propose un, tiré de son objectif. « Archiver et repartir » range alors ce chantier dans les archives du projet, et tu repars d'une page blanche : plus de tâches, un contrat vide, et un orchestrateur qui ne se souvient de rien. Le code du projet n'est pas touché. Le bouton refuse tant qu'un agent travaille ou que l'orchestrateur répond.
+
+### Les chantiers archivés
+
+Ils sont listés en bas de l'onglet Chantier, du plus récent au plus ancien, avec leur nom, leurs dates et leur bilan (« 3 tâches livrées sur 5 »). Un clic ouvre le journal du chantier :
+
+- **Livré** : les tâches qui ont passé le vérificateur, et dont le travail est entré dans le code du projet ;
+- **où est le travail livré** : sur ta machine seulement, ou aussi sur le dépôt en ligne si le projet y est relié, ou l'échec du dernier envoi ;
+- **Pas terminé** : chaque tâche restée en route, avec son état et pourquoi ;
+- **Tes décisions** : les questions que l'Atelier t'a posées, et ta réponse ;
+- **les chiffres** : agents lancés, montées en gamme, coût équivalent ;
+- **le fil complet** de la conversation, replié.
+
+L'Atelier ne déploie rien : « livré » veut dire vérifié et entré dans le code du projet, pas mis en ligne sur un serveur.
+
+Sur le disque, chaque archive est un dossier daté dans `.atelier/archives/` du projet, avec quatre fichiers : `JOURNAL.md` (le journal, lisible dans n'importe quel éditeur), `CAHIER.md`, `etat.json` (l'état complet) et `journal.json`. Le dossier `.atelier/` reste sur ta machine : il n'entre pas dans git. Le cahier du chantier, lui, est aussi dans l'historique git du projet.
 
 ### Reprendre un dépôt existant
 

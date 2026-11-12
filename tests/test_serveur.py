@@ -1774,8 +1774,11 @@ def test_un_nouveau_chantier_archive_l_ancien_et_repart_de_zero(tableau, tmp_pat
 
     assert code == 200 and vue["nouveau_chantier"]["fait"] is True
     phrase = vue["nouveau_chantier"]["phrase"]
-    assert phrase.startswith("Nouveau chantier ouvert. Le précédent est archivé dans ")
-    assert phrase.endswith("Le code du projet n'a pas changé.")
+    assert phrase == (
+        "Nouveau chantier ouvert. Le précédent, « Essai », est archivé : aucune tâche livrée "
+        "sur 1, 1 inachevée. Son journal se relit dans l'onglet Chantier, sous « Chantiers "
+        "archivés ». Le code du projet n'a pas changé."
+    )
     nouveau = atelier.moteur.chantier
     assert nouveau.taches == [] and nouveau.session == "" and nouveau.contrat.valide is False
     assert nouveau.contrat.objectif == "" and nouveau.projet == "essai"
@@ -1870,3 +1873,37 @@ def test_le_nouveau_fil_redit_ce_qui_est_su_de_la_facturation(tmp_path):
     assert any(t.startswith("Aucune variable ANTHROPIC_API_KEY") for t in textes) or any(
         t.startswith("Une variable ANTHROPIC_API_KEY") for t in textes
     )
+
+
+def test_le_chantier_archive_porte_le_nom_choisi_et_apparait_dans_la_vue(tableau, tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")])
+    serveur = tableau(atelier)
+    atelier.message("Objectif")
+    assert attendre(lambda: not atelier.occupe)
+    _, vue = serveur.appeler("/api/chantier/nouveau", {"nom": "  Refonte\ndu   tableau  "})
+    assert vue["nouveau_chantier"]["fait"] is True
+    (archive,) = vue["archives"]
+    assert archive["nom"] == "Refonte du tableau"
+    assert archive["bilan"] == "Aucune tâche livrée sur 1, 1 inachevée."
+    assert archive["archive_le"] and " à " in archive["archive_le"]
+    assert archive["ouvert_le"] and " à " in archive["ouvert_le"]
+    # Le journal se lit par la route, et un identifiant inconnu ou piégé ne lit rien.
+    _, lu = serveur.appeler("/api/archives/lire", {"id": archive["id"]})
+    assert lu["archive"]["trouvee"] is True
+    assert lu["archive"]["journal"]["nom"] == "Refonte du tableau"
+    for piege in ("../etat", "2026-01-01-000000", ["x"], ""):
+        _, lu = serveur.appeler("/api/archives/lire", {"id": piege})
+        assert lu["archive"] == {
+            "trouvee": False,
+            "phrase": "Cette archive est introuvable ou illisible.",
+        }
+
+
+def test_sans_nom_le_chantier_archive_prend_son_objectif(tmp_path):
+    atelier = atelier_simule(tmp_path, [tache("A")])
+    atelier.moteur.chantier.contrat.objectif = "Moteur de calcul de la norme"
+    atelier.message("Bonjour")
+    assert attendre(lambda: not atelier.occupe)
+    assert atelier.vue()["nom_propose"] == "Moteur de calcul de la norme"
+    assert atelier.nouveau_chantier()["fait"] is True
+    assert atelier.vue()["archives"][0]["nom"] == "Moteur de calcul de la norme"

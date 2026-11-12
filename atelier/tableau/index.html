@@ -300,9 +300,32 @@ button.discret { height: 24px; padding: 0 10px; font-size: 11.5px; font-weight: 
 .maj-phrase { flex: none; margin: -4px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
 .maj-phrase .page { display: block; color: var(--faible); }
 #maj[disabled] { opacity: 0.6; cursor: default; }
-.nouveau-chantier { align-items: center; gap: 10px; }
-.nouveau-chantier .petit { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
-#nouveau-chantier[disabled] { opacity: 0.6; cursor: default; }
+.nouveau-chantier, #form-nouveau-chantier { display: flex; flex-direction: column; gap: 8px; }
+.nouveau-chantier > .boutons { align-items: center; gap: 10px; }
+.nouveau-chantier .boutons .petit { flex: 1 1 200px; min-width: 0; overflow-wrap: anywhere; }
+#form-nouveau-chantier[hidden] { display: none; }
+#nom-chantier { max-width: 520px; }
+#archiver-chantier[disabled] { opacity: 0.6; cursor: default; }
+.archives { display: flex; flex-direction: column; }
+.archive-ligne { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 16px; width: 100%; height: auto; padding: 10px 2px;
+  text-align: left; border: 0; border-radius: 0; border-top: 1px solid var(--trait); background: transparent; color: var(--texte); font-weight: 400; }
+.archive-ligne:first-child { border-top: 0; }
+.archive-ligne:hover b, .archive-ligne:focus-visible b { text-decoration: underline; text-underline-offset: 3px; }
+.archive-ligne b { font-weight: 500; overflow-wrap: anywhere; }
+.archive-ligne .petit { grid-column: 1; }
+.archive-ligne .bilan { grid-column: 2; grid-row: 1 / span 2; align-self: center; color: var(--discret); font-size: 12px; text-align: right; }
+dialog.journal-archive { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow-y: auto; }
+.journal-archive h2 { font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.journal-archive h3 { margin-top: 16px; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
+.journal-archive p, .journal-archive li { font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.journal-archive ul { margin: 6px 0 0; padding-left: 18px; display: flex; flex-direction: column; gap: 4px; }
+.journal-archive .bilan { margin-top: 10px; font-weight: 500; }
+.journal-archive .chiffres { margin-top: 8px; }
+.journal-archive details { margin-top: 16px; }
+.journal-archive summary { cursor: pointer; font-size: 12.5px; color: var(--discret); }
+.journal-archive .fil-archive { margin-top: 8px; display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: var(--discret); }
+.journal-archive .fil-archive b { font-weight: 500; color: var(--texte); }
+.journal-archive > .boutons { margin-top: 18px; }
 button.discret.confirme { color: var(--refus); border-color: color-mix(in srgb, var(--refus) 60%, transparent); font-weight: 500; }
 .autorisation { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
 .autor-corps { display: flex; flex-direction: column; gap: 6px; min-width: 0; cursor: pointer; border-radius: 8px; }
@@ -424,7 +447,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
   <section class="vue defilante" id="vue-chantier" aria-label="Chantier">
     <div class="pages">
       <div class="grille">
-        <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="boutons nouveau-chantier"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div></article>
+        <article class="carte"><h2>Orchestrateur</h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
         <article class="carte"><h2>Ce qui t'attend</h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
       </div>
       <article class="carte" id="carte-mode" hidden><h2>Mode des ouvriers</h2><div class="modes-cadre"><div id="mode-ouvriers"></div><div id="mode-ouvriers-etat" aria-live="polite"></div></div></article>
@@ -441,6 +464,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
         </table></div>
       </article>
       <article class="carte"><h2>Fil du chantier</h2><ol class="evenements" id="evenements"></ol></article>
+      <article class="carte" id="carte-archives" hidden><h2>Chantiers archivés</h2><div class="archives" id="archives"></div></article>
     </div>
   </section>
 
@@ -474,6 +498,7 @@ button.mode-btn.envoi { border-color: var(--texte); color: var(--texte); animati
   </form>
 </dialog>
 
+<dialog id="archive" class="journal-archive" aria-labelledby="titre-archive"><div id="contenu-archive"></div><div class="boutons"><button type="button" id="fermer-archive">Fermer</button></div></dialog>
 <dialog id="liaison" aria-labelledby="titre-liaison">
   <form id="form-liaison">
     <h2 id="titre-liaison">Dépôt en ligne</h2>
@@ -893,6 +918,7 @@ function afficherChantier(vue) {
   document.getElementById("objectif").textContent = c.objectif;
   poser("attente", attenteHtml(vue));
   afficherMode(vue);
+  afficherArchives(vue);
   poser("tuiles", vue.statistiques.map((s) => {
     const total = Math.max(1, s.premier_coup + s.refus);
     return `<div class="rang"><span class="nom">${propre(s.type)}</span>
@@ -1226,16 +1252,16 @@ async function mettreAJour() {
   direMaj(faite.phrase, majAttente ? 0 : 15000);
 }
 
-/* Le bouton « Nouveau chantier » : le chantier en cours est archivé côté serveur, et le projet repart d'une
-   page blanche, avec un orchestrateur sans souvenir. Le premier clic arme le bouton cinq secondes, le second envoie. */
-let ncArme = false, ncArmeLe = 0, minuteNc = null, ncEnvoi = false, ncPhrase = "", minuteNcPhrase = null;
+/* « Nouveau chantier » : un clic ouvre un petit formulaire où l'on nomme le chantier qui se termine (le nom
+   proposé vient du serveur), puis « Archiver et repartir » l'envoie. Le serveur archive le chantier avec son
+   journal et repart d'une page blanche. Le formulaire ouvert n'est jamais réécrit par les rafraîchissements. */
+let ncEnvoi = false, ncPhrase = "", minuteNcPhrase = null;
 function afficherNouveauChantier() {
-  const bouton = document.getElementById("nouveau-chantier"), zone = document.getElementById("nouveau-chantier-phrase");
-  if (!bouton || !zone) return;
-  bouton.disabled = ncEnvoi;
-  bouton.classList.toggle("confirme", ncArme && !ncEnvoi);
-  bouton.textContent = ncEnvoi ? "Archivage en cours" : ncArme ? "Confirmer le nouveau chantier" : "Nouveau chantier";
+  const zone = document.getElementById("nouveau-chantier-phrase"), bouton = document.getElementById("archiver-chantier");
+  if (!zone || !bouton) return;
   zone.textContent = ncPhrase;
+  bouton.disabled = ncEnvoi;
+  bouton.textContent = ncEnvoi ? "Archivage en cours" : "Archiver et repartir";
 }
 function direNouveauChantier(texte, duree = 20000) {
   ncPhrase = texte;
@@ -1243,30 +1269,91 @@ function direNouveauChantier(texte, duree = 20000) {
   if (texte && duree) minuteNcPhrase = setTimeout(() => { ncPhrase = ""; afficherNouveauChantier(); }, duree);
   afficherNouveauChantier();
 }
+function ouvrirNouveauChantier(ouvrir) {
+  const form = document.getElementById("form-nouveau-chantier"), champ = document.getElementById("nom-chantier");
+  form.hidden = !ouvrir;
+  document.getElementById("nouveau-chantier").hidden = ouvrir;
+  if (!ouvrir) return;
+  direNouveauChantier("");
+  const propose = (derniere && derniere.nom_propose) || "";
+  champ.value = propose;
+  champ.focus();
+  champ.select();
+  if (rejoue) return;
+  // La vue gardée peut dater de quelques secondes (un plan vient d'arriver) : on relit le nom proposé,
+  // et on ne le pose que si la personne n'a encore rien tapé.
+  fetch("/api/etat").then((r) => (r.ok ? r.json() : null)).then((vue) => {
+    if (vue && vue.nom_propose && !form.hidden && champ.value === propose) { champ.value = vue.nom_propose; champ.select(); }
+  }).catch(() => {});
+}
 async function nouveauChantier() {
   if (ncEnvoi) return;
-  if (!ncArme) {
-    ncArme = true; ncArmeLe = performance.now();
-    clearTimeout(minuteNc);
-    minuteNc = setTimeout(() => { ncArme = false; afficherNouveauChantier(); }, 5000);
-    return direNouveauChantier(""); // une phrase d'avant n'a plus lieu d'être
-  }
-  if (performance.now() - ncArmeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
-  clearTimeout(minuteNc); ncArme = false;
-  if (rejoue) return direNouveauChantier("Démonstration rejouée : rien n'est archivé.");
+  if (rejoue) { ouvrirNouveauChantier(false); return direNouveauChantier("Démonstration rejouée : rien n'est archivé."); }
   ncEnvoi = true;
-  direNouveauChantier("");
+  afficherNouveauChantier();
   let donnees = null;
   try {
-    const retour = await fetch("/api/chantier/nouveau", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+    const nom = document.getElementById("nom-chantier").value.trim();
+    const retour = await fetch("/api/chantier/nouveau", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nom }) });
     if (retour.ok) donnees = await retour.json();
   } catch (erreur) { donnees = null; }
   ncEnvoi = false;
   const fait = donnees && donnees.nouveau_chantier;
   if (!fait || typeof fait.phrase !== "string") return direNouveauChantier("La demande n'est pas partie. Réessaie dans un instant.");
+  if (fait.fait) ouvrirNouveauChantier(false);
   if (Array.isArray(donnees.taches)) afficher(donnees);
   direNouveauChantier(fait.phrase);
 }
+document.getElementById("form-nouveau-chantier").addEventListener("submit", (e) => { e.preventDefault(); nouveauChantier(); });
+
+/* Les chantiers archivés : une ligne par archive (nom, dates, bilan) ; un clic ouvre son journal. */
+function archivesHtml(liste) {
+  return liste.map((a) => {
+    const dates = a.ouvert_le ? `Du ${a.ouvert_le} au ${a.archive_le}` : `Archivé le ${a.archive_le}`;
+    return `<button type="button" class="archive-ligne" data-action="lire-archive" data-id="${propre(a.id)}">
+      <b>${propre(a.nom)}</b><span class="bilan">${propre(a.bilan)}</span><span class="petit">${propre(dates)}</span></button>`;
+  }).join("");
+}
+function afficherArchives(vue) {
+  const liste = Array.isArray(vue.archives) ? vue.archives : [];
+  document.getElementById("carte-archives").hidden = liste.length === 0;
+  poser("archives", archivesHtml(liste));
+}
+const listeHtml = (elements, vide) => (elements.length ? `<ul>${elements.join("")}</ul>` : `<p class="calme">${vide}</p>`);
+function journalHtml(j) {
+  const dates = j.ouvert_le ? `Ouvert le ${j.ouvert_le}, archivé le ${j.archive_le}.` : `Archivé le ${j.archive_le}.`;
+  const livre = (j.livre || []).map((t) => `<li><b>${propre(t.id)}</b> — ${propre(t.titre)}. <span class="calme">${propre(t.detail)}</span></li>`);
+  const reste = (j.inacheve || []).map((t) => `<li><b>${propre(t.id)}</b> — ${propre(t.titre)} <span class="calme">(${propre(t.etat)}) : ${propre(t.raison)}</span></li>`);
+  const decisions = (j.decisions || []).map((d) => `<li>${propre(d.question)} <span class="calme">→ ${propre(d.reponse)}</span></li>`);
+  const chiffres = (j.chiffres || []).map(([nom, valeur]) => `<div><span>${propre(nom)}</span><b>${propre(valeur)}</b></div>`).join("");
+  const fil = (j.fil || []).map((e) => `<div><time>${propre(e.heure)}</time> <b>${propre(e.auteur)}</b> : ${propre(e.texte)}</div>`).join("");
+  return `<h2 id="titre-archive">${propre(j.nom)}</h2><p class="petit">${propre(dates)}</p>
+    <p><span class="calme">Objectif :</span> ${propre(j.objectif || "non fixé")}</p>
+    <p class="bilan">${propre(j.bilan)}</p><p class="calme">${propre(j.en_ligne)}</p>
+    <h3>Livré</h3>${listeHtml(livre, "Rien.")}
+    <h3>Pas terminé</h3>${listeHtml(reste, "Rien : tout a été livré.")}
+    <h3>Tes décisions</h3>${listeHtml(decisions, "Aucune.")}
+    <h3>Les chiffres</h3><div class="chiffres">${chiffres}</div>
+    <details><summary>Le fil complet de la conversation (${(j.fil || []).length} lignes)</summary><div class="fil-archive">${fil}</div></details>`;
+}
+async function lireArchive(id) {
+  if (rejoue) return;
+  const donnees = await envoyerSansAfficher("/api/archives/lire", { id });
+  const archive = donnees && donnees.archive;
+  const contenu = document.getElementById("contenu-archive");
+  contenu.innerHTML = archive && archive.trouvee ? journalHtml(archive.journal)
+    : `<h2 id="titre-archive">Archive introuvable</h2><p class="calme">${propre((archive && archive.phrase) || "La demande n'est pas partie. Réessaie dans un instant.")}</p>`;
+  const fenetre = document.getElementById("archive");
+  if (!fenetre.open) fenetre.showModal();
+  fenetre.scrollTop = 0;
+}
+async function envoyerSansAfficher(adresse, corps) {
+  try {
+    const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
+    return retour.ok ? await retour.json() : null;
+  } catch (erreur) { return null; }
+}
+document.getElementById("fermer-archive").addEventListener("click", () => document.getElementById("archive").close());
 
 function agir(cible) {
   const action = cible.dataset.action;
@@ -1280,7 +1367,9 @@ function agir(cible) {
   if (action === "derouler") { const nom = cible.dataset.nom; if (deroules.has(nom)) deroules.delete(nom); else deroules.add(nom); rafraichir(); }
   if (action === "mode") choisirMode(cible.dataset.mode);
   if (action === "maj") mettreAJour();
-  if (action === "nouveau-chantier") nouveauChantier();
+  if (action === "nouveau-chantier") ouvrirNouveauChantier(true);
+  if (action === "nouveau-chantier-annuler") ouvrirNouveauChantier(false);
+  if (action === "lire-archive") lireArchive(cible.dataset.id);
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
   if (action === "nouveau-projet") document.getElementById("nouveau").click();

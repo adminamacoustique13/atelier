@@ -12,11 +12,10 @@ import threading
 import uuid
 from collections import deque
 from contextlib import suppress
-from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
-from atelier import dosage
+from atelier import archives, dosage
 from atelier.agents import MODE_PAR_DEFAUT, MODES_OUVRIERS, AgentSimule, lire_mode, mode_valide
 from atelier.consignes import (
     BALISE_OUTILS,
@@ -421,6 +420,7 @@ class Atelier:
         self.brouillon = {"texte": "", "outils": []}
         self.sur_vue = None
         self.moteur = Moteur(chantier, agent, controles, profil, sur_changement=self._sauver)
+        self.archives = archives.lister(self.depot)  # relue à chaque archivage, pas à chaque vue
         if not chantier.taches and not chantier.evenements:
             chantier.noter(ACCUEIL, auteur="orchestrateur")
         if isinstance(profil, dict) and "mode_ouvriers" in profil and not mode_valide(lu):
@@ -537,6 +537,8 @@ class Atelier:
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
         donnees["mode_ouvriers"] = self._vue_mode()
+        donnees["archives"] = list(self.archives)
+        donnees["nom_propose"] = archives.nom_propose(self.moteur.chantier)
         controles = self.moteur.controles
         if hasattr(controles, "distant"):
             donnees["distant"] = {"adresse": controles.distant(), "probleme": controles.envoi}
@@ -792,12 +794,13 @@ class Atelier:
 
     # --- un nouveau chantier dans le même projet --------------------------------
 
-    def nouveau_chantier(self) -> dict:
-        """Archive le chantier en cours et repart d'un chantier vide, dans le même projet.
+    def nouveau_chantier(self, nom="") -> dict:
+        """Archive le chantier en cours sous un nom, et repart d'un chantier vide dans le projet.
 
-        La conversation, le contrat et les tâches partent dans `.atelier/archives/` ; le code du
-        projet n'est pas touché. L'orchestrateur repart d'une session neuve, sans souvenir de
-        l'ancienne. Refusé tant qu'un agent travaille ou que l'orchestrateur répond.
+        La conversation, le contrat, les tâches et un journal partent dans `.atelier/archives/` ;
+        le code du projet n'est pas touché. L'orchestrateur repart d'une session neuve, sans
+        souvenir de l'ancienne. Refusé tant qu'un agent travaille ou que l'orchestrateur répond.
+        Sans nom, le chantier reçoit celui que propose l'Atelier (son objectif).
         """
         with self.moteur.verrou:
             if self.en_marche() or self.occupe:
@@ -806,34 +809,37 @@ class Atelier:
             if not ancien.taches and not any(e["auteur"] == "toi" for e in ancien.evenements):
                 return {"fait": False, "phrase": CHANTIER_VIDE}
             avait_annonce = any(e["texte"] in DEPARTS for e in ancien.evenements)
-            archive = self._archiver(ancien)
+            j = archives.archiver(self.depot, ancien, nom, self._contexte_archive())
             nouveau = Chantier(projet=ancien.projet, contrat=Contrat(objectif=""))
             nouveau.noter(ACCUEIL, auteur="orchestrateur")
             phrase = (
-                f"Nouveau chantier ouvert. Le précédent est archivé dans {archive} : "
-                "sa conversation, son contrat et ses tâches y restent lisibles. "
-                "Le code du projet n'a pas changé."
+                f"Nouveau chantier ouvert. Le précédent, « {j['nom']} », est archivé : "
+                f"{j['bilan'][0].lower()}{j['bilan'][1:]} Son journal se relit dans l'onglet "
+                "Chantier, sous « Chantiers archivés ». Le code du projet n'a pas changé."
             )
             nouveau.noter(phrase)
             self.moteur.chantier = nouveau
             self.brouillon = {"texte": "", "outils": []}
+            self.archives = archives.lister(self.depot)
         if avait_annonce:
             self.annoncer_connexion()  # le nouveau fil redit ce qui est su de la facturation
         else:
             self._sauver()
         return {"fait": True, "phrase": phrase}
 
-    def _archiver(self, chantier: Chantier) -> str:
-        """Range l'état et le cahier du chantier dans un dossier daté, et rend son chemin court."""
-        racine = self.depot / ".atelier" / "archives"
-        nom = datetime.now().strftime("%Y-%m-%d-%H%M%S")
-        dossier, rang = racine / nom, 1
-        while dossier.exists():  # deux archives dans la même seconde
-            rang += 1
-            dossier = racine / f"{nom}-{rang}"
-        chantier.sauver(dossier / "etat.json")
-        ecrire_cahier(chantier, dossier / "CAHIER.md")
-        return f".atelier/archives/{dossier.name}"
+    def _contexte_archive(self) -> dict:
+        """Ce que le journal dit de la livraison : le mode, le dépôt en ligne, le dernier envoi."""
+        controles = self.moteur.controles
+        distant = controles.distant() if hasattr(controles, "distant") else ""
+        probleme = getattr(controles, "envoi", "") or ""
+        return {"mode": self.mode, "distant": distant or "", "probleme": probleme}
+
+    def lire_archive(self, ident) -> dict:
+        """Le journal d'un chantier archivé de ce projet, pour le tableau de bord."""
+        j = archives.lire(self.depot, ident)
+        if j is None:
+            return {"trouvee": False, "phrase": "Cette archive est introuvable ou illisible."}
+        return {"trouvee": True, "journal": j}
 
     # --- l'arrêt -----------------------------------------------------------------
 
@@ -1118,7 +1124,10 @@ ROUTES = {
     "/api/arreter": lambda r, c: {"arret": r.atelier.arreter(c.get("tache"))},
     "/api/mode": lambda r, c: {"changement_mode": r.atelier.changer_mode(c["mode"])},
     "/api/mise-a-jour": lambda r, c: r.mettre_a_jour(),
-    "/api/chantier/nouveau": lambda r, c: {"nouveau_chantier": r.atelier.nouveau_chantier()},
+    "/api/chantier/nouveau": lambda r, c: {
+        "nouveau_chantier": r.atelier.nouveau_chantier(c.get("nom", ""))
+    },
+    "/api/archives/lire": lambda r, c: {"archive": r.atelier.lire_archive(c["id"])},
 }
 
 
