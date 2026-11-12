@@ -2,6 +2,14 @@
 
 Validé le 2026-11-12 par la personne responsable (« Tu vas pouvoir lancer le ménage »), une fois les trois branches en cours fusionnées dans `main` (9d4cf2c).
 
+Amendé le 2026-11-12 par la personne responsable (« gère les 4 points ») : les quatre points laissés pour le bilan entrent dans le chantier, et c'est l'orchestrateur qui tranche leurs détails.
+1. Les deux incohérences d'affichage de la page (format d'un nombre de tokens, libellé de l'orchestrateur) : un seul format, ce qui change l'écran à ces deux endroits.
+2. Les défauts antérieurs au chantier relevés en route (écriture du profil interrompue, réglage d'outils qu'on ne peut pas réessayer, valeur mal formée dans le profil, bouton bloqué quand le réseau tombe) : ils sont corrigés, chacun avec un test qui échoue avant.
+3. Les tests qui manquent sur le suivi de la carte et sur le moteur : ils sont écrits.
+4. Ce que le contrat protégeait. Trois zones rouges sont levées, pour ces tâches seulement : toucher `atelier/controles.py` et `atelier/guichet.py` pour réunir les fonctions qui appellent git et les constantes en double, sans changer ce qu'ils décident ; modifier ou retirer les tests qui ne servent qu'à du code retiré ou déplacé ; découper `atelier/serveur.py` et `atelier/tableau/index.html` en plusieurs fichiers, décision d'architecture inscrite au journal.
+
+Le reste du contrat ne change pas : rien n'entre dans `main` sans sa décision, aucune bibliothèque ajoutée, aucun secret touché.
+
 ## Objectif
 Retirer le code mort prouvé, corriger les commentaires qui ne disent plus la vérité et réunir les doublons, sans changer aucun comportement, pour un code d'une clarté absolue.
 

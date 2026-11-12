@@ -1,6 +1,6 @@
 # Cahier des charges — chantier « ménage », 2026-11-12
 
-État général : en cours. Première vague lancée (M1 et M2).
+État général : en cours. Les sept premières tâches sont vérifiées et enregistrées ; le contrat a été amendé le 2026-11-12 pour traiter aussi les quatre points du bilan (tâches M5a à M13).
 
 Source des constats : l'audit du 2026-11-12 (deux lecteurs en lecture seule sur 513bf22, constats principaux recontrôlés par l'orchestrateur sur `main`). Les chantiers précédents sont rangés dans `chantier/archives/`.
 
@@ -15,9 +15,17 @@ Compteur : 5 agents lancés dans le chantier (2 ouvriers, 1 vérificateur, plus 
 | M3a. Archives et carte : table des efforts, format d'un coût | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (1 nouveau) ; égalité des deux formats prouvée par script sur 19 valeurs |
 | M3b. Serveur et rythme : nom d'agent, coupe aux balises, phrases du profil | vérifié | Sonnet | mécanique, diff relu par l'orchestrateur | 1 | 764 tests (2 nouveaux) ; remplacements d'expressions identiques |
 | M4. Serveur : une seule lecture et une seule écriture du profil | vérifié | Opus | complète, Fable : accepté | 1 | 761 tests (3 nouveaux, rouges sur le code de départ) ; 1 104 scénarios comparés avant/après sans différence ; 13 casses sur 14 vues par les tests |
-| M5. Une seule fonction pour appeler git | à lancer, attend une décision | Opus | complète, Fable | | |
+| M6b. (voir plus haut) | en vérification | Opus | bornée, Fable | 1 | |
+| M5a. Une base commune pour appeler git, adoptée par `projets`, `essai`, `carte` | en cours | Opus | complète, Fable | 1 | |
+| M5b. La base git adoptée par `controles` et `mise_a_jour` | à lancer, après M5a | Opus | complète, Fable | | |
+| M5c. `ARRET` et `ARRETE` : une seule constante ; `SANS_REPONSE` : deux noms | en cours | Sonnet | bornée, Opus | 1 | |
+| M9. Profil : écriture d'un seul geste, réglage d'outils qu'on peut réessayer, valeur mal formée refusée | en cours | Opus | complète, Fable | 1 | |
+| M10. Les tests qui manquent : suivi de la carte, moteur | en cours | Opus | bornée, Fable (par casses) | 1 | |
+| M8. Page : un seul format de tokens, un seul libellé de l'orchestrateur, pannes de réseau dites à l'écran | à lancer, après M6b | Opus | bornée, Fable | | |
+| M11. Le code qui ne vit que pour les tests : sorti du produit ou retiré | à lancer, après M5 et M9 | Opus | bornée, Fable | | |
+| M12. `serveur.py` découpé en modules | à lancer, après M9 et M11 | Opus | complète, Fable | | |
+| M13. La page découpée en fichiers | à lancer, après M8 | Opus | complète, Fable | | |
 | M6a. Page : les petits calculs écrits plusieurs fois | vérifié | Opus | bornée, Opus : accepté | 1 | 758 tests, 365 vérifications dans le navigateur ; égalité avant/après prouvée par deux scripts indépendants (ouvrier, vérificateur) |
-| M6b. Page : envois au serveur, minuteries, tracés de fil | à lancer | Opus | bornée, Fable | | |
 | M7. Moteur et carte : doublons internes | vérifié | Opus | complète, Fable : accepté | 1 | 758 tests inchangés et verts ; plus de 150 000 scénarios comparés avant/après sans écart ; 12 casses sur 28 vues par les tests, le reste couvert par la comparaison |
 
 ### Restes mineurs relevés par le vérificateur de M1, non corrigés
