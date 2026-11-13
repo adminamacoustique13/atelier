@@ -17,6 +17,7 @@ Les sept règles, dans les mots de la personne responsable :
 - Mécanisme : un `ClaudeSDKClient` gardé connecté, `connect()` une fois puis `query()` et `receive_response()` à chaque demande. `SessionSDK` le fait déjà (`sdk.py`) ; c'est `AgentClaude._travailler` qui ferme après chaque appel. La référence ne ferme pas, range la session par tâche et la ferme par `liberer`.
 - Ici : l'agent garde l'ouvrier, et le moteur garde son appel `executer(reprendre=session)`, servi par l'ouvrier ouvert s'il l'est encore.
 - La reprise par session reste comme repli quand l'ouvrier n'est plus ouvert. La règle « copie inchangée, le refus vaut » la rend sans coût là où elle ne donne rien.
+- Arbitré à M3 : un ouvrier n'est gardé ouvert que si l'appelant le demande, appel par appel (`executer(..., garder_ouvert=True)`), et celui qui le demande le libère. Le moteur (M9) lit le réglage `ouvrier_ouvert` du profil, passe `garder_ouvert=True`, appelle `liberer(tache)` à la fin de chaque tâche hors de son verrou, et `liberer_tous()` à l'arrêt de l'Atelier.
 - En attente d'un verdict, l'ouvrier ouvert ne tient ni place ni jeton et n'est pas compté en marche ; il est borné par `ouverts_max`. Un retour reprend place et jeton avant les tâches neuves.
 - L'arrêt de la tâche, une suspension ou une erreur le ferment. À l'arrêt de l'Atelier il meurt, et la copie reste.
 
@@ -28,6 +29,8 @@ Tout se décide sur des champs de `Jugement` (`origine`, `motif`, plus `lisible`
 4. tentatives épuisées : tâche rendue ;
 5. fond faux : montée ;
 6. sinon : même niveau, sur la copie gardée.
+
+Arbitré à M6 : une panne est neutre pour tout ce qui décide de la suite d'une tâche. Les entrées `attente_panne` sont sautées par `_fenetre`, `_passes_du_depart` et les statistiques ; le compte des pannes ne revient à zéro que lorsqu'un agent a réellement rendu un travail jugé, jamais sur une limite, une surcharge ou une connexion perdue.
 
 ### c. Reprise seule après un arrêt
 Sûre à ces conditions : `tache.copie` est écrit dans l'état avant chaque départ ; le chargement ne fait que changer l'état, et le serveur relance seulement avec un contrat validé, le port pris et un verrou par dépôt tenu ; la relance est annoncée au fil et attend 30 s ; la tentative est rendue trois fois au plus par tâche ; une tâche « revenue » ne repart jamais seule ; la barrière du budget s'applique ; `reprise_auto: false` rétablit la règle d'avant.
