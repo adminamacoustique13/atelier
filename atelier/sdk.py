@@ -42,6 +42,14 @@ refusés pendant le tour, d'où que vienne le refus : le guichet ou le pont (san
 « non », guichet en panne ; jamais un refus pour arrêt), l'arbitre du mode auto, et en fin de tour
 `permission_denials`, quel que soit le mode. Un même appel n'est compté qu'une fois.
 
+Les refus d'office (`refus_d_office`, voir `atelier.agents.interdits`, dont ceux de tout agent
+s'ajoutent toujours à ceux qu'on donne) : ils vont à Claude Code dans un fichier de réglages
+(`permissions.deny`), lisible par son seul propriétaire, écrit à la première connexion de la
+session et effacé quand elle se ferme, une fois tous ses Claude Code sortis. Un fichier plutôt
+que la ligne de commande : il y en a plus d'un millier, avec des guillemets et des barres
+inverses, que la ligne de commande de Windows n'accepte pas toujours. Si ce fichier ne peut pas
+être écrit, l'agent ne part pas.
+
 La reprise exigée (`reprise_exigee`) : la session demandée doit être celle qui répond. Si Claude
 Code part dans une autre, ou si le tour échoue avant que la session ait répondu (connexion
 refusée, fin en erreur, aucune réponse), le tour rend `REPRISE_IMPOSSIBLE`.
@@ -51,7 +59,10 @@ from __future__ import annotations
 
 import asyncio
 import concurrent.futures
+import json
+import os
 import re
+import tempfile
 import threading
 import warnings
 from contextlib import suppress
@@ -67,6 +78,7 @@ from atelier.agents import (
     decrire_limite,
     decrire_outil,
     forme_courte,
+    interdits,
     mode_valide,
 )
 from atelier.guichet import ARRETE
@@ -215,6 +227,27 @@ class _Memoire(dict):
             del self[next(iter(self))]
 
 
+def ecrire_refus(regles) -> str | None:
+    """Écrit des règles de refus dans un nouveau fichier de réglages Claude Code ; rend son chemin.
+
+    Le fichier, propre à l'appel et lisible par son seul propriétaire, porte `permissions.deny`.
+    Rend None s'il n'y a aucune règle (une entrée qui n'est pas une chaîne pleine est écartée).
+    Lève OSError si le fichier ne peut pas être écrit : un agent ne part jamais sans ses refus.
+    """
+    lues = [r for r in regles or [] if isinstance(r, str) and r.strip()]
+    if not lues:
+        return None
+    descripteur, chemin = tempfile.mkstemp(prefix="atelier-refus-", suffix=".json")
+    try:
+        with os.fdopen(descripteur, "w", encoding="utf-8") as fichier:
+            json.dump({"permissions": {"deny": lues}}, fichier, ensure_ascii=False, indent=1)
+    except BaseException:  # un fichier à moitié écrit ne doit servir à personne
+        with suppress(OSError):
+            os.remove(chemin)
+        raise
+    return chemin
+
+
 def regle_sdk(regle):
     """Transforme une règle Claude Code, comme `Bash(npm install:*)`, en règle du SDK.
 
@@ -320,12 +353,18 @@ class SessionSDK:
         reprise: bool = False,
         fabrique_client=None,
         reprise_exigee: bool = False,
+        refus_d_office: list[str] | None = None,
     ):
         if not mode_valide(mode_permission):  # jamais bypassPermissions, ni un mode inconnu
             raise ValueError(f"Mode de permission refusé : {mode_permission!r}.")
         self.agent, self.modele, self.effort, self.dossier = agent, modele, effort, dossier
         self.outils_permis = list(outils_permis or [])
         self.outils_interdits = list(outils_interdits or [])
+        # Les refus d'office, et le fichier de réglages qui les porte une fois écrit. Ceux de
+        # tout agent (`interdits()`) s'y ajoutent toujours : une session ouverte sans eux, par
+        # un lancement oublié, part quand même avec eux.
+        self.refus_d_office = list(dict.fromkeys([*(refus_d_office or []), *interdits()]))
+        self._reglages: str | None = None
         self.mode_permission, self.role_ajoute = mode_permission, role_ajoute
         self.guichet, self.sur_evenement, self.delai_max_s = guichet, sur_evenement, delai_max_s
         self.session, self.reprise = session, reprise
@@ -438,15 +477,25 @@ class SessionSDK:
         boucle = self._boucle
         if boucle is None:
             return
+        sortis = False  # tous les Claude Code de la session sont-ils sortis ?
         if libre:
             with suppress(Exception):
                 asyncio.run_coroutine_threadsafe(self._tout_deconnecter(), boucle).result(
                     timeout=self.delai_deconnexion_s + 5
                 )
+                sortis = not self._deconnexions
         boucle.call_soon_threadsafe(boucle.stop)
         self._fil.join(timeout=self.delai_deconnexion_s)
         if not boucle.is_running():
             boucle.close()
+        if sortis:  # un Claude Code encore en vie pourrait relire ses réglages : on les laisse
+            self._effacer_reglages()
+
+    def _effacer_reglages(self) -> None:
+        chemin, self._reglages = self._reglages, None
+        if chemin:
+            with suppress(OSError):
+                os.remove(chemin)
 
     def _executer(self, consigne: str) -> Resultat:
         """Confie le tour à la boucle de la session et l'attend, avec un garde-fou."""
@@ -571,6 +620,12 @@ class SessionSDK:
         prompt = {"type": "preset", "preset": "claude_code"}
         if self.role_ajoute:
             prompt["append"] = self.role_ajoute
+        if self._reglages is None and self.refus_d_office:
+            try:
+                self._reglages = ecrire_refus(self.refus_d_office)
+            except OSError as erreur:  # sans ses refus, l'agent ne part pas
+                ecrits = "les refus d'office n'ont pas pu être écrits"
+                raise RuntimeError(f"{ecrits} ({erreur})") from None
         options = ClaudeAgentOptions(
             model=self.modele,
             effort=self.effort,
@@ -583,6 +638,7 @@ class SessionSDK:
             system_prompt=prompt,
             session_id=None if self.reprise else self.session,
             resume=self.session if self.reprise else None,
+            settings=self._reglages,  # les refus d'office, en `permissions.deny`
         )
         return (self.fabrique_client or ClaudeSDKClient)(options)
 

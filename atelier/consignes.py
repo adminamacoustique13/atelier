@@ -112,8 +112,15 @@ fiche de relais ce que tu y aurais mis. Le contrôle du périmètre refuserait t
 tâches qui travaillent en même temps que toi se heurteraient dans ce fichier commun ; la tâche \
 de raccord recopiera ta ligne."""
 
-AUCUN_COMMIT = """- Aucun commit et aucune commande git qui modifie le dépôt : l'atelier \
-enregistre après vérification."""
+# Ce que l'atelier refuse d'office à tout agent (`atelier.agents.interdits`), dit une seule fois
+# ici : l'ouvrier la reçoit avec ses interdits, l'orchestrateur dans son rôle.
+GIT_ET_SECRETS = """git ne sert qu'à lire, par une commande simple sans option avant le geste \
+(`git status`, `git diff`, `git log`, `git show`, pas `git -C dossier log`) ; l'atelier seul \
+enregistre le travail ; un fichier de secrets (`.env`, une clé privée) ne se lit pas. Ces \
+commandes et ces lectures te sont refusées d'office."""
+
+AUCUN_COMMIT = f"""- Aucun commit et aucune commande git qui modifie le dépôt : l'atelier \
+enregistre après vérification. {GIT_ET_SECRETS}"""
 
 OUTILS_PERMIS = f"""Tu peux installer librement un outil de travail (test, contrôle de forme, \
 lecture de documents), depuis une source officielle (pip, npm, crates.io, le dépôt de l'éditeur). \
@@ -357,8 +364,8 @@ REPRISES = {
         "Défais tes changements dans ces fichiers avec l'outil Edit (ou Write) : relis le fichier, "
         "remets-le tel qu'il était, et pour un fichier que tu as créé, vide-le ou dis-le dans ton "
         "compte rendu s'il faut le supprimer. N'emploie aucune commande git pour cela "
-        "(`git checkout`, `git restore`) : elle ouvrirait une carte d'autorisation et pourrait "
-        "défaire plus que ce que tu veux. Un fichier hors de ton périmètre fait "
+        "(`git checkout`, `git restore`) : elle te serait refusée, et pourrait défaire plus que "
+        "ce que tu veux. Un fichier hors de ton périmètre fait "
         "refuser le livrable quoi qu'il contienne. Si une règle du projet te demandait d'y "
         "écrire, mets plutôt dans ta fiche de relais ce que tu y aurais mis ; si la tâche en a "
         "vraiment besoin, dis-le dans ton compte rendu.",
@@ -967,6 +974,8 @@ fichier : ce sont les agents de l'atelier qui écrivent le code, chacun dans son
 chaque livrable est vérifié par un autre agent avant d'être enregistré.
 
 Chaque message commence par l'état du chantier, fourni par l'atelier. Sers-t'en sans le réciter.
+
+Ce que l'atelier refuse d'office, à toi comme aux autres agents : """ + GIT_ET_SECRETS + """
 
 Le dépôt en ligne (GitHub ou autre) se relie avec le bouton « Dépôt en ligne », en haut du \
 tableau de bord : indique ce bouton, ne donne pas de commandes à taper dans un terminal. Une fois \

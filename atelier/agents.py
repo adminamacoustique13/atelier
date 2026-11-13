@@ -13,8 +13,11 @@ livrable, où ses essais passent sans carte (« acceptEdits »), ou à défaut e
 
 from __future__ import annotations
 
+import functools
 import json
+import os
 import re
+import string
 import threading
 import time
 from contextlib import contextmanager, suppress
@@ -31,23 +34,15 @@ ECRITURE = ("Edit", "Write", "MultiEdit", "NotebookEdit")
 # Une règle simple : un nom d'outil, suivi ou non d'une seule paire de parenthèses non vide.
 # Le SDK joint les outils permis par des virgules : une virgule ferait lire deux règles.
 REGLE_SIMPLE = re.compile(r"[A-Za-z0-9_.:-]+(\([^(),\x00-\x1f\x7f]+\))?")
-# Git en lecture seule : regarder l'historique et les branches, jamais les changer.
+# Git en lecture seule : regarder l'historique et les branches, jamais les changer. `git branch`
+# n'est permis que seul : suivi d'un mot, il est refusé (`interdits`), la branche courante se lit
+# par `git status` ou `git rev-parse --abbrev-ref HEAD`.
 GIT_LECTURE = [
     f"Bash(git {c}:*)"
     for c in (
-        "status",
-        "diff",
-        "log",
-        "show",
-        "ls-files",
-        "remote -v",
-        "remote get-url",
-        "branch --show-current",
-        "branch -a",
-        "branch -v",
-        "rev-parse",
+        "status", "diff", "log", "show", "ls-files", "remote -v", "remote get-url", "rev-parse",
     )
-]
+] + ["Bash(git branch)"]  # fmt: skip
 
 # Des commandes qui lisent sans rien changer ni rien lancer d'autre, permises à tous les agents.
 # Écartées exprès : sed, awk, find, xargs, sort et rg, qui savent exécuter une autre commande
@@ -73,6 +68,278 @@ COMMANDES_DEV = [
 ]  # fmt: skip
 # Chercher sur le web ne touche à rien ; lire une page (WebFetch) passe toujours par une carte.
 WEB_LECTURE = ["WebSearch"]
+
+# --- Ce qui est refusé d'office à tout agent (`interdits`) ---------------------------------------
+# Claude Code compare une règle Bash au texte de la commande, morceau par morceau d'une chaîne,
+# espaces répétées ramenées à une seule et casse comprise : `Bash(x:*)` vaut pour `x` et `x ...`,
+# une étoile ailleurs pour n'importe quelle suite de caractères, et une étoile seule en fin après
+# une espace (`Bash(x *)`) pour `x` aussi. Avant de comparer, il retire les variables posées
+# devant, les lanceurs (`env`, `xargs`, `timeout`...) et les redirections, dont il juge la cible
+# par les règles Read et Edit. Un refus passe avant toute permission, toute règle retenue et le
+# guichet. Ce n'est qu'une barrière sur le texte : voir LISEZMOI, « Les autorisations ».
+
+# Git : tout est refusé, sauf une courte liste de lectures. Un refus ne connaît pas d'exception :
+# la liste des commandes de git doit donc être entière. C'est celle de git 2.43
+# (`git --list-cmds=builtins,main,others`), plus les commandes plus récentes et les extensions
+# connues ; un test la compare au git installé. Une commande ajoutée par un programme `git-xxx`
+# du PATH est refusée elle aussi (`_externes_git`).
+LECTURES_GIT = (
+    "status", "diff", "log", "show", "blame", "ls-files", "rev-parse", "cat-file", "grep",
+    "shortlog", "describe", "merge-base", "ls-tree", "rev-list", "name-rev", "for-each-ref",
+    "show-ref", "diff-tree", "diff-files", "diff-index", "check-ignore", "count-objects",
+    "whatchanged", "help", "version", "var",
+)  # fmt: skip
+# Ces deux commandes lisent ou écrivent selon leurs mots : voir `_gestes_git`.
+LECTURES_RESTREINTES = ("branch", "remote")
+COMMANDES_GIT = (
+    "add", "am", "annotate", "apply", "archimport", "archive", "backfill", "bisect", "blame",
+    "branch", "bugreport", "bundle", "cat-file", "check-attr", "check-ignore", "check-mailmap",
+    "check-ref-format", "checkout", "checkout--worker", "checkout-index", "cherry", "cherry-pick",
+    "citool", "clean", "clone", "column", "commit", "commit-graph", "commit-tree", "config",
+    "count-objects", "credential", "credential-cache", "credential-cache--daemon",
+    "credential-store", "cvsexportcommit", "cvsimport", "cvsserver", "daemon", "describe",
+    "diagnose", "diff", "diff-files", "diff-index", "diff-tree", "difftool", "difftool--helper",
+    "fast-export", "fast-import", "fetch", "fetch-pack", "filter-branch", "fmt-merge-msg",
+    "for-each-ref", "for-each-repo", "format-patch", "fsck", "fsck-objects", "fsmonitor--daemon",
+    "gc", "get-tar-commit-id", "gitk", "gitweb", "grep", "gui", "hash-object", "help", "hook",
+    "http-backend",
+    "http-fetch", "http-push", "imap-send", "index-pack", "init", "init-db", "instaweb",
+    "interpret-trailers", "last-modified", "log", "ls-files", "ls-remote", "ls-tree", "mailinfo",
+    "mailsplit", "maintenance", "merge", "merge-base", "merge-file", "merge-index",
+    "merge-octopus", "merge-one-file", "merge-ours", "merge-recursive", "merge-recursive-ours",
+    "merge-recursive-theirs", "merge-resolve", "merge-subtree", "merge-tree", "mergetool",
+    "mktag", "mktree", "multi-pack-index", "mv", "name-rev", "notes", "p4", "pack-objects",
+    "pack-redundant", "pack-refs", "patch-id", "pickaxe", "prune", "prune-packed", "pull", "push",
+    "quiltimport", "range-diff", "read-tree", "rebase", "receive-pack", "reflog", "refs",
+    "remote", "remote-ext", "remote-fd", "remote-ftp", "remote-ftps", "remote-http",
+    "remote-https", "repack", "replace", "replay", "repo", "request-pull", "rerere", "reset",
+    "restore", "rev-list", "rev-parse", "revert", "rm", "scalar", "send-email", "send-pack",
+    "sh-i18n", "sh-i18n--envsubst", "sh-setup", "shell", "shortlog", "show", "show-branch",
+    "show-index", "show-ref",
+    "sparse-checkout", "stage", "stash", "status", "stripspace", "submodule", "submodule--helper",
+    "subtree", "svn", "switch", "symbolic-ref", "tag", "unpack-file", "unpack-objects",
+    "update-index", "update-ref", "update-server-info", "upload-archive",
+    "upload-archive--writer", "upload-pack", "var", "verify-commit", "verify-pack", "verify-tag",
+    "version", "web--browse", "whatchanged", "worktree", "write-tree",
+)  # fmt: skip
+# Des extensions répandues, installées à part (`git lfs`, `git flow`...).
+EXTENSIONS_GIT = (
+    "lfs", "flow", "filter-repo", "clang-format", "absorb", "crypt", "secret", "annex",
+    "credential-manager", "credential-osxkeychain", "credential-libsecret", "credential-wincred",
+    "extras", "delete-branch", "undo", "sync", "town", "machete", "spice", "branchless",
+)  # fmt: skip
+# `git remote` : seuls les sous-gestes qui écrivent sont refusés, même après une option
+# (`git remote -v set-url ...`) ; git n'en connaît pas d'autres. `git remote -v` reste.
+SOUS_GESTES_REMOTE = (
+    "add", "set-url", "remove", "rm", "rename", "set-head", "set-branches", "prune", "update",
+)  # fmt: skip
+# Ce qu'une lecture sait faire d'autre qu'afficher : écrire un fichier (`--output`, abrégé comme
+# git l'accepte), lancer un programme (`git grep -O`, `--open-files-in-pager`, `git help --web`).
+OPTIONS_QUI_ECRIVENT = {lecture: ("--out",) for lecture in LECTURES_GIT}
+OPTIONS_QUI_ECRIVENT |= {"grep": ("--out", "-O", "--op"), "help": ("--out", "-w")}
+# Le programme git sous un autre nom : toute autre casse (Mac et Windows ne la distinguent pas),
+# un chemin, `git.exe`. Aucune lecture n'est permise sous ces noms : tout y est refusé.
+CASSES_DE_GIT = tuple(
+    "".join(c.upper() if (rang >> i) & 1 else c for i, c in enumerate("git")) for rang in range(8)
+)
+FORMES_DE_GIT = ("*/{}", "*\\{}", "{}.exe", "*/{}.exe", "*\\{}.exe")
+NOM_DE_COMMANDE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]*")
+SUFFIXE_DE_PROGRAMME = re.compile(r"\.(exe|cmd|bat|sh|py)$", re.IGNORECASE)
+
+
+def _gestes_git() -> list[str]:
+    """Les règles qui refusent git sauf ses lectures, sous toutes les formes décrites plus haut."""
+    regles = ["Bash(git -*)"]  # une option avant le geste : -C, -c, --git-dir, --no-pager...
+    permises = (*LECTURES_GIT, *LECTURES_RESTREINTES)
+    refusees = [c for c in dict.fromkeys(COMMANDES_GIT + EXTENSIONS_GIT) if c not in permises]
+    regles += [f"Bash(git {commande} *)" for commande in refusees]
+    # `git branch` suivi de quoi que ce soit : `**` exige au moins une espace après le mot.
+    regles.append("Bash(git branch **)")
+    for geste in SOUS_GESTES_REMOTE:
+        regles += [f"Bash(git remote {geste} *)", f"Bash(git remote * {geste})"]
+        regles.append(f"Bash(git remote * {geste} *)")
+    for lecture, options in OPTIONS_QUI_ECRIVENT.items():
+        regles += [f"Bash(git {lecture} *{option}*)" for option in options]
+    regles += [f"Bash({nom} *)" for nom in CASSES_DE_GIT if nom != "git"]
+    regles += [f"Bash({forme.format(nom)} *)" for nom in CASSES_DE_GIT for forme in FORMES_DE_GIT]
+    return regles
+
+
+GIT_ECRITURE = _gestes_git()
+
+
+@functools.lru_cache(maxsize=8)
+def _externes_git(chemins: str) -> tuple[str, ...]:
+    """Les commandes que des programmes `git-xxx` des dossiers `chemins` (le PATH) ajoutent à
+    git, hors de ses lectures : elles sont refusées comme les autres (`git xxx`)."""
+    noms = set()
+    for dossier in filter(None, chemins.split(os.pathsep)):
+        with suppress(OSError):
+            for entree in os.listdir(dossier):
+                nom = SUFFIXE_DE_PROGRAMME.sub("", entree[4:])
+                if entree[:4].lower() == "git-" and NOM_DE_COMMANDE.fullmatch(nom):
+                    noms.add(nom)
+    return tuple(sorted(noms - set(LECTURES_GIT) - set(LECTURES_RESTREINTES)))
+
+
+# Les fichiers de secrets : ni lus ni écrits par les outils de fichiers, ni nommés dans une
+# commande. Un nom vaut partout sur le disque (la copie de travail et le dossier du projet, à
+# côté), comme fichier et comme dossier. La clé `secrets` du profil en ajoute (`_secrets`).
+# `credentials` et `secrets` ne sont fermés que comme données (sans extension, ou avec une
+# extension de données) : `CredentialsForm.tsx` ou `src/secrets.py` restent du code ouvert.
+EXTENSIONS_DE_DONNEES = (
+    "json", "yml", "yaml", "toml", "ini", "env", "txt", "csv", "xml", "cfg", "conf", "properties",
+)  # fmt: skip
+SECRETS = (
+    ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx", "id_rsa*", "id_ed25519*", "id_ecdsa*",
+    "id_dsa*",
+    *(f"{nom}{suite}" for nom in ("credentials", "secrets")
+      for suite in ("", *(f".{e}" for e in EXTENSIONS_DE_DONNEES))),
+    ".credentials*", ".secrets*", ".git-credentials", ".netrc", ".npmrc", ".pypirc", ".ssh",
+    ".aws", ".gnupg",
+)  # fmt: skip
+SECRETS_DE_LA_MACHINE = (
+    "~/.ssh/**", "~/.aws/**", "~/.gnupg/**", "~/.config/gh/**", "~/.claude/.credentials.json",
+    "~/.git-credentials", "~/.netrc", "~/.npmrc", "~/.pypirc",
+)  # fmt: skip
+# `.env.*` reste fermé sauf ces quatre modèles, ouverts aux outils de fichiers. Un refus ne
+# connaissant pas d'exception, le reste est fermé par son complément (`_env_sauf_modeles`).
+MODELES_ENV = ("example", "sample", "template", "dist")
+# Les bornes possibles d'un intervalle `[a-b]` : la bibliothèque de motifs de Claude Code
+# (`ignore`) protège `\ $ . | * + ( ) { ^` d'une barre inverse, et `/ [ ] , -` y ont un sens.
+BORNES_SURES = set(string.ascii_letters + string.digits + "!\"#%&':;<=>@_`~")
+DERNIER_CARACTERE = 0xFFFD
+# Un motif de secret lisible : des lettres, des chiffres, `_ . - + ~ /` et l'étoile, sans espace
+# ni virgule ni parenthèse, qui casseraient une règle.
+MOTIF_DE_SECRET = re.compile(r"[A-Za-z0-9_.*~/+-]+")
+# Ce qui peut précéder un nom de secret dans une commande : `cat .env`, `a/.env`, `".env"`,
+# `--fichier=.env`, `HEAD:.env`, `@.env`. Le nom doit commencer là : `os.environ` ne nomme pas
+# `.env`. Une redirection (`> .env`) est jugée par Claude Code sur les règles Edit.
+BORDS_DE_NOM = (" ", "/", "\\", '"', "'", "=", ":", "@")
+# Un nom fait de lettres seules (`credentials`, `id_rsa`) est aussi un mot courant du code : il
+# n'est refusé que suivi d'une barre, d'un guillemet ou de rien (`credentials`, `secrets/`,
+# `"credentials"`), pour que `grep -rn credentials app/` reste permis.
+MOT_SEUL = re.compile(r"[A-Za-z0-9_-]+")
+FINS_DE_MOT = ("", "/*", '"*', "'*")
+
+
+def _secrets(profil) -> list[str]:
+    """Les motifs de secrets : la liste d'origine, puis ceux de la clé `secrets` du profil.
+
+    Une valeur mal formée est ignorée sans erreur : pas une liste, un élément qui n'est pas une
+    chaîne, une chaîne vide, un motif hors de `MOTIF_DE_SECRET`, sans lettre ni chiffre (`**`) ou
+    qui remonte (`../x`). La liste d'origine reste toujours.
+    """
+    en_plus = profil.get("secrets") if isinstance(profil, dict) else None
+    lus = [m.strip() for m in en_plus if isinstance(m, str)] if isinstance(en_plus, list) else []
+    valides = [m for m in lus if MOTIF_DE_SECRET.fullmatch(m) and re.search(r"[A-Za-z0-9]", m)]
+    valides = [m for m in valides if ".." not in m.split("/")]
+    return list(dict.fromkeys([*SECRETS, *SECRETS_DE_LA_MACHINE, *valides]))
+
+
+def _classe_sauf(exclus: set[str]) -> str:
+    """Une classe `[...]` de tout caractère d'un nom de fichier, sauf `exclus` dans leurs deux
+    casses (Claude Code compare les chemins sans la casse). Faite d'intervalles dont les bornes
+    sont sûres : un caractère douteux en bord d'intervalle reste hors de la classe."""
+    exclus = {c for x in exclus for c in (x.lower(), x.upper())} | set("/\\[]")
+    coupures = sorted({0x20, DERNIER_CARACTERE + 1} | {ord(c) for c in exclus})
+    morceaux = []
+    for avant, apres in zip(coupures, coupures[1:], strict=False):
+        debut, fin = avant + 1, apres - 1
+        while debut <= fin and not _borne_sure(debut):
+            debut += 1
+        while fin >= debut and not _borne_sure(fin):
+            fin -= 1
+        if debut <= fin:
+            morceaux.append(chr(debut) if debut == fin else f"{chr(debut)}-{chr(fin)}")
+    if morceaux and morceaux[0].startswith("!"):  # `[!` se lirait comme une négation
+        morceaux.append(morceaux.pop(0))
+    point = "" if "." in exclus else "."  # seul, le point reste sûr : il ferme `.env.e.x`
+    return "[" + point + "".join(morceaux) + "]"
+
+
+def _borne_sure(point: int) -> bool:
+    return chr(point) in BORNES_SURES or (point >= 0xA0 and not 0xD800 <= point <= 0xDFFF)
+
+
+def _env_sauf_modeles(base: str) -> list[str]:
+    """Les motifs qui ferment `.env.*` sauf les quatre modèles (`MODELES_ENV`) : pour chaque
+    début d'un modèle, ce début suivi d'un caractère qui ne prolonge aucun modèle, ce début seul,
+    et un modèle suivi de quoi que ce soit (`.env.example.local`)."""
+    debuts = sorted({m[:i] for m in MODELES_ENV for i in range(len(m))})
+    motifs = []
+    for debut in debuts:
+        suites = {m[len(debut)] for m in MODELES_ENV if m.startswith(debut)}
+        motifs.append(f"{base}.env.{debut}{_classe_sauf(suites)}*")
+        if debut:
+            motifs.append(f"{base}.env.{debut}")
+    return motifs + [f"{base}.env.{modele}?*" for modele in MODELES_ENV]
+
+
+def _fichiers_secrets(motif: str) -> list[str]:
+    """Les règles Read et Edit qui ferment un secret aux outils de fichiers.
+
+    `Read(...)` vaut pour Read, Grep et Glob ; `Edit(...)` pour Edit, Write et NotebookEdit. Un
+    motif ancré (`~/`, `//`) est gardé ; `/x` devient `//x`, Claude Code lisant sinon `/x` à
+    partir du fichier de réglages ; un nom vaut partout (`//**/`), lui et ce qu'il contient.
+    """
+    if motif == ".env.*":
+        chemins = _env_sauf_modeles("//**/")
+    else:
+        if motif.startswith(("~/", "//")):
+            chemin = motif
+        elif motif.startswith("/"):
+            chemin = "/" + motif
+        else:
+            chemin = "//**/" + re.sub(r"^(\./|\*\*/)+", "", motif)
+        chemins = [chemin] if chemin.endswith("/**") else [chemin, chemin + "/**"]
+    return [f"{outil}({c})" for outil in ("Read", "Edit") for c in chemins]
+
+
+def _coeur(motif: str) -> str:
+    """Le nom qu'une commande écrirait pour ce motif : sans `~/`, `//`, `./`, `**/` devant, ni
+    `/**` derrière. `~/.ssh/**` donne `.ssh`."""
+    coeur = re.sub(r"^(~/|/+|\./|\*\*/)+", "", motif)
+    return re.sub(r"(/\*+|/)+$", "", coeur)
+
+
+def _commandes_secretes(motif: str) -> list[str]:
+    """Les règles Bash qui refusent une commande nommant ce secret, en minuscules et en
+    majuscules (`.ENV` : Mac et Windows ne distinguent pas la casse). `.env` y est refusé sous
+    toutes ses formes, modèles compris : un modèle se lit par l'outil de lecture."""
+    coeur, regles = _coeur(motif), []
+    for forme in dict.fromkeys((coeur, coeur.upper())):
+        if forme.startswith("*") and "*" not in forme[1:] and "/" not in forme:  # `*.pem`
+            fin = forme[1:]
+            regles += [f"Bash(*{fin})"] + [f"Bash(*{fin}{s}*)" for s in (" ", '"', "'")]
+        elif forme.startswith("*"):  # une étoile au milieu : le motif tel quel, n'importe où
+            regles.append(f"Bash({forme}*)")
+        else:
+            nom = forme.rstrip("*")
+            mot = MOT_SEUL.fullmatch(nom) and not forme.endswith("*")
+            fins = FINS_DE_MOT if mot else ("*",)
+            regles += [f"Bash(*{bord}{nom}{fin})" for bord in BORDS_DE_NOM for fin in fins]
+    return regles
+
+
+def interdits(profil: dict | None = None) -> list[str]:
+    """Tout ce qui est refusé d'office à un agent, quel qu'il soit, sous forme de règles Claude
+    Code : lire ou écrire un fichier de secrets avec les outils de fichiers, nommer un secret
+    dans une commande, et toute commande git hors de ses lectures (`GIT_ECRITURE`, plus les
+    commandes `git-xxx` du PATH).
+
+    Les secrets sont la liste d'origine (`SECRETS`, `SECRETS_DE_LA_MACHINE`) et la clé `secrets`
+    du profil, une liste de motifs (`"secrets": ["*.sqlite", "config/prod.yaml"]`) ; une valeur
+    mal formée est ignorée. Le pont les donne à Claude Code comme refus (`permissions.deny`), qui
+    l'emportent sur toute permission, sur une règle « Toujours » et sur le guichet.
+    """
+    motifs = _secrets(profil)
+    regles = [r for m in motifs for r in _fichiers_secrets(m)]
+    regles += [r for m in motifs for r in _commandes_secretes(m)]
+    regles += GIT_ECRITURE
+    regles += [f"Bash(git {nom} *)" for nom in _externes_git(os.environ.get("PATH", ""))]
+    return list(dict.fromkeys(regles))
+
 
 # Les cinq modes que la personne responsable peut choisir pour les ouvriers. Le mode
 # « bypassPermissions » n'en fait pas partie : il n'est accepté nulle part.
@@ -590,14 +857,17 @@ class AgentClaude(_ModeDesOuvriers):
     ):
         """Ouvre une session du pont, lui confie la consigne et rend le résultat.
 
-        Quand l'appel rend la main, la session est fermée et son client déconnecté, même après
-        un arrêt : l'appel suivant ne croise jamais un Claude Code encore en train de sortir.
+        Tout lancement passe par ici, et chacun reçoit les interdits du profil (`interdits`),
+        quel que soit le rôle de l'agent. Quand l'appel rend la main, la session est fermée et
+        son client déconnecté, même après un arrêt : l'appel suivant ne croise jamais un Claude
+        Code encore en train de sortir.
         """
         from atelier.sdk import SessionSDK
 
         session = SessionSDK(
             nom, guichet=self.guichet, delai_max_s=self.delai_max_s,
-            fabrique_client=self.fabrique_client, **reglages,
+            fabrique_client=self.fabrique_client, refus_d_office=interdits(self.profil),
+            **reglages,
         )  # fmt: skip
         une_fois, fermee = threading.Lock(), threading.Event()
 

@@ -16,6 +16,7 @@ import posixpath
 import re
 import subprocess
 import threading
+from contextlib import suppress
 from datetime import datetime
 from pathlib import Path
 
@@ -788,6 +789,14 @@ class ExplicateurAuto:
         return None, 0.0
 
 
+def profil_du_depot(depot: Path) -> dict:
+    """Le profil du projet (`chantier/profil.json`), ou un profil vide s'il manque ou se lit mal."""
+    with suppress(OSError, ValueError):
+        profil = json.loads((Path(depot) / "chantier" / "profil.json").read_text("utf-8"))
+        return profil if isinstance(profil, dict) else {}
+    return {}
+
+
 class ExplicateurClaude:
     """Fait écrire les explications par Claude (Sonnet, effort faible), sans aucun outil."""
 
@@ -808,6 +817,7 @@ class ExplicateurClaude:
         self.depot, self.modele, self.fabrique_client = Path(depot), modele, fabrique_client
 
     def expliquer(self, texte: str) -> tuple[dict | None, float]:
+        from atelier.agents import interdits
         from atelier.sdk import SessionSDK  # comme dans agents.py : jamais au chargement
 
         session = SessionSDK(
@@ -820,6 +830,8 @@ class ExplicateurClaude:
             mode_permission="dontAsk",
             delai_max_s=300,
             fabrique_client=self.fabrique_client,
+            # Il lit le projet (Read, Grep, Glob) : les secrets lui sont fermés comme aux autres.
+            refus_d_office=interdits(profil_du_depot(self.depot)),
         )
         try:
             resultat = session.envoyer(texte)
