@@ -1045,6 +1045,7 @@ class Atelier:
                     tache["phase"] = self.moteur.phase(tache["id"])
             donnees["reprise_en_attente"] = self._reprise == "attente"
         donnees["depot"] = self.suivi_depot.etat()  # hors du verrou : jamais d'attente sur git
+        donnees["salle"] = self.moteur.salle()  # par tâche : place, jeton, ce qu'elle attend
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
         donnees["rythmes"] = self.activite.rythme()

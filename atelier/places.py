@@ -199,6 +199,11 @@ class Places:
         etat = self._taches.get(tache)
         return etat is not None and etat.jeton
 
+    def tient(self, tache: str) -> tuple[bool, bool]:
+        """Dit si `tache` tient une place d'écriture, puis si elle tient un jeton d'agent."""
+        etat = self._taches.get(tache)
+        return (etat.ecrit, etat.jeton) if etat is not None else (False, False)
+
     def places_effectives(self, heure: float) -> int:
         """Les places de l'instant : la moitié (au moins une) pendant une alerte de limite."""
         if any(heure < jusqu for _, jusqu in self._alertes.values()):

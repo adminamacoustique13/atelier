@@ -108,6 +108,23 @@ REPONSE_AU_FIL = 300  # signes gardés de la réponse d'un ouvrier qui n'a rien 
 MONTEES = ("fond", "refus")
 # Le budget du chantier en dollars (`budget_usd` au profil, gardé dans `contrat.max_cout_usd`).
 NATURE_BUDGET = "budget"
+# Ce qu'attend une tâche à lancer, pour la Salle (`Moteur.salle`) : la clé, et la phrase ({0} :
+# les tâches attendues).
+ATTENTES = {
+    "": "",
+    "dependance": "Attend {0}, à vérifier d'abord.",
+    "perimetre": "Attend {0} : même périmètre, une seule tâche y écrit à la fois.",
+    "pause": "En pause après une panne de son agent : elle repart seule.",
+    "limite": "Suspendue : la limite d'usage de Claude est atteinte, elle repart à la reprise.",
+    "depart": "Partira quand le chantier sera lancé.",
+    "place": "Attend une place d'écriture ou un jeton d'agent.",
+}
+
+
+def _en_liste(noms: list) -> str:
+    """« A », « A et B », « A, B et C »."""
+    noms = [str(n) for n in noms]
+    return noms[0] if len(noms) == 1 else ", ".join(noms[:-1]) + " et " + noms[-1] if noms else ""
 SOUS_TACHES = 2  # sous-tâches par tâche, sans réglage (`sous_taches` au profil ; 0 coupe)
 RALLONGE_BUDGET = 1.2  # relancer une tâche arrêtée par le budget l'allonge d'un cinquième
 MOTIF_BUDGET = (
@@ -655,6 +672,68 @@ class Moteur:
                 if lisible and regle > 0:
                     contrat.max_cout_usd = float(regle)
             return max(0.0, contrat.max_cout_usd)
+
+    # --- la Salle : ce que le tableau de bord montre de chaque tâche -------------------------
+
+    def salle(self) -> dict:
+        """Ce que la Salle montre de chaque tâche, par identifiant. Ne change rien.
+
+        `place` et `jeton` : elle tient une place d'écriture, un jeton d'agent. `attend` : ce
+        qu'attend une tâche à lancer (`ATTENTES`), "" quand elle n'attend rien ou n'est pas à
+        lancer ; `attend_de` : les tâches qu'elle attend ; `attend_fr` : la phrase.
+        `ouvrier_ouvert` : son ouvrier est resté ouvert après avoir rendu la main, hors des
+        comptes. `sous_tache` : le nom de la sous-tâche en cours, "" sinon.
+        """
+        ouverts = self._ouvriers_ouverts()
+        heure = self.heure()
+        with self.verrou:
+            taches = self.chantier.taches
+            verifiees = {t.id for t in taches if t.etat == "verifie"}
+            actives = [t for t in taches if t.etat in ACTIFS]
+            partages = fichiers_partages(self.profil)
+            postes = {}
+            for tache in taches:
+                place, jeton = self.places.tient(tache.id)
+                attente = ("", [])
+                if tache.etat == "a_lancer":
+                    attente = self._attente_de(tache, heure, verifiees, actives, partages)
+                postes[tache.id] = {
+                    "place": place,
+                    "jeton": jeton,
+                    "attend": attente[0],
+                    "attend_de": attente[1],
+                    "attend_fr": ATTENTES[attente[0]].format(_en_liste(attente[1])),
+                    "ouvrier_ouvert": tache.id in ouverts,
+                    "sous_tache": str(tache.reste.get("en_cours") or ""),
+                }
+            return postes
+
+    def _ouvriers_ouverts(self) -> set[str]:
+        """Les tâches dont l'agent dit garder l'ouvrier ouvert ; aucune s'il n'en dit rien."""
+        lire = getattr(self.agent, "ouvriers_ouverts", None)
+        try:
+            return {str(t) for t in lire()} if lire is not None else set()
+        except Exception:  # l'affichage ne tombe pas sur un agent qui répond mal
+            return set()
+
+    def _attente_de(self, tache: Tache, heure, verifiees, actives, partages) -> tuple[str, list]:
+        """Sous le verrou : ce qu'attend une tâche à lancer, dans l'ordre où le moteur le
+        regarde (`_prochaine`, puis les places), et les tâches qu'elle attend."""
+        manquent = [d for d in tache.depend_de if d not in verifiees]
+        if manquent:
+            return "dependance", manquent
+        genent = [a.id for a in actives if se_chevauchent(tache.perimetre, a.perimetre, partages)]
+        if genent:
+            return "perimetre", genent
+        if self.places.en_pause(tache.id, heure) is not None:
+            return "pause", []
+        if self.places.suspension(tache.modele, heure, tache.id) is not None:
+            return "limite", []
+        if not self.en_route:
+            return "depart", []
+        if not self.places.peut_partir(tache.modele, heure, tache.id):
+            return "place", []
+        return "", []
 
     def budget_prevu(self) -> float:
         """Le budget du chantier en dollars, pour le tableau de bord ; 0 : aucun. Celui du

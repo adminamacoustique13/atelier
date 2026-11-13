@@ -782,6 +782,12 @@ class _OuvriersOuverts:
             if ouvert is not None:
                 self._fermer_a_part(ouvert).wait(self.delai_liberer_s)
 
+    def ouvriers_ouverts(self) -> list[str]:
+        """Les tâches dont l'ouvrier est resté ouvert après avoir rendu la main : il attend la
+        suite, sans place d'écriture ni jeton d'agent. Pour le tableau de bord."""
+        with self._verrou_ouverts:
+            return sorted(str(cle) for cle in self._gardes if cle)
+
     def liberer_tous(self) -> None:
         """Ferme tous les ouvriers gardés ouverts, ensemble, et attend la fin de toutes les
         fermetures, celles lancées avant par `liberer` ou `arreter` comprises (DELAI_FERMETURES_S
