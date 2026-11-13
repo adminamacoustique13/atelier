@@ -13,6 +13,7 @@ import re
 import shutil
 import signal
 import subprocess
+import tempfile
 import threading
 import time
 from collections.abc import Iterable
@@ -151,6 +152,12 @@ SUPPRIME_PAR_LA_TACHE = "supprime_par_la_tache"
 # Le début d'une ligne de marqueur de conflit laissée par git ; « ======= » seul n'en est pas
 # un sûr : c'est aussi un soulignement de titre en Markdown.
 DEBUTS_DE_MARQUEUR = ("<<<<<<< ", ">>>>>>> ")
+# Où une copie de tâche garde la liste de ses fichiers rendus avec des marqueurs : dans le dossier
+# git propre à cette copie (`.git/worktrees/<tâche>/`), hors des fichiers du projet. La liste
+# survit à un redémarrage de l'Atelier et disparaît avec la copie (retrait, entrée, oubli).
+FICHIER_MARQUEURS = "atelier-marqueurs.json"
+# Combien de fois `empreinte` recommence quand la copie change pendant son calcul.
+ESSAIS_EMPREINTE = 3
 
 
 # Le temps laissé à chaque commande de contrôle du profil avant de l'arrêter : une suite de tests
@@ -214,6 +221,24 @@ class ControlesSimules:
         """Un état du dépôt d'exemple, sans git, de la même forme que `ControlesGit`."""
         return etat_du_depot_d_exemple(taches)
 
+    # Sans copie de travail, rien n'est jamais gardé : versions neutres des trois méthodes de la
+    # copie gardée (voir `ControlesGit`), dont héritent aussi les doubles des tests.
+
+    def copie_existante(self, dossier) -> bool:
+        return False
+
+    def place_de_la_copie(self, tache) -> Path | None:
+        return None
+
+    def empreinte(self, dossier) -> str:
+        return ""
+
+    def differences(self, dossier, avant: str, apres: str = "") -> list[str]:
+        return []
+
+    def conflit_pose(self, dossier) -> bool:
+        return False
+
 
 class ControlesGit:
     """Contrôles réels : un arbre de travail par tâche, commandes du profil, fusion après accord."""
@@ -239,8 +264,9 @@ class ControlesGit:
         self.unions = [motif for motif, fusion in partages.items() if fusion == "union"]
         self._verrou_unions = threading.Lock()  # `FICHIER_UNIONS` s'écrit d'un seul geste
         # Par tâche, les fichiers rendus à l'ouvrier avec des marqueurs (`poser_conflits`) : ils
-        # n'entrent pas tant qu'il en reste (`enregistrer`). Vidé à chaque copie neuve.
-        self._a_marqueurs: dict[str, list[str]] = {}
+        # n'entrent pas tant qu'il en reste (`enregistrer`). La liste vit dans la copie
+        # (`FICHIER_MARQUEURS`) ; ici, seulement un raccourci : tâche -> (copie, liste).
+        self._a_marqueurs: dict[str, tuple[str, list[str]]] = {}
 
     def _config(self, cle: str) -> str:
         # Une clé absente (git rend un code d'erreur) donne une valeur vide.
@@ -280,16 +306,131 @@ class ControlesGit:
         return self.depot / ".atelier" / "arbres" / tache.id.replace("/", "_")
 
     def preparer(self, tache) -> Path:
-        """Crée pour la tâche une copie de travail propre, partie de l'état vérifié."""
+        """Crée pour la tâche une copie de travail propre, partie de l'état vérifié.
+
+        Une copie gardée qui n'est plus utilisable (effacée à la main, ou un dossier que git ne
+        connaît plus) ne retient rien : son dossier est retiré, et git oublie d'abord les copies
+        disparues, qui garderaient sinon la branche de la tâche.
+        """
         self._a_marqueurs.pop(tache.id, None)
         arbre = self._arbre(tache)
         if arbre.exists():
-            with self.verrou_fusion:
-                self._git("worktree", "remove", "--force", str(arbre))
+            self._retirer_arbre(arbre)
         arbre.parent.mkdir(parents=True, exist_ok=True)
         with self.verrou_fusion:
+            self._git("worktree", "prune")
             self._git("worktree", "add", "-q", "-B", f"tache/{tache.id}", str(arbre), "HEAD")
         return arbre
+
+    def _retirer_arbre(self, arbre: Path) -> None:
+        """Retire une copie de travail de tâche, même quand git ne la reconnaît plus.
+
+        Le dossier n'est effacé à la main que s'il est rangé parmi les copies des tâches.
+        """
+        with self.verrou_fusion, suppress(RuntimeError):
+            self._git("worktree", "remove", "--force", str(arbre))
+        if arbre.exists() and self._parmi_les_arbres(arbre):
+            shutil.rmtree(arbre, ignore_errors=True)
+        with self.verrou_fusion, suppress(RuntimeError):
+            self._git("worktree", "prune")
+
+    def _parmi_les_arbres(self, dossier: Path) -> bool:
+        """Dit si le dossier est une copie de tâche de ce dépôt : un dossier direct de
+        `.atelier/arbres/`, hors la copie de contrôle de la branche principale."""
+        racine = (self.depot / ".atelier" / "arbres").resolve()
+        try:
+            chemin = Path(dossier).resolve()
+        except (OSError, ValueError):  # un chemin impossible (caractère nul…) n'en est pas une
+            return False
+        return chemin.parent == racine and chemin.name != "_principale"
+
+    def place_de_la_copie(self, tache) -> Path:
+        """Le chemin que l'Atelier donne à la copie de travail de cette tâche : une copie gardée
+        qui nomme un autre chemin n'est pas la sienne, et ne se reprend ni ne se jette."""
+        return self._arbre(tache)
+
+    # --- la copie gardée : la reconnaître, et savoir si son contenu a changé ----------
+
+    def copie_existante(self, dossier) -> bool:
+        """Dit si `dossier` est une copie de travail utilisable de ce dépôt.
+
+        Vrai seulement pour une copie de tâche rangée à sa place (`.atelier/arbres/<tâche>`),
+        que git reconnaît comme une copie de ce dépôt-ci, avec un commit de départ lisible.
+        Un dossier effacé, vidé, venu d'ailleurs ou que git a oublié rend False, comme un chemin
+        impossible. Ne lève pas.
+        """
+        try:
+            return bool(dossier) and self._copie_reconnue(Path(dossier))
+        except (RuntimeError, OSError, ValueError):
+            return False
+
+    def _copie_reconnue(self, dossier: Path) -> bool:
+        """`copie_existante`, qui peut lever : le chemin est lu une fois résolu."""
+        if not self._parmi_les_arbres(dossier):
+            return False
+        chemin = dossier.resolve()
+        if not chemin.is_dir() or not (chemin / ".git").exists():
+            return False
+        commun = self._git("rev-parse", "--git-common-dir", dossier=chemin).strip()
+        racine = self._git("rev-parse", "--show-toplevel", dossier=chemin).strip()
+        self._git("rev-parse", "-q", "--verify", "HEAD", dossier=chemin)
+        attendu = self._git("rev-parse", "--git-common-dir").strip()
+        meme_depot = (chemin / commun).resolve() == (self.depot / attendu).resolve()
+        return meme_depot and Path(racine).resolve() == chemin
+
+    def empreinte(self, dossier) -> str:
+        """Un texte qui change si et seulement si le contenu de la copie change.
+
+        C'est l'identifiant git de l'arbre de tous ses fichiers, suivis ou non (ceux que git
+        ignore exceptés ; le contenu d'un dépôt git imbriqué non plus n'est pas vu). Il est
+        calculé dans un index provisoire, hors de la copie : ni l'index de la copie ni ses
+        fichiers ne sont touchés. Ne lève jamais : quand le calcul échoue, même après
+        `ESSAIS_EMPREINTE` essais (la copie change pendant le calcul, git échoue, ce n'est pas une
+        copie), elle rend "", qui veut dire « inconnue », jamais « inchangée ».
+        """
+        for _ in range(ESSAIS_EMPREINTE):
+            with suppress(RuntimeError, OSError, ValueError, subprocess.TimeoutExpired):
+                return self._empreinte(Path(dossier))
+        return ""
+
+    def _empreinte(self, dossier: Path) -> str:
+        """Un essai d'`empreinte`, qui lève si git échoue."""
+        provisoire = Path(tempfile.mkdtemp(prefix="atelier-empreinte-"))
+        try:
+            index = provisoire / "index"
+            reel = Path(self._git("rev-parse", "--git-path", "index", dossier=dossier).strip())
+            reel = reel if reel.is_absolute() else dossier / reel
+            if reel.exists():
+                shutil.copyfile(reel, index)  # garde ce que git sait déjà : plus rapide
+            environnement = {"GIT_INDEX_FILE": str(index)}
+            for arguments in (("add", "-A"), ("write-tree",)):
+                resultat = lancer_git(dossier, *arguments, delai=120, environnement=environnement)
+                if resultat.returncode != 0:
+                    raise RuntimeError(f"git {arguments[0]} : {resultat.stderr.strip()}")
+            empreinte = resultat.stdout.strip()
+            if not empreinte:
+                raise RuntimeError("git write-tree : rien rendu")
+            return empreinte
+        finally:
+            shutil.rmtree(provisoire, ignore_errors=True)
+
+    def differences(self, dossier, avant: str, apres: str = "") -> list[str]:
+        """Les fichiers qui diffèrent entre deux empreintes de la copie, triés.
+
+        `apres` vide : l'empreinte de la copie maintenant. Un fichier renommé compte sous ses
+        deux noms. Une empreinte vide (« inconnue ») ou illisible ne compare rien et rend une
+        liste vide : savoir si rien n'a changé demande deux empreintes non vides. Ne lève pas.
+        """
+        apres = apres or (self.empreinte(dossier) if avant else "")
+        if not avant or not apres or avant == apres:
+            return []
+        try:
+            sortie = self._git(
+                "diff", "--name-only", "-z", "--no-renames", avant, apres, dossier=Path(dossier)
+            )
+        except (RuntimeError, OSError, ValueError):
+            return []
+        return sorted(nom for nom in sortie.split("\0") if nom)
 
     def _copie(self, tache) -> Path:
         return self.depot / ".atelier" / "verifications" / tache.id.replace("/", "_")
@@ -368,6 +509,12 @@ class ControlesGit:
         rendu à l'ouvrier avec des marqueurs de conflit n'entre pas non plus s'il en reste.
         """
         restants = self._marqueurs_restants(tache, dossier)
+        if restants is None:
+            return (
+                "La liste des fichiers rendus avec des marqueurs de conflit est illisible pour "
+                "cette copie : je ne sais plus lesquels surveiller. Rien n'entre dans la branche "
+                "principale : la tentative suivante repart d'une copie propre."
+            )
         if restants:
             return (
                 f"Des marqueurs de conflit restent dans : {', '.join(restants)}. Rien n'entre "
@@ -387,6 +534,7 @@ class ControlesGit:
                         continue  # une autre tâche est entrée pendant les contrôles : on rejoue
                     self._git("merge", "-q", "--ff-only", f"tache/{tache.id}")
                     self._git("worktree", "remove", "--force", str(dossier))
+                    self._a_marqueurs.pop(tache.id, None)  # la liste est partie avec la copie
                     self._git("branch", "-q", "-D", f"tache/{tache.id}")
                     self.enregistrer_cahier(f"Cahier : {tache.id} enregistrée")
                 break
@@ -444,7 +592,7 @@ class ControlesGit:
                 if conflits:
                     self._git("reset", "-q", base, dossier=dossier)
                     marques = [c for c, nature in conflits.items() if nature == MARQUEURS]
-                    self._a_marqueurs[tache.id] = marques
+                    self._retenir_marqueurs(tache, dossier, marques)
                     return conflits
         with suppress(RuntimeError):
             self._git("merge", "--abort", dossier=dossier)
@@ -469,19 +617,71 @@ class ControlesGit:
                 natures[chemin] = MARQUEURS if "3" in vues else SUPPRIME_SUR_LA_PRINCIPALE
         return natures
 
-    def _marqueurs_restants(self, tache, dossier) -> list[str]:
+    def _marqueurs_restants(self, tache, dossier) -> list[str] | None:
         """Les fichiers rendus à l'ouvrier avec des marqueurs qui en ont encore une ligne.
 
         Le contenu est lu, et non `git diff --check`, qui ignore les fichiers non suivis et
-        prend un soulignement Markdown pour un marqueur.
+        prend un soulignement Markdown pour un marqueur. Rend None quand la liste de ces
+        fichiers est illisible : on ne sait plus lesquels regarder, et rien ne doit entrer.
         """
+        poses = self._marqueurs_poses(tache, dossier)
+        if poses is None:
+            return None
         restants = []
-        for chemin in self._a_marqueurs.get(tache.id, []):
+        for chemin in poses:
             fichier = Path(dossier) / chemin
             lignes = fichier.read_text("utf-8", "replace").splitlines() if fichier.is_file() else []
             if any(ligne.startswith(DEBUTS_DE_MARQUEUR) for ligne in lignes):
                 restants.append(chemin)
         return restants
+
+    def _fichier_des_marqueurs(self, dossier) -> Path:
+        """Le fichier de la liste des marqueurs, dans le dossier git propre à la copie."""
+        propre = Path(self._git("rev-parse", "--git-dir", dossier=Path(dossier)).strip())
+        propre = propre if propre.is_absolute() else Path(dossier) / propre
+        return propre / FICHIER_MARQUEURS
+
+    def conflit_pose(self, dossier) -> bool:
+        """Dit si cette copie a reçu un conflit de fusion à résoudre (`poser_conflits`).
+
+        La liste des marqueurs, écrite à ce moment dans le dossier git de la copie, en est la
+        trace : elle suit la copie d'un départ à l'autre, survit à un redémarrage, et part avec
+        elle. Quand git ne sait pas répondre, la réponse est oui : dans le doute, le travail est
+        vérifié complètement. Sans copie (aucun dossier), il n'y a rien à marquer."""
+        if dossier is None:
+            return False
+        try:
+            return self._fichier_des_marqueurs(dossier).exists()
+        except (RuntimeError, OSError):
+            return True
+
+    def _retenir_marqueurs(self, tache, dossier, marques: list[str]) -> None:
+        """Écrit la liste des fichiers rendus avec des marqueurs, pour cette copie, et la garde
+        en raccourci. L'écrire est nécessaire : sans elle, un redémarrage laisserait entrer les
+        marqueurs (une RuntimeError ou une OSError remonte)."""
+        ecrire_d_un_seul_geste(self._fichier_des_marqueurs(dossier), json.dumps(marques))
+        self._a_marqueurs[tache.id] = (str(dossier), list(marques))
+
+    def _marqueurs_poses(self, tache, dossier) -> list[str] | None:
+        """Les fichiers rendus avec des marqueurs dans cette copie : le raccourci s'il porte sur
+        elle, sinon la liste écrite dans son dossier git (aucune si elle n'existe pas).
+
+        Une liste écrite mais illisible (tronquée, vide, d'une autre forme, git qui ne répond
+        pas) rend None : après un redémarrage le raccourci est vide, et le prendre pour « aucun
+        fichier à surveiller » laisserait entrer des marqueurs dans la branche principale."""
+        raccourci = self._a_marqueurs.get(tache.id)
+        if raccourci is not None and raccourci[0] == str(dossier):
+            return raccourci[1]
+        try:
+            fichier = self._fichier_des_marqueurs(dossier)
+            if not fichier.exists():
+                return []
+            lus = json.loads(fichier.read_text("utf-8"))
+        except (RuntimeError, OSError, ValueError):
+            return None
+        if not isinstance(lus, list) or not all(isinstance(c, str) for c in lus):
+            return None
+        return lus
 
     def controler_principale(self) -> tuple[bool, str]:
         """Lance les commandes du projet sur la branche principale, dans une copie propre.
@@ -565,8 +765,15 @@ class ControlesGit:
                 raise ValueError(self.envoi) from erreur
 
     def annuler(self, tache, dossier) -> None:
-        """Jette le travail refusé : la tentative suivante repartira d'un état propre."""
-        if dossier and Path(dossier).exists():
+        """Jette le travail refusé : la tentative suivante repartira d'un état propre.
+
+        Une copie de tâche rangée à sa place est retirée même si git ne la reconnaît plus
+        (`_retirer_arbre`), sans lever : une copie gardée peut avoir été abîmée entre-temps.
+        """
+        self._a_marqueurs.pop(getattr(tache, "id", ""), None)  # la liste part avec la copie
+        if dossier and self._parmi_les_arbres(Path(dossier)):
+            self._retirer_arbre(Path(dossier))
+        elif dossier and Path(dossier).exists():
             with self.verrou_fusion:
                 self._git("worktree", "remove", "--force", str(dossier))
 

@@ -700,6 +700,31 @@ def test_apres_un_conflit_resolu_la_verification_est_complete_a_tout_niveau(type
     assert len(agent.verifs) == (1 if type_ == "mecanique" else 2) and a.etat == "verifie"
 
 
+class ControlesCopieMarquee(Controles):
+    """Le double d'une copie gardée d'un départ précédent, qui porte la résolution d'un conflit :
+    aucun refus d'enregistrement n'est tracé dans le départ en cours."""
+
+    def conflit_pose(self, dossier):
+        return True
+
+
+@pytest.mark.parametrize("type_", ["mecanique", "courante", "delicate"])
+def test_une_copie_gardee_qui_porte_un_conflit_resolu_est_verifiee_completement(type_):
+    a = tache("A", type=type_)
+    c, m, agent, _ = monter([a], PROFIL, ControlesCopieMarquee())
+    m.executer()
+    (seul,) = agent.verifs  # un vérificateur part, même pour une tâche mécanique
+    assert (seul["modele"], seul["effort"]) == dosage.verificateur(*dosage.depart(type_))
+    assert a.etat == "verifie"
+
+
+def test_sans_marque_de_conflit_une_tache_mecanique_entre_toujours_sans_verificateur():
+    a = tache("A", type="mecanique")
+    c, m, agent, _ = monter([a], PROFIL, Controles())
+    m.executer()
+    assert agent.verifs == [] and a.etat == "verifie"
+
+
 @pytest.mark.parametrize("type_", ["mecanique", "courante"])
 @pytest.mark.parametrize("motif", ["local", "bacle", "ne_sait_pas"])
 def test_conflit_resolu_puis_refus_du_verificateur_la_correction_est_relue_completement(

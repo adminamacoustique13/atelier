@@ -24,6 +24,7 @@ from collections.abc import Callable, Collection
 from contextlib import suppress
 from dataclasses import dataclass, replace
 from itertools import dropwhile
+from pathlib import Path
 
 from atelier import dosage, refus
 from atelier.agents import (
@@ -31,6 +32,7 @@ from atelier.agents import (
     LIMITE_ATTEINTE,
     REPRISE_IMPOSSIBLE,
     SURCHARGE,
+    Resultat,
     commande_permise,
     forme_courte,
 )
@@ -131,6 +133,19 @@ FINS_D_OUTILS_REFUSES = {
     (False, False): "Si ces outils doivent servir aux agents, tu peux les leur permettre.",
 }
 NON_REFUS = ("valide", ARRETEE, PANNE)  # les issues d'historique qui ne sont pas des refus
+# Le travail refusé est gardé dans sa copie (`Tache.copie`) : le départ suivant le reprend sur
+# place. Elle est jetée après un refus de ces origines, qui la laisse porter ce qu'il ne faut pas
+# garder (un débord, un état de fusion) ; aussi pour un arrêt par la personne, un abandon, une
+# panne de l'Atelier, et quand le travail est entré.
+COPIE_JETEE = ("perimetre", "integration")
+# L'entrée d'une tâche interrompue par un arrêt de l'Atelier ; avec `pendant: "verification"`,
+# l'ouvrier avait rendu son travail et seul le jugement est à refaire (`Moteur._rejuger`).
+INTERROMPUE = "interrompue"
+HORS_REFUS = (*NON_REFUS, INTERROMPUE, "attente_panne")  # ni refus ni remarque pour la suite
+TRAVAIL_GARDE = (
+    "Travail gardé dans sa copie de travail ({}) : une relance le reprend là où il en est, un "
+    "abandon le jette."
+)
 # La boucle d'`executer` et les tâches qui attendent une place, un jeton ou la fin d'une
 # suspension dorment au plus ce temps ; un changement les réveille aussitôt (`_signaler`).
 PAS_VEILLE_S = 5.0
@@ -655,14 +670,17 @@ class Moteur:
     def _rendre(self, tache: Tache, raison: str, **en_plus) -> dict:
         """Rend une tâche à la personne responsable, avec une seule décision à prendre.
 
-        `en_plus` : des clés ajoutées à la demande (celles d'un blocage). Rend la demande.
+        `en_plus` : des clés ajoutées à la demande (celles d'un blocage). Rend la demande. Quand
+        le travail de la tâche est gardé dans sa copie, la question le dit, avec le chemin de la
+        copie (`TRAVAIL_GARDE`).
         """
         with self.verrou:
             tache.etat = "revenu"
+            garde = f" {TRAVAIL_GARDE.format(tache.copie)}" if tache.copie else ""
             demande = {
                 "id": f"{tache.id}-{len(self.chantier.demandes) + 1}",
                 "tache": tache.id,
-                "question": f"Tâche {tache.id}, « {tache.titre} » : {raison}",
+                "question": f"Tâche {tache.id}, « {tache.titre} » : {raison}{garde}",
                 "options": [RELANCER_TEL, RELANCER, ABANDONNER],
                 "reponse": None,
                 **en_plus,
@@ -1234,41 +1252,247 @@ class Moteur:
     def _boucle(self, tache: Tache) -> None:
         """Mène la tâche de départ neuf en départ neuf, jusqu'à ce qu'elle soit vérifiée ou rendue.
 
-        Chaque départ a sa reprise à chaud : la copie de travail n'est jetée (`annuler`) que pour
-        repartir de zéro ou rendre la tâche. Le premier départ a reçu sa place en partant
-        (`_lancer_pretes`), les suivants l'attendent (`_prendre_place`). Un ouvrier refusé pour
-        limite ou surcharge ne compte pas : sa copie est jetée et le même départ recommence,
-        d'une copie propre, à la fin de la suspension.
+        Le travail refusé est gardé dans sa copie (`tache.copie`) : le départ suivant, tout de
+        suite ou après la réponse de la personne, le reprend sur place (`_departs`). Une panne de
+        l'Atelier pendant la tâche laisse la copie dans un état inconnu : elle est jetée, puis
+        la panne suit son chemin (`_traiter`, `_panne`).
         """
-        remarques = ""
+        try:
+            self._departs(tache)
+        except Exception:  # la panne remonte telle quelle ; la copie ne lui survit pas
+            with suppress(Exception):
+                self._jeter_copie_gardee(tache)
+            raise
+
+    def _departs(self, tache: Tache) -> None:
+        """La boucle des départs d'une tâche.
+
+        Chaque départ a sa reprise à chaud. Le premier départ a reçu sa place en partant
+        (`_lancer_pretes`), les suivants l'attendent (`_prendre_place`). Un ouvrier refusé pour
+        limite ou surcharge ne compte pas : le même départ recommence à la fin de la suspension,
+        dans la copie gardée. Après un refus, la copie est gardée ou jetée (`_copie_apres`) avant
+        la décision de la suite, pour que la question posée à la personne dise si le travail
+        est gardé. Arrêtée pendant sa vérification par un arrêt de l'Atelier, la tâche est
+        seulement rejugée sur sa copie, sans ouvrier (`_rejuger`).
+        """
+        remarques = self._remarques_de_depart(tache)
         while True:
             if self._arretee(tache):  # arrêt demandé avant le départ de l'ouvrier
                 return self._arret_avant_depart(tache)
-            self._prendre_agent()
-            dossier, resultat = self._lancer_ouvrier(tache, remarques)
+            rejuge = self._rejuger(tache)
+            if rejuge is None:
+                self._prendre_agent()
+            dossier, resultat = rejuge or self._lancer_ouvrier(tache, remarques)
             if resultat is None:  # arrêt demandé pendant la préparation : l'ouvrier n'est pas parti
-                self.controles.annuler(tache, dossier)
+                self._jeter_copie(tache, dossier)
                 return self._arret_avant_depart(tache)
             if self._suspendre(tache, resultat):  # la tentative ne compte pas non plus
                 with self.verrou:
                     tache.tentatives -= 1
-                self.controles.annuler(tache, dossier)
+                self._copie_apres(tache, dossier, resultat, None)
             else:
-                jugement = self._passe(tache, dossier, resultat)
-                jugement = self._reprises(tache, dossier, resultat.session, jugement)
+                jugement = self._jugement_du_depart(tache, dossier, resultat, rejuge is not None)
                 if jugement.motif is None:
                     return self._verifiee(tache, jugement)
-                self.controles.annuler(tache, dossier)
+                self._copie_apres(tache, dossier, resultat, jugement)
                 remarques = jugement.pour_la_suite()
                 if not self._suite(tache, jugement):
                     return None
             self._prendre_place(tache)
 
+    def _jugement_du_depart(self, tache: Tache, dossier, resultat, rejuge: bool) -> Jugement:
+        """Juge la passe de l'ouvrier, puis ses reprises à chaud. Une copie rejugée après un
+        arrêt de l'Atelier n'a plus d'ouvrier dans une session : son refus ne se reprend pas
+        à chaud, le départ suivant reprend la copie."""
+        jugement = self._passe(tache, dossier, resultat)
+        if rejuge:
+            return replace(jugement, reprenable=False)
+        return self._reprises(tache, dossier, resultat.session, jugement)
+
+    # --- la copie gardée : le travail refusé reste, le tour suivant le reprend -----------------
+
+    def _place_de_la_copie(self, tache: Tache):
+        """Le chemin que les contrôles donnent à la copie de la tâche, ou None s'ils n'en disent
+        rien (doubles sans `place_de_la_copie`, contrôles sans copie)."""
+        place = getattr(self.controles, "place_de_la_copie", None)
+        return place(tache) if place is not None else None
+
+    def _copie_a_soi(self, tache: Tache, chemin) -> bool:
+        """Dit si la copie nommée est celle de cette tâche : le chemin que l'Atelier lui donne.
+        Une tâche ne reprend ni ne jette la copie d'une autre, ni un dossier venu d'ailleurs.
+        Sans place connue des contrôles, toute copie nommée passe ce contrôle."""
+        try:
+            place = self._place_de_la_copie(tache)
+            return place is None or Path(chemin).resolve() == Path(place).resolve()
+        except Exception:  # un chemin impossible n'est la copie de personne
+            return False
+
+    def _copie_utilisable(self, tache: Tache, chemin) -> bool:
+        """Dit si la copie nommée est celle de la tâche et sert encore (`copie_existante` des
+        contrôles, un dossier présent à défaut) ; une erreur vaut une copie absente."""
+        if not chemin or not self._copie_a_soi(tache, chemin):
+            return False
+        existante = getattr(self.controles, "copie_existante", None)
+        try:
+            return bool(existante(Path(chemin))) if existante else Path(chemin).is_dir()
+        except Exception:  # une copie illisible ne se reprend pas : une neuve la remplace
+            return False
+
+    def _copie_a_reprendre(self, tache: Tache) -> Path | None:
+        """La copie gardée que reprend le départ qui commence, ou None : il en prépare une neuve.
+
+        Une copie nommée qui n'existe plus (effacée à la main, disque nettoyé) est oubliée, et le
+        fil le dit en une phrase. Un chemin qui n'est pas celui de la copie de cette tâche (un état
+        écrit ailleurs) est oublié sans rien y toucher, et le fil le dit aussi. Une copie qui porte
+        des fichiers hors périmètre (laissée par un arrêt de l'Atelier en plein travail) est
+        jetée : un débord ne passe jamais au tour suivant.
+        """
+        with self.verrou:
+            chemin = tache.copie
+        if not chemin:
+            return None
+        if not self._copie_a_soi(tache, chemin):
+            with self.verrou:
+                tache.copie = ""
+            self._noter(
+                f"La copie nommée pour cette tâche ({chemin}) n'est pas la sienne : je n'y touche "
+                "pas, et l'ouvrier repart d'une copie neuve.",
+                tache,
+            )
+            return None
+        if self._copie_utilisable(tache, chemin):
+            jetee = self._jetee_si_elle_deborde(tache, Path(chemin), Resultat(ok=True))
+            return None if jetee else Path(chemin)
+        with self.verrou:
+            tache.copie = ""
+        self._noter(
+            f"La copie gardée pour cette tâche n'existe plus ({chemin}) : l'ouvrier repart d'une "
+            "copie neuve.",
+            tache,
+        )
+        return None
+
+    def _retenir_copie(self, tache: Tache, dossier) -> None:
+        """Écrit le chemin de la copie dans l'état, et le fait sauver avant le départ de l'ouvrier :
+        une coupure juste après ce départ retrouve ce travail."""
+        valeur = str(dossier) if dossier is not None else ""
+        with self.verrou:
+            change, tache.copie = tache.copie != valeur, valeur
+        if change or dossier is not None:
+            self.sur_changement()
+
+    def _jeter_copie(self, tache: Tache, dossier) -> None:
+        """Jette la copie de la passe (`annuler`), et l'oublie : le départ suivant repart propre.
+
+        Sans copie de travail (contrôles simulés), `annuler` est appelé comme avant, sur None.
+        """
+        with self.verrou:
+            tache.copie = ""
+        self.controles.annuler(tache, dossier)
+
+    def _jeter_copie_gardee(self, tache: Tache) -> None:
+        """Jette la copie que nomme `tache.copie`, s'il y en a une, et vide le champ.
+
+        Seule la copie de cette tâche est jetée (`_copie_a_soi`) : un autre chemin est seulement
+        oublié. Une copie abîmée (que git ne reconnaît plus) dont le dossier est encore là, à la
+        place que les contrôles donnent à la tâche, est jetée quand même ; une copie qui n'existe
+        plus est seulement oubliée.
+        """
+        with self.verrou:
+            chemin, tache.copie = tache.copie, ""
+        if not chemin or not self._copie_a_soi(tache, chemin):
+            return
+        abimee = self._place_de_la_copie(tache) is not None and self._dossier_present(chemin)
+        if abimee or self._copie_utilisable(tache, chemin):
+            self.controles.annuler(tache, Path(chemin))
+
+    @staticmethod
+    def _dossier_present(chemin) -> bool:
+        """Dit si le dossier nommé est sur le disque ; un chemin impossible ne l'est pas."""
+        try:
+            return Path(chemin).is_dir()
+        except (OSError, ValueError):
+            return False
+
+    def _copie_apres(self, tache: Tache, dossier, resultat, jugement: Jugement | None) -> None:
+        """Après un refus (`jugement`) ou une suspension (None) : garde la copie ou la jette.
+
+        Jetée pour un arrêt par la personne, un débord de périmètre ou un refus d'enregistrement
+        (`COPIE_JETEE`) : elle porte ce qu'il ne faut pas garder. Gardée sinon (contrôles,
+        verdict, erreur d'agent, suspension), sauf si elle porte des fichiers hors périmètre :
+        après une erreur d'agent ou une suspension, le périmètre n'a pas été contrôlé.
+        """
+        jetee = jugement is not None and (
+            jugement.motif == ARRETEE or jugement.origine in COPIE_JETEE
+        )
+        if dossier is None or jetee:
+            return self._jeter_copie(tache, dossier)
+        if jugement is None or jugement.origine == "agent":
+            self._jetee_si_elle_deborde(tache, dossier, resultat)
+        return None  # contrôles ou verdict : le périmètre vient de passer sur cette copie
+
+    def _jetee_si_elle_deborde(self, tache: Tache, dossier, resultat) -> bool:
+        """Jette la copie si elle porte des fichiers hors périmètre, et le dit au fil ; rend
+        True si elle a été jetée. Le périmètre est lu sur toute la copie (`fichiers_modifies`)."""
+        dehors = hors_perimetre(
+            self.controles.fichiers_modifies(tache, dossier, resultat), tache.perimetre
+        )
+        if not dehors:
+            return False
+        self._noter(
+            f"La copie porte des fichiers hors périmètre ({', '.join(dehors)}) : je la jette, le "
+            "départ suivant repart d'une copie propre.",
+            tache,
+        )
+        self._jeter_copie(tache, dossier)
+        return True
+
+    def _remarques_de_depart(self, tache: Tache) -> str:
+        """Ce que reçoit le premier ouvrier d'un lancement quand une copie gardée l'attend : le
+        dernier refus, comme `Jugement.pour_la_suite` (le verdict entier, sinon le détail)."""
+        with self.verrou:
+            if not tache.copie:
+                return ""
+            refus_ = [e for e in tache.historique if e.get("issue") not in HORS_REFUS]
+        if not refus_:
+            return ""
+        dernier, verdict = refus_[-1], str(refus_[-1].get("verdict") or "")
+        if dernier.get("origine") == "verdict" and verdict.strip():
+            return verdict
+        return str(dernier.get("detail") or "")
+
+    def _rejuger(self, tache: Tache):
+        """Après un arrêt de l'Atelier pendant la vérification, rend (copie, résultat) pour
+        refaire seulement le jugement, sans ouvrier ; sinon None.
+
+        Il faut que la dernière entrée d'historique soit `interrompue` avec `pendant:
+        "verification"`, et que la copie gardée existe encore : sinon un ouvrier part, dans une
+        copie neuve si elle a disparu (`_copie_a_reprendre`).
+        """
+        with self.verrou:
+            dernier = tache.historique[-1] if tache.historique else {}
+            chemin = tache.copie
+        if dernier.get("issue") != INTERROMPUE or dernier.get("pendant") != "verification":
+            return None
+        if not self._copie_utilisable(tache, chemin):
+            return None
+        with self.verrou:
+            tache.etat = "en_cours"
+        self._noter(
+            "L'Atelier s'était arrêté pendant la vérification : le travail de l'ouvrier est resté "
+            "dans sa copie. Aucun ouvrier ne repart, je refais seulement le contrôle du périmètre, "
+            "les contrôles automatiques et la vérification.",
+            tache,
+        )
+        return Path(chemin), Resultat(ok=True)
+
     def _verifiee(self, tache: Tache, jugement: Jugement) -> None:
         """La tâche est vérifiée ; un empêchement signalé en chemin, ou un outil refusé à
-        l'ouvrier, est seulement noté au fil."""
+        l'ouvrier, est seulement noté au fil. Son travail est entré : sa copie est oubliée, et
+        retirée si l'enregistrement l'a laissée."""
         with self.verrou:
             tache.etat = "verifie"
+        self._jeter_copie_gardee(tache)
         self._noter("Vérifiée et enregistrée.", tache)
         if jugement.signales:
             liste = " ; ".join(f"« {_court(e, DETAIL_CITE)} »" for e in jugement.empechements)
@@ -1484,9 +1708,14 @@ class Moteur:
     def _lancer_ouvrier(self, tache: Tache, remarques: str):
         """Prépare le travail et lance l'ouvrier ; rend (dossier, résultat).
 
+        Une copie gardée d'un passage précédent est reprise telle quelle, sans `preparer`, et la
+        consigne le dit à l'ouvrier (`sur_place`) ; sinon une copie neuve est préparée. Son chemin
+        est écrit dans l'état et sauvé avant le départ (`_retenir_copie`).
+
         Le résultat est None si l'arrêt a été demandé pendant la préparation : l'agent n'est
         alors pas lancé, et ni le compte des agents ni celui des tentatives ne le gardent.
         """
+        gardee = self._copie_a_reprendre(tache)
         with self.verrou:
             tache.tentatives += 1
             tache.etat = "en_cours"
@@ -1495,8 +1724,17 @@ class Moteur:
             f"tentative {tache.tentatives}.",
             tache,
         )
-        self._phase(tache, PHASES["preparation"])
-        dossier = self.controles.preparer(tache)
+        if gardee is None:
+            self._phase(tache, PHASES["preparation"])
+            dossier = self.controles.preparer(tache)
+        else:
+            dossier = gardee
+            self._noter(
+                "Le travail d'un passage précédent est resté dans sa copie : l'ouvrier le reprend "
+                "et ne corrige que ce qui a été relevé, sans tout refaire.",
+                tache,
+            )
+        self._retenir_copie(tache, dossier)
         if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
             with self.verrou:
                 tache.tentatives -= 1
@@ -1504,7 +1742,9 @@ class Moteur:
             return dossier, None
         self._phase(tache, PHASES["ouvrier"].format(tache.tentatives))
         resultat = self.agent.executer(
-            consigne_ouvrier(tache, self.chantier.contrat, self.profil, remarques),
+            consigne_ouvrier(
+                tache, self.chantier.contrat, self.profil, remarques, sur_place=gardee is not None
+            ),
             tache.modele,
             tache.effort,
             dossier,
@@ -1514,7 +1754,12 @@ class Moteur:
         return dossier, resultat
 
     def _arret_avant_depart(self, tache: Tache) -> None:
-        """Rend la tâche arrêtée avant qu'un ouvrier n'ait travaillé, en gardant la trace."""
+        """Rend la tâche arrêtée avant qu'un ouvrier n'ait travaillé, en gardant la trace.
+
+        Un arrêt voulu par la personne repart d'un état propre : la copie gardée d'un passage
+        précédent, s'il y en a une, est jetée.
+        """
+        self._jeter_copie_gardee(tache)
         with self.verrou:
             self._tracer(tache, ARRETEE, DETAIL_ARRET, decalage=1)
         self._rendre(tache, MOTIF_ARRET)
@@ -1640,13 +1885,22 @@ class Moteur:
             if not deja:
                 self.chantier.noter(texte, tache.id)
 
-    def _conflit_resolu(self, tache: Tache) -> bool:
-        """Dit si la copie du départ en cours porte la résolution d'un conflit de fusion : un
-        refus d'enregistrement y a été tracé, et un départ ne continue après lui que si ce
-        conflit a été rendu à l'ouvrier (`_conflit_a_reprendre`). Un départ neuf repart d'une
-        copie neuve, sans résolution."""
+    def _conflit_resolu(self, tache: Tache, dossier=None) -> bool:
+        """Dit si la copie porte la résolution d'un conflit de fusion : un refus
+        d'enregistrement a été tracé dans le départ en cours (il ne continue après lui que si ce
+        conflit a été rendu à l'ouvrier, `_conflit_a_reprendre`), ou les contrôles disent que
+        cette copie a reçu un conflit à résoudre (`conflit_pose`). La seconde marque suit la
+        copie : un travail refusé puis gardé d'un départ à l'autre la porte encore."""
         with self.verrou:
-            return any(e.get("origine") == "integration" for e in self._passes_du_depart(tache))
+            if any(e.get("origine") == "integration" for e in self._passes_du_depart(tache)):
+                return True
+        lire = getattr(self.controles, "conflit_pose", None)
+        if lire is None:
+            return False
+        try:
+            return bool(lire(dossier))
+        except Exception:  # dans le doute, vérification complète
+            return True
 
     def _choisir_verification(
         self, tache: Tache, dossier, precedent: Jugement | None, sortie: str | None
@@ -1662,7 +1916,7 @@ class Moteur:
         Sinon le niveau de la tâche décide (`_niveau`).
         """
         origine = precedent.origine if precedent is not None else ""
-        conflit = origine == "integration" or self._conflit_resolu(tache)
+        conflit = origine == "integration" or self._conflit_resolu(tache, dossier)
         niveau = COMPLETE if conflit else self._niveau(tache)
         with self.verrou:
             releve = tache.releve
@@ -2229,7 +2483,10 @@ class Moteur:
     # --- la réponse de la personne responsable ----------------------------------------------
 
     def repondre(self, demande_id: str, choix: str) -> None:
-        """Applique la décision de la personne responsable sur une tâche qui lui est revenue."""
+        """Applique la décision de la personne responsable sur une tâche qui lui est revenue.
+
+        Une relance reprend la copie gardée, s'il y en a une ; un abandon la jette.
+        """
         with self.verrou:
             demande = next(d for d in self.chantier.demandes if d["id"] == demande_id)
             demande["reponse"] = choix
@@ -2247,9 +2504,24 @@ class Moteur:
                 self._relancee_a[tache.id] = self.horloge()  # la mesure de l'attente seulement
             else:
                 tache.etat = "abandonnee"
+            jeter = tache.etat == "abandonnee" and tache.id not in self._en_vol
+        if jeter:  # plus personne ne reprendra ce travail ; une relance, elle, le reprend
+            self._jeter_copie_gardee(tache)
         self._noter(f"Décision reçue : {choix.lower()}.", tache)
         with self.verrou:  # si le moteur tourne, la tâche relancée part sans attendre son tour
             self._reveiller()
+
+    def jeter_les_copies_gardees(self) -> list[str]:
+        """Jette les copies gardées des tâches qu'aucun fil ne mène, et rend leurs identifiants.
+
+        Pour un chantier arrêté pour de bon (archivé) : plus personne ne reprendra ce travail, et
+        aucune copie ne doit rester sur le disque. À appeler quand le moteur ne tourne pas.
+        """
+        with self.verrou:
+            gardees = [t for t in self.chantier.taches if t.copie and t.id not in self._en_vol]
+        for tache in gardees:
+            self._jeter_copie_gardee(tache)
+        return [t.id for t in gardees]
 
     def relancer_au_meme_niveau(self, demande_id: str) -> bool:
         """Répond à une demande de blocage par la relance au même niveau, comme son bouton.

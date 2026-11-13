@@ -1490,6 +1490,7 @@ class Atelier:
             if not ancien.taches and not any(e["auteur"] == "toi" for e in ancien.evenements):
                 return {"fait": False, "phrase": CHANTIER_VIDE}
             avait_annonce = any(e["texte"] in DEPARTS for e in ancien.evenements)
+            self.moteur.jeter_les_copies_gardees()  # plus personne ne reprendra ce travail
             j = archives.archiver(self.depot, ancien, nom, self._contexte_archive())
             nouveau = Chantier(projet=ancien.projet, contrat=Contrat(objectif=""))
             nouveau.noter(ACCUEIL, auteur="orchestrateur")
