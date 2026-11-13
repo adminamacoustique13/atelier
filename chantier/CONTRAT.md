@@ -1,25 +1,25 @@
-# Contrat de chantier — 2026-11-12 (chantier « débit »)
+# Contrat de chantier — 2026-11-13 (chantier « quatre trous »)
 
-Validé le 2026-11-12 par la personne responsable (« Lance »), sur la proposition de l'orchestrateur : un chantier court, trois ouvriers en parallèle dès le départ. Le chantier « ménage », arrêté sur sa décision, est rangé dans `chantier/archives/2026-11-12-menage/`.
+Validé le 2026-11-13 par la personne responsable (« Occupe-toi déjà des points de 1 »), sur la comparaison du dépôt avec la ligne « PC et autonomie » reçue en fichier bundle (`chantier/pc-autonomie`, 5f2c337). Le chantier « débit », terminé, est rangé dans `chantier/archives/2026-11-12-debit/`.
 
 ## Objectif
-Maximiser en continu le nombre d'agents qui travaillent ensemble dans l'Atelier : des fichiers partagés par plusieurs tâches parallèles, avec une fusion prévue ; six places d'écriture, les vérificateurs hors place et un régulateur qui suit les limites de l'abonnement ; plus aucun arrêt pour un outil refusé sans rapport avec le travail.
+Fermer quatre trous du dépôt que la ligne « PC et autonomie » a déjà fermés : le serveur local accepte une demande venue d'un autre site ; un verdict mal écrit vaut accord ; aucun agent n'est empêché de lire un fichier de secrets ni de modifier git ; un fichier au nom accentué est déclaré hors de son périmètre.
 
 ## Hors périmètre
-- Les tâches reportées du chantier « ménage » : V3c (l'agent qui n'avance plus), V3d (montées par tâche), V3e (vérification proportionnée branchée dans le moteur), P2 (signes de vie), les découpages de `atelier/serveur.py` et de la page.
-- L'affichage des places et des fichiers partagés dans la page : une tâche suivante.
+- Tout le reste de la comparaison : les règles du moteur après un refus ou une panne, les contrôles après envoi, le verrou de branche, le socle Windows, le juge de commandes, le plan de pilotage.
+- Les restes du chantier « débit » et les tâches reportées du chantier « ménage ».
 
 ## Enveloppe
 - Tentatives par tâche au maximum : 2, la reprise à chaud comprise.
 - Montées en gamme au maximum : 1.
-- Agents : trois ouvriers, trois vérificateurs, la moitié en marge, soit neuf.
+- Pas de plafond sur le nombre d'agents (leçon du 2026-11-11) ; le compte est donné au bilan.
 
 ## Plafond d'escalade
-Opus pour les ouvriers et les vérificateurs (les crédits de Fable sont épuisés pour cette session).
+Fable en effort élevé.
 
 ## Zones rouges
-- Changer un choix d'architecture inscrit au journal. Exception décidée par la personne responsable : un fichier déclaré partagé peut entrer dans le périmètre de plusieurs tâches parallèles (la règle de la tâche de raccord ne vaut plus que pour un fichier commun non déclaré).
+- Changer un choix d'architecture inscrit au journal.
 - Supprimer des fichiers ou réécrire l'historique git.
-- Faire entrer quoi que ce soit dans `main` sans sa décision.
+- Faire entrer quoi que ce soit dans `main` sans la décision de la personne responsable.
 - Toucher aux secrets ; ajouter une bibliothèque au produit.
 - Modifier les tests ou les essais existants, sauf exception arbitrée et notée au journal.
