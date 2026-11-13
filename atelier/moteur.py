@@ -105,6 +105,17 @@ REPONSE_AU_FIL = 300  # signes gardés de la réponse d'un ouvrier qui n'a rien 
 # Quand le modèle monte après un refus (réglage `montee` du profil) : "fond", seulement si le
 # vérificateur juge le fond faux ; "refus", après tout refus, comme avant le 2026-11-13.
 MONTEES = ("fond", "refus")
+# Le budget du chantier en dollars (`budget_usd` au profil, gardé dans `contrat.max_cout_usd`).
+NATURE_BUDGET = "budget"
+RALLONGE_BUDGET = 1.2  # relancer une tâche arrêtée par le budget l'allonge d'un cinquième
+MOTIF_BUDGET = (
+    "le budget du chantier est atteint ({depense:.2f} $ dépensés pour {budget:.2f} $). La "
+    "relancer accorde une rallonge d'un cinquième."
+)
+COUT_INCOMPLET = (
+    "Le coût de cet agent est incomplet : il a été coupé avant son message de fin. Le total du "
+    "chantier est donc sous-estimé."
+)
 MONTEE_SANS_REGLAGE = "fond"
 MOTIFS_REPRIS = ("bacle", "ne_sait_pas")  # un verdict « consigne » revient à la personne
 VERDICT_GARDE = 8000  # les derniers caractères du texte du vérificateur, gardés et transmis
@@ -626,6 +637,62 @@ class Moteur:
             tache.tokens += resultat.tokens
             self.chantier.cout_usd += resultat.cout_usd
             self.chantier.tokens += resultat.tokens
+        if getattr(resultat, "cout_incomplet", False):
+            self._noter(COUT_INCOMPLET, tache)
+
+    # --- le budget en dollars ---------------------------------------------------------------
+
+    def _budget(self) -> float:
+        """Le budget du chantier en dollars ; 0 : aucun. Celui du contrat, sinon celui du profil
+        (`budget_usd`), recopié alors dans le contrat pour qu'une rallonge ait où s'écrire."""
+        contrat = self.chantier.contrat
+        with self.verrou:
+            if contrat.max_cout_usd <= 0:
+                regle = self.profil.get("budget_usd")
+                lisible = isinstance(regle, (int, float)) and not isinstance(regle, bool)
+                if lisible and regle > 0:
+                    contrat.max_cout_usd = float(regle)
+            return max(0.0, contrat.max_cout_usd)
+
+    def _budget_atteint(self) -> bool:
+        budget = self._budget()
+        with self.verrou:
+            return budget > 0 and self.chantier.cout_usd >= budget
+
+    def _plafond(self) -> dict:
+        """Ce qu'un appel d'agent ajoute pour qu'il ne dépasse pas ce qui reste du budget ; rien
+        sans budget, ni pour un agent qui ne sait pas tenir un plafond (`plafonne_la_depense`)."""
+        budget = self._budget()
+        if budget <= 0 or not getattr(self.agent, "plafonne_la_depense", False):
+            return {}
+        with self.verrou:
+            reste = budget - self.chantier.cout_usd
+        return {"budget_usd": round(reste, 4)} if reste > 0 else {}
+
+    def _rendre_pour_budget(self, tache: Tache) -> None:
+        """Rend la tâche à la personne parce que le budget est atteint ; son travail, s'il y
+        en a, reste dans sa copie. La relancer accorde une rallonge (`repondre`)."""
+        with self.verrou:
+            raison = MOTIF_BUDGET.format(
+                depense=self.chantier.cout_usd, budget=self.chantier.contrat.max_cout_usd
+            )
+        self._rendre(tache, raison, nature=NATURE_BUDGET)
+
+    def _rallonger(self, demande: dict) -> str:
+        """Sous le verrou : la rallonge qu'accorde la relance d'une tâche arrêtée par le budget.
+        Rend la phrase à dire au fil, ou "" quand il n'y a rien à allonger (le budget a déjà été
+        relevé par une autre relance)."""
+        contrat, depense = self.chantier.contrat, self.chantier.cout_usd
+        if demande.get("nature") != NATURE_BUDGET or contrat.max_cout_usd <= 0:
+            return ""
+        if depense < contrat.max_cout_usd:
+            return ""
+        avant = contrat.max_cout_usd
+        contrat.max_cout_usd = round(max(avant, depense) * RALLONGE_BUDGET, 2)
+        return (
+            f"Budget relevé d'un cinquième à ta demande : {avant:.2f} $ deviennent "
+            f"{contrat.max_cout_usd:.2f} $."
+        )
 
     def _tracer(
         self,
@@ -1293,11 +1360,18 @@ class Moteur:
                 return self._arret_avant_depart(tache)
             rejuge = self._rejuger(tache)
             if rejuge is None:
+                if self._budget_atteint():  # plus aucun ouvrier ne part au-delà du budget
+                    return self._rendre_pour_budget(tache)
                 self._prendre_agent()
             dossier, resultat = rejuge or self._lancer_ouvrier(tache, remarques)
             if resultat is None:  # arrêt demandé pendant la préparation : l'ouvrier n'est pas parti
                 self._jeter_copie(tache, dossier)
                 return self._arret_avant_depart(tache)
+            if self._nature(resultat) == NATURE_BUDGET:  # coupé par son plafond : rien de compté
+                with self.verrou:
+                    tache.tentatives -= 1
+                self._copie_apres(tache, dossier, resultat, None)
+                return self._rendre_pour_budget(tache)
             if self._suspendre(tache, resultat):  # la tentative ne compte pas non plus
                 with self.verrou:
                     tache.tentatives -= 1
@@ -1683,7 +1757,9 @@ class Moteur:
         return sait and lire_garde(self.profil)[0]
 
     def _retour_permis(self, jugement: Jugement, faits: dict) -> bool:
-        """Compte ce retour et dit s'il peut partir (voir `_reprises`)."""
+        """Compte ce retour et dit s'il peut partir (voir `_reprises`). Aucun au-delà du budget."""
+        if self._budget_atteint():
+            return False
         if not self._garde():
             faits["tous"] += 1
             return faits["tous"] <= REPRISES_PAR_DEPART
@@ -1771,6 +1847,7 @@ class Moteur:
             contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
             reprendre=session,
             **self._garder_ouvert(),
+            **self._plafond(),
         )
         self._compter(tache, resultat)
         if resultat.erreur == REPRISE_IMPOSSIBLE:
@@ -1824,6 +1901,7 @@ class Moteur:
             dossier,
             contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
             **self._garder_ouvert(),
+            **self._plafond(),
         )
         self._compter(tache, resultat)
         return dossier, resultat
@@ -2248,6 +2326,7 @@ class Moteur:
                 lecture_seule=True,
                 contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
                 **en_plus,
+                **self._plafond(),
             )
         finally:
             if copie:
@@ -2603,6 +2682,7 @@ class Moteur:
 
         Une relance reprend la copie gardée, s'il y en a une ; un abandon la jette.
         """
+        rallonge = ""
         with self.verrou:
             demande = next(d for d in self.chantier.demandes if d["id"] == demande_id)
             demande["reponse"] = choix
@@ -2617,6 +2697,7 @@ class Moteur:
                 tache.rallonge = tache.tentatives
                 tache.pannes = 0  # la patience après une panne repart d'une minute
                 tache.etat = "a_lancer"
+                rallonge = self._rallonger(demande)
                 self._relancee_a[tache.id] = self.horloge()  # la mesure de l'attente seulement
             else:
                 tache.etat = "abandonnee"
@@ -2624,6 +2705,8 @@ class Moteur:
         if jeter:  # plus personne ne reprendra ce travail ; une relance, elle, le reprend
             self._jeter_copie_gardee(tache)
         self._noter(f"Décision reçue : {choix.lower()}.", tache)
+        if rallonge:
+            self._noter(rallonge, tache)
         with self.verrou:  # si le moteur tourne, la tâche relancée part sans attendre son tour
             self._reveiller()
 

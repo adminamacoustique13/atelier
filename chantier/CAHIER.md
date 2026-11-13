@@ -24,7 +24,7 @@
 | M9. Retours à l'ouvrier ouvert | fait, à relire | Claude directement, sans ouvrier ni vérificateur | tests seuls : 14 tests nouveaux, les 3 130 existants inchangés | 1 | le moteur demande à garder l'ouvrier quand le profil le permet et que l'agent sait le faire ; un contrôle rouge lui revient jusqu'à trois fois (`retours_controles`), un manque une fois (`complements`) ; arrêt au même échec ; copie restée telle quelle : le refus vaut sans rien rejouer ; ouvrier libéré à la fin de la tâche et à l'arrêt du serveur |
 | M10. Sous-tâche | à lancer (vague 2) | Opus, effort élevé | bornée | | |
 | M11. Après un refus | fait, à relire | Claude directement, sans ouvrier ni vérificateur | tests seuls : 11 tests nouveaux sous la règle du produit ; les tests d'avant prouvent l'ancienne règle, gardée au profil | 1 | sans réglage, le modèle ne monte que si le vérificateur juge le fond faux ; un fond jugé faux ne revient jamais au même ouvrier ; le même refus deux fois de suite bloque ; à bout de tentatives la tâche revient, et seule une tâche au fond faux est relancée seule ; suite 3 146, ruff propre |
-| M12. Budget | à lancer (vague 2) | Fable, effort élevé | complète | | |
+| M12. Budget | fait, à relire | Claude directement, sans ouvrier ni vérificateur | tests seuls : 16 tests nouveaux | 1 | `budget_usd` au profil, gardé dans le contrat ; au-delà, plus aucun ouvrier ni retour ne part, la tâche revient avec une demande de nature « budget », travail gardé ; la relancer accorde un cinquième, une fois ; chaque agent qui sait le tenir reçoit le reste comme plafond ; un ouvrier coupé par son plafond ne compte pas contre la tâche ; un coût incomplet est dit au fil |
 | M13. Page | à lancer (vague 3) | Sonnet, effort moyen | bornée | | |
 | M14. Épreuves d'ensemble et démonstration | à lancer (vague 3) | Sonnet, effort élevé | bornée | | |
 
@@ -97,6 +97,13 @@ Les vérificateurs partageaient le même dossier de travail. Celui de M5 a lanc�
 - **Deux règles vivent dans le produit.** La règle « fond » est celle du produit sans réglage. L'ancienne (« refus » : seconde chance, puis un cran après tout refus) reste, par `"montee": "refus"` au profil. Les tests écrits avant ce jour prouvent l'ancienne : un réglage commun des tests (`tests/conftest.py`, `montee_d_avant`) la leur donne, pour ne pas en réécrire plusieurs dizaines. Seuls les tests marqués `montee_sur_le_fond` (aujourd'hui `tests/test_moteur_montee.py`) tournent sous la règle du produit. Conséquence : les croisements de la règle « fond » avec le reste du moteur (pannes, conflits de fusion, niveaux, places) sont moins prouvés que ceux de l'ancienne. À décider à la relecture : retirer l'ancienne règle et réécrire ses tests, ou la garder.
 - La cause de blocage reste nommée `sans_cran` (le même refus deux fois, sans cran possible) ; la fiche voulait `meme_defaut`. Le comportement est celui demandé.
 - `jugement.meme_defaut` (dit par le vérificateur d'une retouche) et deux délais dépassés de suite ne sont pas encore lus pour bloquer.
+
+## Écarts de M12 par rapport à sa fiche (à relire)
+- La barrière vaut avant le départ d'un ouvrier et avant un retour à l'ouvrier, pas avant un vérificateur : un travail déjà rendu est jugé jusqu'au bout. Le dépassement est donc borné aux vérifications des tâches en cours.
+- Il n'y a pas une demande unique pour le chantier avec « Ajouter un cinquième » et « Arrêter là » : chaque tâche arrêtée par le budget revient avec les boutons habituels, et la relancer accorde la rallonge (une seule fois tant que le budget relevé n'est pas de nouveau atteint). C'est la règle de la ligne « PC et autonomie ».
+- Un vérificateur coupé par son plafond suit encore la règle des erreurs d'agent.
+- Le budget du profil est recopié dans le contrat par le moteur à sa première lecture, pas par le serveur à l'adoption du plan. La page ne le montre pas encore (M13).
+- Un test du jour modifié : `test_une_nature_qui_n_est_pas_une_panne_suit_la_regle_d_avant_sans_pause` ne joue plus la nature « budget », qui a maintenant sa propre règle.
 
 ## Relevés des ouvriers, hors périmètre
 - P3 : pendant sa reprise, l'ouvrier a effacé 171 fichiers `atelier-refus-*.json` du dossier temporaire commun, sans savoir s'ils étaient tous à lui (une seconde suppression a été refusée par l'arbitre). Fichiers jetables de tests ; à retenir : les tests du pont doivent écrire leurs réglages dans un dossier à eux.

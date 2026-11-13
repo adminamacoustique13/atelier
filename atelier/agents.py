@@ -926,8 +926,10 @@ class AgentClaude(_ModeDesOuvriers, _OuvriersOuverts):
     Un outil qui n'est ni permis ni interdit passe par le guichet, s'il y en a un.
     """
 
-    # Le moteur ne demande `garder_ouvert` qu'à un agent qui le dit (voir `Moteur._garde`).
+    # Le moteur ne demande `garder_ouvert` qu'à un agent qui le dit (voir `Moteur._garde`), et
+    # ne lui donne un plafond de dépense (`budget_usd`) que s'il dit savoir le tenir.
     garde_les_ouvriers = True
+    plafonne_la_depense = True
 
 
     def __init__(self, profil: dict | None = None, delai_max_s: int = 3600, fabrique_client=None):
@@ -981,6 +983,7 @@ class AgentClaude(_ModeDesOuvriers, _OuvriersOuverts):
         copie_jetable: bool = False,
         reprendre: str | None = None,
         garder_ouvert: bool = False,
+        budget_usd: float | None = None,
     ) -> Resultat:
         """Exécute une consigne et rend le résultat de l'agent.
 
@@ -1038,9 +1041,12 @@ class AgentClaude(_ModeDesOuvriers, _OuvriersOuverts):
                 # part par la reprise de session, comme s'il n'y avait pas eu d'ouvrier ouvert.
             self._fermer_l_ancien(tache)  # jamais deux ouvriers pour une même tâche
         garder = de_tache and bool(garder_ouvert)
+        # Le plafond de dépense n'entre pas dans les réglages comparés pour servir une suite : il
+        # change à chaque appel, et celui d'un ouvrier resté ouvert date de sa connexion.
         return self._travailler(
-            tache, nom, consigne, ouvrier=not lecture_seule, garder=garder, **reglages, **reprise
-        )
+            tache, nom, consigne, ouvrier=not lecture_seule, garder=garder,
+            budget_usd=budget_usd, **reglages, **reprise,
+        )  # fmt: skip
 
     def _ouvert_pour(self, tache: str, reprendre, reglages: dict) -> _Ouvert | None:
         """L'ouvrier ouvert de la tâche, s'il est sur la session `reprendre` et que rien de ses

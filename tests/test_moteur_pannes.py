@@ -779,7 +779,9 @@ def test_une_alternance_sans_fin_de_pannes_et_de_surcharges_borne_les_agents_lan
     assert [e["issue"] for e in a.historique].count(ATTENTE_PANNE) == len(PAUSES_PANNE_S)
 
 
-@pytest.mark.parametrize("nature", ["delai", "budget", "erreur"])
+# « budget » n'y est plus : un ouvrier coupé par son plafond rend la tâche pour budget, sans
+# rien compter contre elle (tests/test_moteur_budget.py).
+@pytest.mark.parametrize("nature", ["delai", "erreur"])
 def test_une_nature_qui_n_est_pas_une_panne_suit_la_regle_d_avant_sans_pause(nature):
     c = chantier([tache("A")])
     agent = agent_script(c, {("A", "ouvrier"): [nature, nature]})
