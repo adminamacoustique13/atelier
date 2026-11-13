@@ -1,0 +1,160 @@
+/* Maquettes V1 : la Salle à plusieurs agents (pistes A et B) et l'état du dépôt.
+   Même palette et mêmes polices que le tableau de bord : noir, bleu nuit, ambre, gris clair, blanc.
+   Ambre = ce qui t'attend. Blanc = vérifié, entré dans la branche. Bleu acier = en cours.
+   Un refus se dit par des points creux, ce qui n'est pas parti par un pointillé. */
+@font-face { font-family: "Geist"; src: url("../atelier/tableau/polices/geist.woff2") format("woff2"); font-weight: 300 700; }
+@font-face { font-family: "Geist Mono"; src: url("../atelier/tableau/polices/geist-mono.woff2") format("woff2"); font-weight: 400 600; }
+@font-face { font-family: "Doto"; src: url("../atelier/tableau/polices/doto.woff") format("woff"); font-weight: 900; }
+:root {
+  color-scheme: dark;
+  --noir: #000000; --ambre: #e8953a; --gris: #dcdcdc; --blanc: #ffffff;
+  --surface: #0e1220; --surface-haut: #151b2d;
+  --bord: rgba(220, 220, 220, 0.09); --bord-fort: rgba(220, 220, 220, 0.17);
+  --texte: var(--blanc); --discret: rgba(220, 220, 220, 0.74); --faible: rgba(220, 220, 220, 0.52); --eteint: rgba(220, 220, 220, 0.12);
+  --attend: var(--ambre); --verifie: var(--blanc); --en-cours: #8297c4;
+  --sans: "Geist", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace; --points: "Doto", "Geist Mono", monospace;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  min-height: 100vh; color: var(--texte); font: 400 13px/1.45 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased;
+  background: radial-gradient(120% 90% at 50% -25%, #1c2440 0%, #0b0f1b 48%, #000 100%) fixed, #000;
+}
+h1, h2, h3, p, ul, ol { margin: 0; } ul, ol { padding: 0; list-style: none; }
+code { font: 400 12px var(--mono); background: rgba(255, 255, 255, 0.06); padding: 1px 5px; border-radius: 5px; }
+.app { display: flex; flex-direction: column; gap: 12px; padding: 0 22px 18px; min-width: 0; }
+.panneau { background: linear-gradient(180deg, var(--surface-haut), var(--surface)); border: 1px solid rgba(220, 220, 220, 0.05); border-radius: 16px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 0 rgba(0, 0, 0, 0.6), 0 24px 40px -24px rgba(0, 0, 0, 0.85); }
+.etiquette { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
+.etiquette.ambre { color: var(--attend); }
+.points { font-family: var(--points); font-weight: 900; letter-spacing: 0.02em; }
+.calme { color: var(--discret); } .fort { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.id { font: 500 11.5px var(--mono); color: var(--discret); margin-right: 7px; }
+.signe { flex: none; vertical-align: -2px; }
+/* « Bientôt » : décidé pour le chantier suivant, pas encore dans le moteur. « À venir » : pas décidé. */
+.bientot { display: inline-block; font: 500 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; font-style: normal; color: var(--discret);
+  border: 1px dashed var(--bord-fort); border-radius: 5px; padding: 0 5px; line-height: 14px; vertical-align: 1px; white-space: nowrap; }
+.btn { display: inline-flex; align-items: center; height: 28px; padding: 0 10px; border-radius: 8px; font: 500 11.5px var(--mono); border: 1px solid var(--bord-fort); white-space: nowrap; }
+.btn.attend { background: var(--attend); color: #1c0f00; border-color: transparent; font-weight: 600; }
+.boutons { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* ---------- En-tête ---------- */
+.tete { display: flex; align-items: center; gap: 16px; min-height: 64px; padding: 0 4px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+.tete::-webkit-scrollbar { display: none; }
+.tete .mot { font: 900 25px/1 var(--points); letter-spacing: 0.02em; }
+.tete .projet { font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--discret); padding-left: 16px; border-left: 1px solid var(--bord); }
+.tete nav { display: flex; gap: 2px; margin-left: 4px; }
+.tete nav a { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 8px; color: var(--faible); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.tete nav a.on { color: var(--texte); background: rgba(220, 220, 220, 0.08); }
+.tete nav a.neuf { border: 1px dashed var(--bord-fort); }
+.tete nav .pt { width: 6px; height: 6px; border-radius: 50%; background: var(--attend); box-shadow: 0 0 10px var(--attend); }
+.tete .pousse { flex: 1; }
+.tete .vif { display: flex; align-items: center; gap: 8px; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--discret); }
+.tete .vif i { width: 7px; height: 7px; border-radius: 50%; background: var(--en-cours); box-shadow: 0 0 10px var(--en-cours); }
+.tete .demo { font: 500 10.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); border: 1px dashed var(--bord-fort); padding: 5px 10px; border-radius: 7px; }
+
+/* ---------- Le bandeau : la phrase, puis les comptes ---------- */
+.bandeau { display: flex; align-items: stretch; gap: 0; padding: 12px 6px 12px 18px; }
+.bandeau .resume { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 5px; justify-content: center; padding-right: 16px; }
+.bandeau .resume .calme { display: none; }
+.bandeau .phrase { font-size: 16.5px; font-weight: 500; line-height: 1.3; letter-spacing: -0.005em; }
+.cpt { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 0 15px; border-left: 1px solid var(--bord); min-width: 96px; }
+.cpt b { display: flex; align-items: baseline; gap: 6px; font-weight: 400; line-height: 1; height: 28px; white-space: nowrap; }
+.cpt b .points { font-size: 27px; line-height: 28px; }
+.cpt b small { font: 400 12px var(--mono); color: var(--faible); }
+.cpt .sous { font: 400 10.5px var(--mono); color: var(--faible); white-space: nowrap; }
+.cpt.attend .points, .cpt.attend .etiquette { color: var(--attend); }
+.cases { display: flex; align-items: center; gap: 3px; height: 9px; }
+.cases i { width: 8px; height: 8px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--faible); }
+.cases i.pris { background: var(--en-cours); box-shadow: none; }
+.cases i.rond { border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.6px var(--en-cours); }
+.cases i.vide { box-shadow: none; border: 1px dashed var(--faible); }
+.cases em { width: 5px; }
+.cases.fin i { width: 5px; } .cases.fin i.pris { background: var(--verifie); }
+.jauge { display: block; height: 4px; margin-top: 3px; border-radius: 2px; background: var(--eteint); overflow: hidden; }
+.jauge i { display: block; height: 100%; background: var(--gris); border-radius: 2px; }
+
+/* ---------- La Salle : le sol à gauche, la colonne à droite ---------- */
+.salle2 { display: grid; grid-template-columns: minmax(0, 1fr) 286px; gap: 14px; align-items: start; }
+.sol { position: relative; height: 676px; min-width: 934px; }
+.sol-cadre { overflow-x: auto; scrollbar-width: none; }
+.sol svg.plan { position: absolute; left: 0; top: 0; width: 934px; height: 676px; }
+.etq { position: absolute; transform: translateY(-50%); width: 160px; padding: 7px 10px 8px; border-radius: 11px; background: rgba(14, 18, 32, 0.88); border: 1px solid var(--bord); box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.9); }
+.etq::after { content: ""; position: absolute; top: 50%; left: -13px; width: 12px; height: 1px; background: rgba(220, 220, 220, 0.3); }
+.etq .t { font-size: 12px; font-weight: 500; line-height: 1.3; }
+.etq .coin { position: absolute; top: -8px; right: 8px; background: #101524; }
+.etq .t .id { margin-right: 6px; }
+.etq .m { display: flex; align-items: center; gap: 5px; font: 500 10.5px var(--mono); margin-top: 3px; white-space: nowrap; color: var(--en-cours); }
+.etq .d { font: 400 10.5px var(--mono); color: var(--faible); margin-top: 2px; white-space: nowrap; }
+.etq .d b { font-weight: 500; color: var(--discret); }
+.etq.fusionnee .m { color: var(--verifie); } .etq.fusionnee { border-color: rgba(255, 255, 255, 0.26); }
+.etq.toi .m { color: var(--attend); } .etq.toi { border-color: color-mix(in srgb, var(--attend) 55%, transparent); }
+.etq.file .m { color: var(--faible); } .etq.file { border-style: dashed; border-color: rgba(255, 255, 255, 0.14); background: rgba(8, 10, 18, 0.7); box-shadow: none; }
+.etq.file .t { color: var(--discret); }
+.etq.corrige { border-style: dotted; border-color: rgba(130, 151, 196, 0.6); }
+.etq.conflit { border-color: rgba(130, 151, 196, 0.5); box-shadow: 3px 3px 0 -1px rgba(14, 18, 32, 1), 3px 3px 0 0 rgba(130, 151, 196, 0.4), 0 12px 24px -12px rgba(0, 0, 0, 0.9); }
+.etq.ecrit, .etq.ouvert, .etq.verif { border-color: rgba(130, 151, 196, 0.34); }
+.etq.sobre { background: none; border: 0; box-shadow: none; padding: 0; width: auto; } .etq.sobre::after { display: none; }
+.zone-titre { position: absolute; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); white-space: nowrap; }
+.zone-titre b { font: 900 17px/1 var(--points); color: var(--texte); letter-spacing: 0.02em; margin-right: 6px; vertical-align: -2px; }
+.zone-titre small { display: block; font: 400 10.5px var(--mono); letter-spacing: 0; text-transform: none; color: var(--faible); margin-top: 4px; white-space: normal; }
+
+.cote { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.cote .panneau { padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; }
+.cote .attente { border-color: color-mix(in srgb, var(--attend) 34%, transparent); }
+.entre { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.lecture { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--discret); }
+.lecture li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: center; }
+.lecture svg { display: block; margin: auto; }
+.lecture li.mots { display: block; }
+.fil { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--discret); }
+.fil li { display: grid; grid-template-columns: 40px 16px minmax(0, 1fr); gap: 4px; }
+.fil time, .fil b { font: 400 10.5px var(--mono); color: var(--faible); line-height: 16px; } .fil b { color: var(--texte); font-weight: 500; }
+
+/* ---------- Écran étroit : la même Salle en liste ---------- */
+.liste { display: none; }
+.groupe { padding: 14px 14px 6px; }
+.groupe > h2 { display: flex; align-items: baseline; gap: 8px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--discret); padding-bottom: 8px; }
+.groupe > h2 b { font: 900 19px/1 var(--points); color: var(--texte); letter-spacing: 0.02em; }
+.groupe > h2 small { font: 400 10.5px var(--mono); letter-spacing: 0; text-transform: none; color: var(--faible); margin-left: auto; text-align: right; }
+.ligne { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--bord); }
+.ligne .noeud { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #0b0f1b; border: 1.5px solid var(--en-cours); color: var(--en-cours); position: relative; z-index: 1; }
+.ligne p { font-size: 13px; font-weight: 500; line-height: 1.35; }
+.ligne .mot { font: 500 11px var(--mono); color: var(--en-cours); margin-top: 1px; }
+.ligne small { display: block; font: 400 11px/1.45 var(--mono); color: var(--faible); }
+.ligne small .signe { vertical-align: -2px; color: var(--en-cours); }
+.ligne small.detail { font-family: var(--sans); font-size: 11.5px; color: var(--discret); margin-top: 2px; }
+.ligne.fusionnee .noeud { background: var(--verifie); border-color: var(--verifie); color: #000; } .ligne.fusionnee .mot { color: var(--verifie); }
+.ligne.toi .noeud { border-color: var(--attend); color: var(--attend); box-shadow: 0 0 0 3px rgba(232, 149, 58, 0.18); } .ligne.toi .mot { color: var(--attend); }
+.ligne.file .noeud { border: 1.5px dashed var(--faible); color: var(--faible); } .ligne.file .mot { color: var(--faible); } .ligne.file p:first-child { color: var(--discret); }
+.ligne.corrige .noeud { border-style: dotted; border-width: 2px; }
+.ligne.conflit .noeud { box-shadow: 4px 0 0 -1.5px #0b0f1b, 4px 0 0 0 var(--en-cours); }
+.ligne.ouvert .noeud { background: transparent; border-width: 1px; }
+.ligne.verif .noeud { border-width: 1px; }
+.ligne.autre .noeud { border-color: var(--bord-fort); color: var(--discret); }
+/* Piste A, écran étroit : la route descend le long des tâches. */
+.route .ligne { border-top: 0; padding: 8px 0; }
+.route .ligne::before { content: ""; position: absolute; left: 12px; top: 0; bottom: 0; border-left: 2px solid var(--en-cours); opacity: 0.55; }
+.route .ligne.fusionnee::before, .route .ligne.depart::before { border-left-color: var(--verifie); opacity: 1; }
+.route .ligne.file::before, .route .ligne.fin::before { border-left: 2px dashed var(--faible); opacity: 0.6; }
+.route .ligne.depart::before { top: 20px; } .route .ligne.fin::before { bottom: calc(100% - 20px); }
+.route .etape-titre { padding: 12px 0 2px; }
+
+@media (max-width: 999px) {
+  .app { padding: 0 10px 12px; gap: 10px; }
+  .tete { flex-wrap: wrap; justify-content: space-between; gap: 6px 12px; padding: 12px 4px 0; overflow: visible; } .tete .projet, .tete .vif, .tete .pousse { display: none; }
+  .tete nav { order: 5; flex: 1 1 100%; margin: 0 -4px; overflow-x: auto; scrollbar-width: none; } .tete nav::-webkit-scrollbar { display: none; }
+  .tete .mot { font-size: 22px; } .tete nav a { padding: 8px 9px; }
+  .bandeau { flex-wrap: wrap; padding: 14px 4px 4px 14px; }
+  .bandeau .resume { flex-basis: 100%; padding-bottom: 12px; }
+  .bandeau .phrase { font-size: 16px; } .bandeau .resume .calme { display: block; }
+  .cpt b .points { font-size: 23px; } .cpt b small { font-size: 11px; }
+  .cpt { flex: 1 1 30%; min-width: 0; padding: 0 8px 12px 0; border-left: 0; }
+  .cpt .etiquette { font-size: 9.5px; letter-spacing: 0.05em; white-space: nowrap; }
+  .cpt .sous { white-space: normal; }
+  .salle2 { grid-template-columns: minmax(0, 1fr); }
+  .sol-cadre { display: none; }
+  .liste { display: flex; flex-direction: column; gap: 10px; }
+  .cote { display: contents; } .cote .attente { order: -1; } .cote .suite { order: 5; }
+  .cote .panneau.lire { display: none; }
+}
