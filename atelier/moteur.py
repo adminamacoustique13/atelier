@@ -18,6 +18,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+import unicodedata
 import weakref
 from collections.abc import Callable, Collection
 from contextlib import suppress
@@ -42,6 +43,7 @@ from atelier.consignes import (
     consigne_reprise,
     consigne_reverification,
     consigne_verificateur,
+    consigne_verificateur_bornee,
     dernier_json,
     lire_verdict,
 )
@@ -188,6 +190,12 @@ class Jugement:
     travailler, et les outils refusés à l'ouvrier (`refus.empechements`) ; `refuses_seuls` :
     parmi eux, les outils refusés qu'aucun agent ne signale aussi, que la reprise cite à
     l'ouvrier ; `blocage` : la cause qui bloque la tâche, "" sinon.
+
+    Ce qui servira à décider après un refus, sans rien décider ici (valeurs neutres par défaut) :
+    `lisible`, le vérificateur a rendu un verdict lisible ; `nature`, celle du résultat de l'agent
+    quand l'échec vient de lui ; `reste` et `fichiers`, ceux du verdict (pour un refus des
+    contrôles automatiques, `reste` porte ce qui a échoué) ; `meme_defaut`, dit par le
+    vérificateur d'une retouche ; `fond_faux`, le vérificateur juge le fond faux (`_fond_faux`).
     """
 
     motif: str | None
@@ -200,6 +208,12 @@ class Jugement:
     empechements: tuple[str, ...] = ()
     blocage: str = ""
     refuses_seuls: tuple[str, ...] = ()
+    lisible: bool = False
+    nature: str = ""
+    reste: tuple[str, ...] = ()
+    fichiers: tuple[str, ...] = ()
+    meme_defaut: bool = False
+    fond_faux: bool = False
 
     @property
     def signales(self) -> tuple[str, ...]:
@@ -213,6 +227,43 @@ class Jugement:
 
 
 ARRET = Jugement(ARRETEE, DETAIL_ARRET)
+
+# Les genres de vérification d'une passe (`Verification.genre`) : selon le niveau de la tâche,
+# la retouche de ce qu'un vérificateur a relevé, la relecture qui suit la reprise d'un refus
+# du fond, ou celle qui suit la reprise d'un conflit de fusion.
+COMPLETE, BORNEE = dosage.COMPLETE, dosage.BORNEE
+RETOUCHE, REVERIFICATION, CONFLIT = "retouche", "reverification", "conflit"
+# Les motifs d'un refus lisible qui laissent le reste du travail acquis : le vérificateur écrit
+# ce qu'il a relevé (`Tache.releve`), et la vérification suivante est une retouche.
+MOTIFS_RELEVES = ("bacle", "local")
+ENTREE_SANS_VERIFICATEUR = (
+    "Entrée sans vérificateur : vérification mécanique seule, le contrôle du périmètre et les "
+    "contrôles automatiques ont passé."
+)
+MECANIQUE_SANS_CONTROLE = (
+    "Le profil n'a aucune commande de contrôle : une tâche mécanique ne peut pas être jugée par "
+    "les seuls contrôles automatiques, elle reçoit donc une vérification bornée."
+)
+TYPE_INCONNU = (
+    "Le type de cette tâche ({type}) n'est pas un type connu : elle sera vérifiée complètement, "
+    "quel que soit le profil."
+)
+
+
+@dataclass(frozen=True)
+class Verification:
+    """Comment une passe est vérifiée : le genre (`COMPLETE`, `BORNEE`, `RETOUCHE`,
+    `REVERIFICATION` ou `CONFLIT`), le dosage du vérificateur, la sortie des contrôles que le
+    moteur vient de jouer (None quand il n'a rien joué), pour une retouche les fichiers changés
+    depuis ce que le vérificateur précédent a vu (vide quand on ne sait pas les dire), et l'état
+    de la copie que ce vérificateur va voir (`empreinte`, "" quand on ne sait pas le dire)."""
+
+    genre: str
+    modele: str
+    effort: str
+    sortie: str | None = None
+    fichiers: tuple[str, ...] = ()
+    empreinte: str = ""
 
 
 def _court(texte: object, longueur: int) -> str:
@@ -354,15 +405,34 @@ CHAMPS_DU_PLAN = ("id", "titre", "type", "pourquoi", "criteres", "perimetre", "d
 CHAMPS_DU_PLAN += ("fournit", "attend", "ajoutee")
 
 
+# Les types de tâche que le produit connaît : ceux que l'orchestrateur choisit (`dosage.TYPES_FR`)
+# et ceux qui ont un niveau de vérification de départ (`dosage.NIVEAU_DEPART`, réparation comprise).
+TYPES_CONNUS = tuple(dict.fromkeys([*dosage.TYPES_FR, *dosage.NIVEAU_DEPART]))
+
+
+def _type_du_plan(ecrit) -> str:
+    """Le type d'une tâche tel que le plan l'écrit, ramené à sa forme connue quand il n'en
+    diffère que par la casse, les accents ou les espaces autour (« Délicate », « physique  »).
+
+    Un type qui reste inconnu est gardé tel qu'écrit (un texte vide pour une valeur nulle) : il
+    n'est jamais confondu avec « courante », et le moteur le vérifie complètement."""
+    texte = ecrit if isinstance(ecrit, str) else ("" if ecrit is None else str(ecrit))
+    decompose = unicodedata.normalize("NFKD", texte.strip().lower())
+    simple = "".join(c for c in decompose if not unicodedata.combining(c))
+    return simple if simple in TYPES_CONNUS else texte
+
+
 def taches_du_plan(plan: dict, profil: dict) -> list[Tache]:
-    """Construit les tâches d'un plan rendu par l'orchestrateur, et dose chacune."""
+    """Construit les tâches d'un plan rendu par l'orchestrateur, et dose chacune.
+
+    Le type est ramené à sa forme connue (`_type_du_plan`) ; un type inconnu reste tel quel, et
+    son ouvrier est dosé comme une tâche courante (`dosage.depart`), comme avant."""
     taches = []
     for brut in plan.get("taches") or []:
         if not isinstance(brut, dict) or not brut.get("id") or not brut.get("titre"):
             continue
         tache = Tache(**{cle: brut[cle] for cle in CHAMPS_DU_PLAN if cle in brut})
-        if tache.type not in dosage.TYPES_FR:
-            tache.type = "courante"
+        tache.type = _type_du_plan(tache.type)
         tache.modele, tache.effort = dosage.depart(tache.type, profil.get("dosage"))
         taches.append(tache)
     return taches
@@ -972,10 +1042,14 @@ class Moteur:
                 if self._veulent_ecrire.pop(tache.id, None) is not None:
                     self._reveiller()
 
-    def _attendre_jeton(self, tache: Tache) -> None:
+    def _attendre_jeton(self, tache: Tache, modele: str | None = None) -> None:
         """La tâche passe en vérification et rend sa place, qui va aussitôt à une tâche prête ;
-        attend le jeton de son vérificateur (`Places.en_verification`), ou l'arrêt."""
-        modele, _ = dosage.verificateur(tache.modele, tache.effort)
+        attend le jeton de son vérificateur (`Places.en_verification`), ou l'arrêt.
+
+        `modele` : celui du vérificateur qui va partir, selon le niveau de vérification ; sans
+        lui, un modèle au-dessus de l'ouvrier."""
+        if modele is None:
+            modele, _ = dosage.verificateur(tache.modele, tache.effort)
         with self.verrou:
             tache.etat = "en_verification"
             self.places.en_verification(tache.id, modele, self.heure())
@@ -1452,48 +1526,269 @@ class Moteur:
 
         Rend un `Jugement` sans motif si le livrable est accepté. `precedent` est le refus qui a
         conduit à une reprise : venu du vérificateur, il appelle une vérification restreinte.
+
+        Une passe sans `precedent` ouvre un départ, dans une copie neuve : ce qu'un vérificateur
+        avait relevé sur une autre copie ne vaut plus (`_retenir_releve`). Un débord l'efface
+        aussi ; un refus des contrôles ou une erreur de l'ouvrier le laissent.
         """
         if self._arretee(tache, resultat):
             return ARRET
+        if precedent is None:
+            self._retenir_releve(tache)
         if not resultat.ok:
             detail = f"L'agent s'est arrêté sur une erreur : {resultat.erreur}"
-            return Jugement("ne_sait_pas", detail, "agent")
-        refus = self._controler(tache, dossier, resultat)
+            return Jugement("ne_sait_pas", detail, "agent", nature=self._nature(resultat))
+        refus, sortie = self._controler(tache, dossier, resultat)
         if refus is not None:
+            if refus.origine == "perimetre":
+                self._retenir_releve(tache)
             return refus
         if self._arretee(tache):  # aucun agent n'est en marche : le vérificateur ne part pas
             return ARRET
-        return self._verifier(tache, dossier, precedent)
+        return self._verifier(tache, dossier, precedent, sortie)
 
-    def _controler(self, tache: Tache, dossier, resultat) -> Jugement | None:
-        """Contrôle le périmètre puis lance les contrôles ; rend le refus, ou None s'ils passent.
+    @staticmethod
+    def _nature(resultat) -> str:
+        """La nature de l'échec d'un agent (`Resultat.nature`), "" quand il n'en dit rien."""
+        nature = getattr(resultat, "nature", "")
+        return nature if isinstance(nature, str) else ""
+
+    def _controler(self, tache: Tache, dossier, resultat) -> tuple[Jugement | None, str | None]:
+        """Contrôle le périmètre puis lance les contrôles ; rend (le refus ou None, la sortie).
 
         Ces deux refus se reprennent à chaud : l'ouvrier a fini son tour et le message existe.
+        La sortie est celle des contrôles que le moteur vient de jouer et qui passent, telle
+        quelle, pour le vérificateur ; None quand le profil n'a aucune commande de contrôle (rien
+        n'a été joué) ou que la passe est refusée.
         """
         self._phase(tache, PHASES["perimetre"])
         modifies = self.controles.fichiers_modifies(tache, dossier, resultat)
         dehors = hors_perimetre(modifies, tache.perimetre)
         if dehors:
             detail = "Fichiers modifiés hors périmètre : " + ", ".join(dehors) + "."
-            return Jugement("deborde", detail, "perimetre", list(dehors), reprenable=True)
+            return Jugement("deborde", detail, "perimetre", list(dehors), reprenable=True), None
         commandes = getattr(self.controles, "commandes", None) or []
         if commandes:
             self._phase(tache, PHASES["controles"] + " ; ".join(commandes))
         passe, sortie = self.controles.mecaniques(tache, dossier)
         if passe:
-            return None
+            return None, (str(sortie or "") if self._commandes_au_profil() else None)
         detail = "Les contrôles automatiques échouent :\n" + sortie[-1500:]
         fin = sortie[-SORTIE_REPRISE:]
-        return Jugement("ne_sait_pas", detail, "controles", fin, reprenable=True)
+        reste = (self._ce_qui_echoue(sortie),)
+        return Jugement("ne_sait_pas", detail, "controles", fin, reprenable=True, reste=reste), None
 
-    def _verifier(self, tache: Tache, dossier, precedent: Jugement | None) -> Jugement:
+    def _commandes_au_profil(self) -> bool:
+        """Dit si le profil a au moins une commande de contrôle : sans elle, rien n'est joué."""
+        commandes = self.profil.get("commandes")
+        return isinstance(commandes, list) and any(
+            isinstance(c, str) and c.strip() for c in commandes
+        )
+
+    @staticmethod
+    def _ce_qui_echoue(sortie: str) -> str:
+        """Ce qui a échoué, lu dans la sortie des contrôles : depuis la dernière commande lancée
+        (« $ … » ; les contrôles s'arrêtent à la première qui échoue), ses `SORTIE_REPRISE`
+        derniers caractères."""
+        texte = str(sortie or "")
+        echec = texte[texte.rfind("\n$ ") + 1 :].strip()[-SORTIE_REPRISE:]
+        return echec or "Les contrôles automatiques échouent sans rien afficher."
+
+    def _niveau(self, tache: Tache) -> str:
+        """Le niveau de vérification de la tâche : `dosage.niveau_verification`, d'après son type
+        et le profil seulement, jamais d'après une valeur posée par tâche dans le plan.
+
+        Une tâche de réparation de la branche principale garde le plancher, quel que soit son
+        type ; un type inconnu est vérifié complètement, quoi que dise le profil. « mecanique »
+        devient « bornee » quand le profil n'a aucune commande de contrôle : il ne resterait
+        plus aucun contrôle. Le fil le dit une fois ; il dit aussi, une fois pour chaque tâche
+        concernée, qu'un type inconnu sera vérifié complètement.
+        """
+        if not self._type_connu(tache):
+            ecrit = f"« {tache.type} »" if str(tache.type or "").strip() else "vide"
+            self._dire_une_fois(TYPE_INCONNU.format(type=ecrit), tache, par_tache=True)
+            return COMPLETE
+        reparation = tache.id.startswith(PREFIXE_REPARATION)
+        niveau = dosage.niveau_verification(tache.type, self.profil.get("verification"), reparation)
+        if niveau == dosage.MECANIQUE and not self._commandes_au_profil():
+            self._dire_une_fois(MECANIQUE_SANS_CONTROLE, tache)
+            return BORNEE
+        return niveau
+
+    @staticmethod
+    def _type_connu(tache: Tache) -> bool:
+        """Dit si le type de la tâche est un type que le produit connaît (`TYPES_CONNUS`)."""
+        return isinstance(tache.type, str) and tache.type in TYPES_CONNUS
+
+    def _plancher(self, tache: Tache) -> bool:
+        """Dit si la tâche ne descend jamais sous la vérification complète : un type du plancher
+        (`dosage.PLANCHER_COMPLET`), une réparation, ou un type inconnu."""
+        if not self._type_connu(tache) or tache.id.startswith(PREFIXE_REPARATION):
+            return True
+        return tache.type in dosage.PLANCHER_COMPLET
+
+    def _dire_une_fois(self, texte: str, tache: Tache, par_tache: bool = False) -> None:
+        """Note `texte` au fil, sauf s'il y est déjà : une seule fois par chantier, ou une fois
+        pour chaque tâche avec `par_tache`.
+
+        Sans sauvegarde à part : la note qui suit aussitôt (« Vérificateur lancé ») l'emporte."""
+        with self.verrou:
+            deja = any(
+                e.get("texte") == texte and (not par_tache or e.get("tache") == tache.id)
+                for e in self.chantier.evenements
+            )
+            if not deja:
+                self.chantier.noter(texte, tache.id)
+
+    def _conflit_resolu(self, tache: Tache) -> bool:
+        """Dit si la copie du départ en cours porte la résolution d'un conflit de fusion : un
+        refus d'enregistrement y a été tracé, et un départ ne continue après lui que si ce
+        conflit a été rendu à l'ouvrier (`_conflit_a_reprendre`). Un départ neuf repart d'une
+        copie neuve, sans résolution."""
+        with self.verrou:
+            return any(e.get("origine") == "integration" for e in self._passes_du_depart(tache))
+
+    def _choisir_verification(
+        self, tache: Tache, dossier, precedent: Jugement | None, sortie: str | None
+    ) -> Verification | None:
+        """Comment vérifier cette passe ; None pour la vérification mécanique seule, décidée en
+        dernier, une fois écarté tout ce qui impose un vérificateur.
+
+        Une copie qui porte la résolution d'un conflit de fusion est vérifiée complètement
+        jusqu'à son entrée, retouches comprises, quel que soit le niveau. Une tâche qui porte un
+        relevé (`Tache.releve`) reçoit une retouche, faite au niveau de l'ouvrier, et complète
+        pour une tâche du plancher (`_plancher`). La reprise d'un refus du vérificateur sans
+        relevé (le fond) est relue sur la correction, au niveau de la tâche (borné au moins).
+        Sinon le niveau de la tâche décide (`_niveau`).
+        """
+        origine = precedent.origine if precedent is not None else ""
+        conflit = origine == "integration" or self._conflit_resolu(tache)
+        niveau = COMPLETE if conflit else self._niveau(tache)
+        with self.verrou:
+            releve = tache.releve
+        if releve:
+            juge = COMPLETE if conflit or self._plancher(tache) else BORNEE
+            return self._dosee(tache, RETOUCHE, juge, sortie, dossier)
+        if origine == "integration":
+            return self._dosee(tache, CONFLIT, COMPLETE, sortie, dossier)
+        if origine == "verdict":
+            juge = BORNEE if niveau == dosage.MECANIQUE else niveau
+            return self._dosee(tache, REVERIFICATION, juge, sortie, dossier)
+        if niveau == dosage.MECANIQUE:
+            return None
+        return self._dosee(tache, niveau, niveau, sortie, dossier)
+
+    def _dosee(
+        self, tache: Tache, genre: str, niveau: str, sortie: str | None, dossier
+    ) -> Verification:
+        """La vérification de ce genre, dosée par `dosage.verificateur_selon_niveau` : un modèle
+        au-dessus de l'ouvrier au niveau complet, le même au niveau borné. Elle porte l'état de
+        la copie que le vérificateur va voir et, pour une retouche, les fichiers changés depuis
+        celui qu'avait vu le vérificateur précédent."""
+        modele, effort = dosage.verificateur_selon_niveau(tache.modele, tache.effort, niveau)
+        vu = self._empreinte(dossier)
+        fichiers = ()
+        if genre == RETOUCHE:
+            with self.verrou:
+                depuis = tache.releve_sur
+            fichiers = self._fichiers_changes(dossier, depuis, vu)
+        return Verification(genre, modele, effort, sortie, fichiers, vu)
+
+    def _verification_d_avant(self, tache: Tache, precedent: Jugement | None) -> Verification:
+        """La vérification d'avant les niveaux, pour un appel qui n'en dit pas : complète, ou
+        restreinte après une reprise, sans sortie des contrôles."""
+        origine = precedent.origine if precedent is not None else ""
+        genre = {"verdict": REVERIFICATION, "integration": CONFLIT}.get(origine, COMPLETE)
+        modele, effort = dosage.verificateur(tache.modele, tache.effort)
+        return Verification(genre, modele, effort)
+
+    def _empreinte(self, dossier) -> str:
+        """L'état de la copie (`controles.empreinte`, un texte qui change avec son contenu), ou ""
+        quand les contrôles ne savent pas le donner ou échouent."""
+        lire = getattr(self.controles, "empreinte", None)
+        if lire is None:
+            return ""
+        try:
+            vu = lire(dossier)
+        except Exception:  # sans empreinte, la retouche ne nomme pas les fichiers changés
+            return ""
+        return vu if isinstance(vu, str) else ""
+
+    def _fichiers_changes(self, dossier, depuis: str, vu: str) -> tuple[str, ...]:
+        """Les fichiers changés entre deux états de la copie (`controles.differences`) ; vide
+        quand on ne sait pas les dire (une empreinte manque, pas de `differences`, une erreur)."""
+        differences = getattr(self.controles, "differences", None)
+        if differences is None or not depuis or not vu:
+            return ()
+        try:
+            changes = differences(dossier, depuis, vu)
+        except Exception:  # sans la liste, le vérificateur juge la retouche par le verdict
+            return ()
+        return tuple(dict.fromkeys(str(f) for f in changes or () if str(f).strip()))
+
+    def _retenir_releve(self, tache: Tache, jugement: Jugement | None = None, vu: str = "") -> None:
+        """Écrit dans la tâche ce que le vérificateur a relevé (`Tache.releve`) et l'état de la
+        copie qu'il a vue (`Tache.releve_sur`), ou les efface.
+
+        Écrits pour un refus lisible du vérificateur, de motif « bacle » ou « local ». Effacés
+        sans jugement (départ dans une copie neuve, débord), pour un accord, ou pour un refus du
+        vérificateur d'un autre motif. Une erreur d'agent ne change rien ; un arrêt non plus, qui
+        n'arrive jamais jusqu'ici (`_juger` et `_verifier` le rendent avant).
+        """
+        if jugement is not None and jugement.origine == "agent":
+            return
+        garder = (
+            jugement is not None
+            and jugement.origine == "verdict"
+            and jugement.lisible
+            and jugement.motif in MOTIFS_RELEVES
+        )
+        releve = self._releve_de(jugement) if garder else ""
+        with self.verrou:
+            tache.releve, tache.releve_sur = releve, vu if garder else ""
+
+    @staticmethod
+    def _releve_de(jugement: Jugement) -> str:
+        """Ce qu'un refus a relevé, de quoi rédiger la retouche : son résumé et ses points."""
+        resume = jugement.detail.strip() or (
+            f"Le vérificateur a refusé ce travail (motif « {jugement.motif} ») sans en dire plus."
+        )
+        lignes = [resume]
+        if jugement.reste:
+            lignes += ["Points relevés :", *(f"- {point}" for point in jugement.reste)]
+        if jugement.fichiers:
+            lignes.append("Fichiers concernés : " + ", ".join(jugement.fichiers) + ".")
+        return "\n".join(lignes)
+
+    def _sans_verificateur(self, tache: Tache) -> Jugement:
+        """La vérification mécanique seule : le contrôle du périmètre et les contrôles
+        automatiques ont passé, ils décident seuls. Aucun vérificateur ne part ; l'historique
+        dit que la tâche est entrée sans vérificateur. La tâche ne porte alors aucun relevé : un
+        relevé impose une retouche (`_choisir_verification`), il n'y a donc rien à effacer."""
+        with self.verrou:
+            tache.verdict = ENTREE_SANS_VERIFICATEUR
+        self._noter(
+            "Vérification mécanique seule : le contrôle du périmètre et les contrôles "
+            "automatiques ont passé, aucun vérificateur ne part pour cette tâche.",
+            tache,
+        )
+        return Jugement(None, ENTREE_SANS_VERIFICATEUR)
+
+    def _verifier(
+        self, tache: Tache, dossier, precedent: Jugement | None, sortie: str | None = None
+    ) -> Jugement:
         """Fait relire le livrable par un vérificateur neuf et lit son verdict.
 
-        Un vérificateur en erreur ou au verdict illisible est relancé une fois, neuf, sur la même
-        copie de l'ouvrier, avant de valoir refus ; sauf s'il signale un empêchement, sur lequel
-        un second buterait aussi.
+        Le niveau de vérification décide du vérificateur (`_choisir_verification`) ; au niveau
+        mécanique, aucun ne part. `sortie` : celle des contrôles que le moteur vient de jouer,
+        None quand il n'a rien joué. Un vérificateur en erreur ou au verdict illisible est
+        relancé une fois, neuf, sur la même copie de l'ouvrier, avant de valoir refus ; sauf
+        s'il signale un empêchement, sur lequel un second buterait aussi.
         """
-        avis = self._avis(tache, dossier, precedent)
+        choix = self._choisir_verification(tache, dossier, precedent, sortie)
+        if choix is None:
+            return self._sans_verificateur(tache)
+        avis = self._avis(tache, dossier, precedent, choix)
         if avis is None or self._arretee(tache, avis):
             return ARRET
         if self._a_relancer(avis):
@@ -1506,20 +1801,31 @@ class Moteur:
                 f"Le vérificateur {raison} : j'en relance un, une seule fois, sur la même copie.",
                 tache,
             )
-            avis = self._avis(tache, dossier, precedent)
+            avis = self._avis(tache, dossier, precedent, choix)
             if avis is None or self._arretee(tache, avis):
                 return ARRET
-        return self._lire_avis(tache, avis)
+        jugement = self._lire_avis(tache, avis, choix)
+        self._retenir_releve(tache, jugement, choix.empreinte)
+        return jugement
 
-    def _avis(self, tache: Tache, dossier, precedent: Jugement | None):
+    def _avis(
+        self, tache: Tache, dossier, precedent: Jugement | None, choix: Verification | None = None
+    ):
         """Compte et lance un vérificateur dès qu'il a son jeton ; rend son avis, ou None (arrêt
-        avant son départ). Refusé pour limite ou surcharge, il repart après la suspension."""
+        avant son départ). Refusé pour limite ou surcharge, il repart après la suspension.
+
+        `choix` : la vérification décidée (`_choisir_verification`) ; le jeton attendu est celui
+        de son modèle. Sans lui, la vérification d'avant les niveaux."""
+        choix = choix or self._verification_d_avant(tache, precedent)
 
         def lancer():
             self._prendre_agent()
-            return self._lancer_verificateur(tache, dossier, precedent)
+            return self._lancer_verificateur(tache, dossier, precedent, choix)
 
-        return self._malgre_les_limites(tache, self._attendre_jeton, lancer)
+        def attendre(t: Tache) -> None:
+            self._attendre_jeton(t, choix.modele)
+
+        return self._malgre_les_limites(tache, attendre, lancer)
 
     @staticmethod
     def _empeches_du_verificateur(avis) -> tuple[str, ...]:
@@ -1533,12 +1839,14 @@ class Moteur:
         lisible = avis.ok and "valide" in (dernier_json(avis.texte or "") or {})
         return not lisible and not self._empeches_du_verificateur(avis)
 
-    def _lire_avis(self, tache: Tache, avis) -> Jugement:
+    def _lire_avis(self, tache: Tache, avis, choix: Verification | None = None) -> Jugement:
         """Le jugement que porte l'avis du vérificateur.
 
-        Seul un verdict lisible qui recale pour « bâclé » ou « ne sait pas » se reprend à chaud :
-        un verdict illisible, ou une consigne mal posée, ne se reprend pas. Un vérificateur en
-        erreur est une erreur d'agent (origine « agent ») : elle ne fera pas monter d'un cran.
+        Seul un verdict lisible qui recale pour « bâclé », « local » ou « ne sait pas » se reprend
+        à chaud : un verdict illisible, ou une consigne mal posée, ne se reprend pas. Un
+        vérificateur en erreur est une erreur d'agent (origine « agent ») : elle ne fera pas
+        monter d'un cran. Le jugement porte aussi `lisible`, `reste`, `fichiers`, `fond_faux` et,
+        pour la relecture d'une correction (`choix`), `meme_defaut`.
         """
         empeches = self._empeches_du_verificateur(avis)
         verdict = lire_verdict(avis.texte) if avis.ok else lire_verdict("")
@@ -1546,25 +1854,48 @@ class Moteur:
         with self.verrou:
             tache.verdict = verdict["resume"]
         if verdict["valide"]:
-            return Jugement(None, verdict["resume"], verdict=texte, empechements=empeches)
+            resume = verdict["resume"]
+            return Jugement(None, resume, verdict=texte, empechements=empeches, lisible=True)
         if not avis.ok:
             detail = f"Le vérificateur s'est arrêté sur une erreur : {avis.erreur}"
-            return Jugement("ne_sait_pas", detail, "agent", empechements=empeches)
+            nature = self._nature(avis)
+            return Jugement("ne_sait_pas", detail, "agent", empechements=empeches, nature=nature)
         lisible = "valide" in (dernier_json(avis.texte or "") or {})
-        reprenable = lisible and verdict["motif"] in MOTIFS_REPRIS
         motif, resume = verdict["motif"], verdict["resume"]
-        return Jugement(motif, resume, "verdict", texte, texte, reprenable, False, empeches)
+        reprenable = lisible and motif in (*MOTIFS_REPRIS, "local")
+        correction = choix is not None and choix.genre in (RETOUCHE, REVERIFICATION)
+        return Jugement(
+            motif, resume, "verdict", texte, texte, reprenable, False, empeches,
+            lisible=lisible,
+            reste=tuple(verdict.get("reste", ())),
+            fichiers=tuple(verdict.get("fichiers", ())),
+            meme_defaut=correction and bool(verdict.get("meme_defaut", False)),
+            fond_faux=self._fond_faux(lisible, motif),
+        )  # fmt: skip
 
-    def _lancer_verificateur(self, tache: Tache, dossier, precedent: Jugement | None = None):
+    @staticmethod
+    def _fond_faux(lisible: bool, motif: str | None) -> bool:
+        """Dit si le vérificateur juge le fond faux : un verdict lisible qui refuse pour « ne sait
+        pas ». Jamais un verdict illisible, une erreur du vérificateur, ni un autre refus."""
+        return lisible and motif == "ne_sait_pas"
+
+    def _lancer_verificateur(
+        self,
+        tache: Tache,
+        dossier,
+        precedent: Jugement | None = None,
+        choix: Verification | None = None,
+    ):
         """Lance le vérificateur ; rend son avis, ou None si l'arrêt a été demandé avant son départ.
 
-        Dans ce cas l'agent n'est pas lancé et ne compte pas parmi les agents lancés. Après la
-        reprise d'un refus du vérificateur, c'est un vérificateur neuf, au même dosage, avec la
-        consigne restreinte : le verdict précédent en entier, et seulement les points recalés.
+        Dans ce cas l'agent n'est pas lancé et ne compte pas parmi les agents lancés. Le dosage et
+        la consigne viennent de la vérification décidée (`choix`, `_choisir_verification`) :
+        complète, bornée, retouche, relecture d'une correction ou d'un conflit résolu. Sans elle,
+        la vérification d'avant les niveaux.
         """
-        modele, effort = dosage.verificateur(tache.modele, tache.effort)
-        restreinte = precedent is not None and precedent.origine == "verdict"
-        objet = " sur la correction" if restreinte else ""
+        choix = choix or self._verification_d_avant(tache, precedent)
+        modele, effort = choix.modele, choix.effort
+        objet = " sur la correction" if choix.genre in (RETOUCHE, REVERIFICATION) else ""
         self._noter(f"Vérificateur lancé{objet} ({dosage.libelle(modele, effort)}).", tache)
         if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
             with self.verrou:
@@ -1575,7 +1906,7 @@ class Moteur:
         en_plus = {"copie_jetable": True} if copie else {}
         try:
             avis = self.agent.executer(
-                self._consigne_de_verification(tache, precedent, copie),
+                self._consigne_de_verification(tache, precedent, copie, choix),
                 modele,
                 effort,
                 copie or dossier,
@@ -1589,15 +1920,42 @@ class Moteur:
         self._compter(tache, avis)
         return avis
 
-    def _consigne_de_verification(self, tache: Tache, precedent: Jugement | None, copie) -> str:
-        """La consigne restreinte qui suit la reprise d'un verdict, sinon la consigne complète ;
-        après la reprise d'un conflit de fusion, celle-ci nomme les fichiers résolus."""
-        contrat, jetable = self.chantier.contrat, bool(copie)
-        origine = precedent.origine if precedent is not None else ""
-        if origine == "verdict":
-            return consigne_reverification(tache, contrat, self.profil, precedent.verdict, jetable)
-        conflits = precedent.complet if origine == "integration" else ""
-        return consigne_verificateur(tache, contrat, self.profil, jetable, conflits)
+    def _consigne_de_verification(
+        self, tache: Tache, precedent: Jugement | None, copie, choix: Verification | None = None
+    ) -> str:
+        """La consigne de la vérification décidée, avec la sortie des contrôles joués.
+
+        Retouche : la consigne restreinte, le relevé (ou le verdict entier qui vient de refuser)
+        et les fichiers changés. Relecture d'une correction : la consigne restreinte et le
+        verdict précédent. Bornée : la consigne bornée au verdict complet. Sinon la consigne
+        complète, qui nomme les fichiers résolus après la reprise d'un conflit de fusion.
+        """
+        contrat, jetable, profil = self.chantier.contrat, bool(copie), self.profil
+        choix = choix or self._verification_d_avant(tache, precedent)
+        sortie = choix.sortie
+        if choix.genre == RETOUCHE:
+            precedent_ = self._verdict_releve(tache, precedent)
+            fichiers = list(choix.fichiers) or None
+            return consigne_reverification(
+                tache, contrat, profil, precedent_, jetable, sortie, fichiers
+            )
+        if choix.genre == REVERIFICATION and precedent is not None:
+            verdict = precedent.verdict
+            return consigne_reverification(tache, contrat, profil, verdict, jetable, sortie)
+        if choix.genre == BORNEE:
+            return consigne_verificateur_bornee(
+                tache, contrat, profil, sortie or "", jetable, verdict_complet=True
+            )
+        conflits = precedent.complet if choix.genre == CONFLIT and precedent is not None else ""
+        return consigne_verificateur(tache, contrat, profil, jetable, conflits, sortie)
+
+    def _verdict_releve(self, tache: Tache, precedent: Jugement | None) -> str:
+        """Ce que reçoit le vérificateur d'une retouche comme verdict précédent : le verdict entier
+        qui vient de refuser cette copie, s'il est là, sinon le relevé gardé dans la tâche."""
+        if precedent is not None and precedent.origine == "verdict" and precedent.verdict.strip():
+            return precedent.verdict
+        with self.verrou:
+            return tache.releve
 
     def _copie_de_verification(self, tache: Tache, dossier):
         """La copie jetable où le vérificateur fait ses essais, ou None : il relit alors la

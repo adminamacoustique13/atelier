@@ -226,7 +226,8 @@ def test_le_reveil_suit_l_heure_de_remise_a_zero_sans_attendre_la_veille(monkeyp
 
 
 def test_une_limite_propre_a_opus_laisse_partir_une_tache_sonnet():
-    c = chantier([tache("Z"), tache("X", modele="opus", effort="medium"), tache("Y")])
+    y = tache("Y", type="delicate", modele="sonnet", effort="low")  # son vérificateur : Opus
+    c = chantier([tache("Z"), tache("X", modele="opus", effort="medium"), y])
     heure = Heure()
     reglages = {"limites": {"Z": ["refus"]}, "type_limite": "seven_day_opus"}
     agent = guette(c, delai_limite_s=None, **reglages)
@@ -403,7 +404,8 @@ def test_une_surcharge_arrete_les_autres_departs_deux_minutes():
 
 
 def test_un_verificateur_sans_agent_libre_dit_qu_il_attend_et_le_temps_est_mesure():
-    c = chantier([tache("A"), tache("B"), tache("C")])
+    a = tache("A", type="delicate", modele="sonnet", effort="low")  # son vérificateur : Opus
+    c = chantier([a, tache("B"), tache("C")])
     heure, horloge = Heure(), Horloge()  # le temps des mesures n'avance que sur ordre du test
     reglages = {"limites": {"A": ["", "refus"]}, "type_limite": "seven_day_opus"}
     agent = guette(c, {("B", "ouvrier"), ("C", "ouvrier")}, delai_limite_s=None, **reglages)

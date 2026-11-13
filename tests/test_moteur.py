@@ -90,7 +90,7 @@ def test_sans_contrat_valide_rien_ne_demarre():
 
 def test_le_moteur_dit_ou_en_est_chaque_tache_active():
     """Même quand aucun agent ne tourne (copie, contrôles, fusion), la phase est connue."""
-    c = chantier([tache("A")])
+    c = chantier([tache("A", type="delicate", modele="sonnet", effort="low")])
     vues = []
 
     class Controles(ControlesSimules):
@@ -134,13 +134,19 @@ def test_chantier_nominal_tout_est_verifie_dans_l_ordre_des_dependances():
     assert ouvriers.index("C") == 2
 
 
-def test_chaque_agent_recoit_son_dosage_et_le_verificateur_est_au_dessus():
-    c = chantier([tache("A"), tache("P", type="physique")])
+def test_chaque_agent_recoit_son_dosage_et_le_verificateur_suit_le_niveau():
+    """Complet : un modèle au-dessus ; borné : le même modèle. Sans commande de contrôle au
+    profil, la tâche mécanique reçoit une vérification bornée."""
+    taches = [tache("A"), tache("C", type="courante"), tache("D", type="delicate")]
+    c = chantier([*taches, tache("P", type="physique")])
     m, agent = moteur(c)
     m.executer()
     dosages = {(a["tache"], a["role"]): (a["modele"], a["effort"]) for a in agent.appels}
     assert dosages[("A", "ouvrier")] == ("sonnet", "low")
-    assert dosages[("A", "verificateur")] == ("opus", "medium")
+    assert dosages[("A", "verificateur")] == ("sonnet", "medium")
+    assert dosages[("C", "ouvrier")] == dosages[("C", "verificateur")] == ("sonnet", "medium")
+    assert dosages[("D", "ouvrier")] == ("opus", "high")
+    assert dosages[("D", "verificateur")] == ("fable", "high")
     assert dosages[("P", "ouvrier")] == ("fable", "max")
     assert dosages[("P", "verificateur")] == ("fable", "max")
 
@@ -377,7 +383,9 @@ def test_un_plan_se_lit_meme_avec_des_objets_imbriques_et_des_champs_inconnus():
     texte, plan = extraire_plan(reponse)
     assert texte == "Voici {le plan}." and plan["objectif"] == "But"
     taches = taches_du_plan(plan, {})
-    assert [(t.id, t.type) for t in taches] == [("A", "physique"), ("B", "courante")]
+    # Un type inconnu reste tel qu'écrit : jamais confondu avec « courante » (vérifié complètement).
+    assert [(t.id, t.type) for t in taches] == [("A", "physique"), ("B", "bizarre")]
+    assert (taches[1].modele, taches[1].effort) == ("sonnet", "medium")  # dosé comme une courante
     assert (taches[0].modele, taches[0].effort) == ("fable", "max")
     assert extraire_plan("Juste une réponse.") == ("Juste une réponse.", None)
 
@@ -1190,8 +1198,9 @@ def consignes_de(agent, role):
 
 
 def test_un_refus_du_verificateur_est_repris_a_chaud_et_le_livrable_entre():
+    a = tache("A", type="delicate", modele="sonnet", effort="low")  # vérification complète
     c, m, agent, controles = moteur_a_reprises(
-        [tache("A")], {("A", "verificateur"): ["bacle", "ok"]}, {"A": [VERDICT_LONG]}
+        [a], {("A", "verificateur"): ["bacle", "ok"]}, {"A": [VERDICT_LONG]}
     )
     m.executer()
     a = c.tache("A")

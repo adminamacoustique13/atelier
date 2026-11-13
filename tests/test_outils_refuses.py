@@ -50,8 +50,8 @@ class AgentRefuse(AgentParRang):
         return resultat
 
 
-def moteur_refuse(refuses, issues=None, profil=None, lignes=(), textes=None):
-    c = chantier([tache("A")])
+def moteur_refuse(refuses, issues=None, profil=None, lignes=(), textes=None, type_="mecanique"):
+    c = chantier([tache("A", type=type_)])
     agent = AgentRefuse(refuses, lignes, issues=issues or REFUSEE_PUIS_ACCEPTEE, textes=textes,
                         perimetres={"A": ["a.py"]})  # fmt: skip
     return c, Moteur(c, agent, ControlesComptes(), profil), agent
@@ -62,7 +62,7 @@ def moteur_refuse(refuses, issues=None, profil=None, lignes=(), textes=None):
 
 def test_un_outil_refuse_sans_rapport_laisse_partir_la_reprise_a_chaud_qui_le_cite():
     """Le cas rejoué : `Bash(git push)` refusé et un verdict « bâclé » bloquaient la tâche."""
-    c, m, agent = moteur_refuse([[GIT_PUSH]], profil=PROFIL_UV)
+    c, m, agent = moteur_refuse([[GIT_PUSH]], profil=PROFIL_UV, type_="delicate")
     m.executer()
     a = c.tache("A")
     assert blocages(c) == [] and a.etat == "verifie" and c.termine
@@ -98,7 +98,7 @@ def test_un_outil_refuse_sans_rapport_laisse_partir_la_reprise_a_chaud_qui_le_ci
 def test_un_outil_refuse_ne_bloque_que_s_il_lance_un_controle_non_permis_aux_agents(
     refuse, profil, bloquee
 ):
-    c, m, agent = moteur_refuse([[refuse]], profil=profil)
+    c, m, agent = moteur_refuse([[refuse]], profil=profil, type_="delicate")
     m.executer()
     a = c.tache("A")
     if not bloquee:
