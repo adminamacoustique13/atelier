@@ -18,3 +18,23 @@ def git_sans_configuration_de_la_machine(tmp_path_factory):
         reglages.setenv("GIT_CONFIG_GLOBAL", str(vide))
         reglages.setenv("GIT_CONFIG_NOSYSTEM", "1")
         yield
+
+
+@pytest.fixture(autouse=True)
+def pont_sans_attente_ni_memoire_des_couts(monkeypatch):
+    """Deux réglages du pont (`atelier.sdk`), pour chaque test.
+
+    Après une interruption, le pont attend le message de fin de Claude Code (jusqu'à 2 s dans le
+    produit). Les faux clients de la plupart des tests n'en envoient jamais : chaque arrêt y
+    dormirait pour rien. L'attente du message de fin (`delai_fin_s`) est donc courte ici ;
+    l'interruption elle-même garde sa borne. Les tests qui portent sur cette attente la règlent.
+
+    Le registre des cumuls de coût est commun au processus, et les tests réutilisent les mêmes
+    identifiants de session : il est vidé avant chaque test, pour qu'aucun n'hérite d'un autre.
+    """
+    from atelier.sdk import SessionSDK, vider_les_cumuls
+
+    monkeypatch.setattr(SessionSDK, "delai_fin_s", 0.01)
+    vider_les_cumuls()
+    yield
+    vider_les_cumuls()

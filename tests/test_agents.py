@@ -96,8 +96,10 @@ def du_type(evenements, type_):
     "result, is_error, attendu",
     [
         ("Fini.", False, Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)),
-        ("Quota dépassé.", True, Resultat(ok=False, erreur="Quota dépassé.", tokens=120)),
-        ("", True, Resultat(ok=False, erreur="Erreur signalée par Claude Code.", tokens=120)),
+        ("Quota dépassé.", True,
+         Resultat(ok=False, erreur="Quota dépassé.", cout_usd=0.12, tokens=120)),
+        ("", True,
+         Resultat(ok=False, erreur="Erreur signalée par Claude Code.", cout_usd=0.12, tokens=120)),
     ],
 )
 def test_executer_rend_le_resultat_attendu(result, is_error, attendu):
@@ -111,7 +113,7 @@ def test_executer_rend_le_resultat_attendu(result, is_error, attendu):
     [
         ("Bonjour", False, Resultat(ok=True, texte="Bonjour", cout_usd=0.5, tokens=120)),
         ("", False, Resultat(ok=True, texte="Bonjour", cout_usd=0.5, tokens=120)),
-        ("Non.", True, Resultat(ok=False, erreur="Non.", tokens=120)),
+        ("Non.", True, Resultat(ok=False, erreur="Non.", cout_usd=0.5, tokens=120)),
     ],
 )
 def test_converser_rend_le_resultat_attendu(result, is_error, attendu):

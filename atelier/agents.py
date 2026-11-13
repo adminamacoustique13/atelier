@@ -725,10 +725,15 @@ def _objet_de_forme(forme: str) -> str:
 
 
 def _arrete(marche: _Marche, resultat: Resultat) -> Resultat:
-    """Un arrêt demandé pendant le travail l'emporte sur ce que l'agent a rendu."""
+    """Un arrêt demandé pendant le travail l'emporte sur ce que l'agent a rendu.
+
+    Le résultat d'arrêt garde ce que le travail a coûté (coût, tokens, coût incomplet) ; sa
+    nature est « arret », celle que le pont donne déjà à un tour arrêté.
+    """
     if not marche.arret.is_set():
         return resultat
-    return Resultat(ok=False, erreur=ARRETE, cout_usd=resultat.cout_usd, tokens=resultat.tokens)
+    return Resultat(ok=False, erreur=ARRETE, cout_usd=resultat.cout_usd, tokens=resultat.tokens,
+                    nature="arret", cout_incomplet=resultat.cout_incomplet)  # fmt: skip
 
 
 class AgentClaude(_ModeDesOuvriers):

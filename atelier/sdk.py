@@ -60,6 +60,7 @@ from __future__ import annotations
 import asyncio
 import concurrent.futures
 import json
+import math
 import os
 import re
 import tempfile
@@ -113,6 +114,26 @@ STATUT_HTTP_LIMITE = 429  # « trop de requêtes » : la limite atteinte, vue pa
 # « Server is temporarily limiting requests (not your usage limit) », pour un 429 sans en-tête
 # de limite de l'abonnement, et « Opus is experiencing high load… » (de même pour Fable).
 SURCHARGES = ("not your usage limit", "is experiencing high load")
+# La nature d'un échec, lue sur ce que le SDK et Claude Code (2.1.308) donnent de structuré :
+# le champ `error` d'un message de l'assistant, le statut HTTP et le sous-type du message de fin.
+ERREURS_CONNEXION = ("authentication_failed",)  # Claude Code : « login required — run /login »
+STATUTS_CONNEXION = (401,)
+FIN_BUDGET = "error_max_budget_usd"  # le plafond `max_budget_usd` est atteint
+# Claude Code marque `server_error` une connexion à l'API perdue (ECONNRESET…), un flux coupé,
+# l'API saturée et les erreurs 5xx, « usually temporary ».
+ERREURS_PASSAGERES = ("server_error",)
+STATUTS_PASSAGERS = (408, *range(500, 600))
+# Faute de mieux, sur le texte : les signes d'une connexion à Claude perdue, et ceux d'une panne
+# dans un texte d'erreur de l'API (« API Error: … »), pour un Claude Code qui ne marque rien.
+SIGNES_CONNEXION = (
+    "failed to authenticate", "authentication_error", "oauth session expired",
+    "oauth token has expired", "not logged in", "run /login", "invalid api key",
+)  # fmt: skip
+PREFIXE_API = "api error"
+SIGNES_PANNE = (
+    "connection to the api was lost", "connection error", "request timed out", "econnreset",
+    "socket hang up", "usually temporary",
+)  # fmt: skip
 
 
 class _RepriseRefusee(Exception):
@@ -127,16 +148,145 @@ def lire_source(api_key_source) -> str:
 
 
 def lire_resultat(final, morceaux: list[str]) -> Resultat:
-    """Traduit le message de fin du SDK en résultat : texte, coût et tokens, ou échec."""
+    """Traduit le message de fin du SDK en résultat : texte, coût et tokens, ou échec.
+
+    Le coût est celui que porte le message (`total_cost_usd`), en erreur comme en succès : un
+    tour raté a coûté lui aussi. C'est un cumul depuis le début de la session Claude Code ;
+    la session du pont le ramène au tour (`cout_du_tour`).
+    """
     if final is None:
         return Resultat(ok=False, erreur=CLAUDE_SANS_REPONSE)
     usage = getattr(final, "usage", None) or {}
     tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
     texte = str(getattr(final, "result", None) or "")
+    cout = cout_du_tour(getattr(final, "total_cost_usd", None), 0.0)
     if getattr(final, "is_error", False):
-        return Resultat(ok=False, erreur=texte or "Erreur signalée par Claude Code.", tokens=tokens)
-    cout = float(getattr(final, "total_cost_usd", None) or 0)
+        erreur = texte or "Erreur signalée par Claude Code."
+        return Resultat(ok=False, erreur=erreur, cout_usd=cout, tokens=tokens)
     return Resultat(ok=True, texte=texte or "".join(morceaux), cout_usd=cout, tokens=tokens)
+
+
+def _montant(valeur) -> float | None:
+    """Un montant lisible en dollars (un nombre fini, positif ou nul), ou None."""
+    if isinstance(valeur, bool) or not isinstance(valeur, (int, float)):
+        return None
+    return float(valeur) if math.isfinite(valeur) and valeur >= 0 else None
+
+
+def cout_du_tour(cumul, avant: float) -> float:
+    """Ce qu'un tour a coûté, d'après le cumul de sa connexion et celui du tour d'avant.
+
+    Claude Code annonce dans chaque message de fin le coût cumulé de la session : le tour en
+    a coûté la différence. Un cumul absent, illisible, qui n'augmente pas ou qui baisse rend 0,
+    jamais un coût négatif. Arrondi au milliardième de dollar, pour taire le bruit des flottants.
+    """
+    lu = _montant(cumul)
+    if lu is None or lu <= avant:
+        return 0.0
+    return round(lu - avant, 9)
+
+
+class _Cumuls:
+    """Le registre « session Claude Code → plus haut cumul vu », commun au processus.
+
+    Claude Code annonce dans chaque message de fin le coût cumulé de la session, et une session
+    reprise, même par un autre pont (`executer(reprendre=…)`, chaque message de `converser`),
+    repart du total qu'elle a gardé. Chaque tour rend donc la différence avec le plus haut cumul
+    vu pour sa session, sous un verrou : deux fils sur une même session ne comptent rien deux
+    fois. La référence ne baisse jamais (un résultat après plantage peut annoncer 0).
+
+    Une session neuve (connexion qui l'ouvre) part de zéro, même si son identifiant est déjà
+    connu : ce qu'on en savait ne vaut plus. Une session inconnue part de zéro aussi.
+
+    Limite acceptée : le registre vit en mémoire. Après un redémarrage de l'Atelier il est vide,
+    et le premier tour d'une session reprise compte son cumul entier : une erreur par excès, du
+    côté sûr pour un budget. De même pour une session oubliée parce que le registre est plein :
+    au-delà de `maxi` sessions, celles vues le moins récemment sont oubliées.
+    """
+
+    def __init__(self, maxi: int):
+        self.maxi, self._vus, self._verrou = maxi, {}, threading.Lock()
+
+    def part_du_tour(self, session: str, cumul, neuve: bool = False) -> float:
+        lu = _montant(cumul)
+        with self._verrou:
+            avant = 0.0 if neuve else self._vus.get(session, 0.0)
+            if neuve or lu is not None:
+                self._vus.pop(session, None)  # remise au bout : la plus récemment vue
+            if lu is not None:
+                self._vus[session] = max(avant, lu)
+                while len(self._vus) > self.maxi:
+                    del self._vus[next(iter(self._vus))]
+            return cout_du_tour(cumul, avant)
+
+    def vider(self) -> None:
+        with self._verrou:
+            self._vus.clear()
+
+
+# 4 096 sessions de ~200 octets chacune : moins d'un mégaoctet, pour des dizaines de chantiers
+# (un agent lancé, une session ; un chantier de 30 tâches en ouvre de l'ordre de 150).
+SESSIONS_RETENUES = 4096
+_CUMULS = _Cumuls(SESSIONS_RETENUES)
+
+
+def cout_de_session(session: str, cumul, neuve: bool = False) -> float:
+    """Ce qu'un tour de cette session a coûté, d'après le cumul annoncé par son message de fin
+    et le registre des cumuls du processus (`_Cumuls`), qu'il met à jour. `neuve` : le premier
+    tour d'une connexion qui ouvre la session, qui part de zéro."""
+    return _CUMULS.part_du_tour(session, cumul, neuve)
+
+
+def vider_les_cumuls() -> None:
+    """Oublie tous les cumuls retenus : chaque session repartira de zéro."""
+    _CUMULS.vider()
+
+
+def plafond_valide(budget) -> bool:
+    """Dit si un plafond de dépense est à passer au SDK : un nombre fini strictement positif."""
+    lu = _montant(budget)
+    return lu is not None and lu > 0
+
+
+def _statut_http(source) -> int | None:
+    """Le statut HTTP de l'appel à l'API qui a échoué (`api_error_status`), s'il est donné."""
+    statut = getattr(source, "api_error_status", None)
+    return statut if isinstance(statut, int) and not isinstance(statut, bool) else None
+
+
+def _textes_de_fin(source) -> list[str]:
+    """Les textes d'une fin en erreur : `result` et `errors` (message de fin ou `ResultError`)."""
+    erreurs = getattr(source, "errors", None)
+    textes = [getattr(source, "result", None), *(erreurs if isinstance(erreurs, list) else [])]
+    return [t for t in textes if isinstance(t, str)]
+
+
+def lire_nature(fin=None, erreur_api=None, *textes) -> str:
+    """La nature d'un échec qui n'est ni un arrêt, ni un délai, ni une limite, ni une surcharge,
+    ni une reprise impossible (le pont les décide avant) : « connexion », « budget », « panne »,
+    ou "" quand rien ne la dit (un agent qui n'a pas su faire, une erreur inconnue).
+
+    `fin` est le message de fin du SDK, ou une `ResultError` qui en porte les champs ;
+    `erreur_api`, le champ `error` d'un message de l'assistant ; `textes`, ceux de l'erreur.
+    Le structuré passe avant le texte : une erreur passagère que Claude Code marque
+    `server_error` reste une panne, même si son texte parle de connexion (« OAuth »). Le texte
+    ne fait une panne que si rien de structuré ne dit le contraire (ni statut HTTP, ni erreur
+    de l'assistant autre que « unknown »).
+    """
+    statut = _statut_http(fin)
+    if erreur_api in ERREURS_CONNEXION or statut in STATUTS_CONNEXION:
+        return "connexion"
+    if getattr(fin, "subtype", None) == FIN_BUDGET:
+        return "budget"
+    if erreur_api in ERREURS_PASSAGERES or (statut is not None and statut in STATUTS_PASSAGERS):
+        return "panne"
+    lus = " ".join(t for t in (*textes, *_textes_de_fin(fin)) if isinstance(t, str)).lower()
+    if any(signe in lus for signe in SIGNES_CONNEXION):
+        return "connexion"
+    muet = statut is None and erreur_api in (None, "unknown")  # rien de structuré
+    if muet and PREFIXE_API in lus and any(signe in lus for signe in SIGNES_PANNE):
+        return "panne"
+    return ""
 
 
 def lire_refus(texte) -> str:
@@ -333,6 +483,10 @@ class SessionSDK:
     """Une session de l'Agent SDK pour un agent d'Atelier, utilisable depuis n'importe quel fil."""
 
     delai_interruption_s = 2.0  # temps laissé à `interrupt` avant la déconnexion
+    # Attente du message de fin après une interruption (pour porter le coût du tour) ; None :
+    # `delai_interruption_s`. Distincte pour que les tests puissent la raccourcir sans raccourcir
+    # l'interruption elle-même (voir tests/conftest.py).
+    delai_fin_s: float | None = None
     delai_deconnexion_s = 30.0  # borne large : le SDK peut mettre ~20 s à finir un CLI rétif
     delai_mode_s = 10.0  # borne de `set_permission_mode`
 
@@ -354,6 +508,7 @@ class SessionSDK:
         fabrique_client=None,
         reprise_exigee: bool = False,
         refus_d_office: list[str] | None = None,
+        budget_usd: float | None = None,
     ):
         if not mode_valide(mode_permission):  # jamais bypassPermissions, ni un mode inconnu
             raise ValueError(f"Mode de permission refusé : {mode_permission!r}.")
@@ -376,6 +531,14 @@ class SessionSDK:
         self._limite: dict | None = None
         self._limite_refusee = False
         self._surcharge = False  # un signe de surcharge du serveur, pendant le tour
+        # Le plafond de dépense de l'agent, passé au SDK (`max_budget_usd`) ; None : aucun.
+        self.budget_usd = budget_usd
+        # Le coût : la connexion ouvre-t-elle sa session (son premier tour part de zéro) ? Puis
+        # pour le tour en cours sa part, son message de fin, une dépense vue (une réponse de
+        # l'assistant) et l'erreur de l'API. Les cumuls vivent dans le registre `_CUMULS`.
+        self._session_neuve = True
+        self._cout_tour, self._fin, self._depense_vue = 0.0, None, False
+        self._erreur_api, self._texte_api = None, ""
         # Les outils refusés du tour (formes courtes), et les appels déjà comptés ou écartés.
         self._refuses: list[str] = []
         self._refuses_vus = _Memoire()
@@ -550,6 +713,12 @@ class SessionSDK:
         return resultat
 
     async def _derouler(self, consigne: str, arret: _Arret) -> Resultat:
+        """Le tour : son résultat porte ce qu'il a coûté (`cout_du_tour`) et, en échec, sa
+        nature. Un arrêt arrivé avant le départ ne lance rien : il n'a rien coûté."""
+        self._cout_tour, self._fin, self._depense_vue = 0.0, None, False
+        self._erreur_api, self._texte_api = None, ""
+        if arret.pose.is_set():
+            return Resultat(ok=False, erreur=ARRETE, nature="arret")
         travail = asyncio.ensure_future(self._travailler(consigne))
         attente = asyncio.ensure_future(arret.evenement.wait())
         try:
@@ -559,28 +728,80 @@ class SessionSDK:
         finally:
             attente.cancel()
         if arret.pose.is_set() or not travail.done():
-            _oublier(travail)
-            self._couper()
-            if arret.pose.is_set():
-                return Resultat(ok=False, erreur=ARRETE)
-            delai = f"{self.delai_max_s} secondes"
-            return Resultat(ok=False, erreur=f"L'agent n'a pas fini dans le délai de {delai}.")
-        return self._qualifier(self._issue(travail))
+            return await self._interrompre(travail, arret)
+        exception = None if travail.cancelled() else travail.exception()
+        return self._chiffrer(self._qualifier(self._issue(travail), exception))
 
-    def _qualifier(self, resultat: Resultat) -> Resultat:
+    async def _interrompre(self, travail: asyncio.Future, arret: _Arret) -> Resultat:
+        """Un arrêt ou un délai dépassé : Claude Code est interrompu, et son message de fin
+        attendu au plus `delai_interruption_s` (ou `delai_fin_s` s'il est réglé), pour porter le
+        coût du tour. Sans lui, la main est rendue quand même, `cout_incomplet` posé. Le client
+        est ensuite coupé ; son interruption, bornée par `delai_interruption_s`, finit à part.
+
+        Pendant l'attente, une demande nouvelle de ce client est refusée sans le guichet ; une
+        demande déjà au guichet y reste, et le tour fini la ferme comme d'habitude.
+        """
+        client, self._client = self._client, None
+        coupure, self._coupure = self._coupure, None
+        if coupure is not None:
+            coupure.pose.set()  # le drapeau seul : les demandes en attente ne sont pas réveillées
+        interruption = None
+        if client is not None and not travail.done():
+            interruption = asyncio.ensure_future(
+                asyncio.wait_for(client.interrupt(), self.delai_interruption_s)
+            )
+            attente = self.delai_interruption_s if self.delai_fin_s is None else self.delai_fin_s
+            await asyncio.wait({travail}, timeout=attente)
+        resultat = self._resultat_interrompu(travail, arret)
+        if not travail.done():
+            _oublier(travail)
+        if coupure is not None:
+            coupure.poser()
+        if client is not None:
+            tache = asyncio.ensure_future(self._deconnecter(client, interruption))
+            self._deconnexions.add(tache)
+            tache.add_done_callback(self._deconnexions.discard)
+        return resultat
+
+    def _resultat_interrompu(self, travail: asyncio.Future, arret: _Arret) -> Resultat:
+        """L'arrêt ou le délai dépassé, avec le coût du tour et ses tokens s'ils sont connus."""
+        if arret.pose.is_set():
+            erreur, nature = ARRETE, "arret"
+        else:
+            delai = f"{self.delai_max_s} secondes"
+            erreur, nature = f"L'agent n'a pas fini dans le délai de {delai}.", "delai"
+        fini = travail.done() and not travail.cancelled() and travail.exception() is None
+        tokens = travail.result().tokens if fini and self._fin is not None else 0
+        return Resultat(ok=False, erreur=erreur, nature=nature, cout_usd=self._cout_tour,
+                        tokens=tokens, cout_incomplet=self._fin is None)  # fmt: skip
+
+    def _chiffrer(self, resultat: Resultat) -> Resultat:
+        """Le coût d'un tour allé à son terme : sa part du cumul annoncé. Sans message
+        de fin après une réponse de l'assistant (une dépense), le coût est incomplet."""
+        resultat.cout_usd = self._cout_tour
+        resultat.cout_incomplet = self._fin is None and self._depense_vue
+        return resultat
+
+    def _qualifier(self, resultat: Resultat, exception: BaseException | None = None) -> Resultat:
         """Un échec dû à une limite, à une surcharge, ou à une session qu'on n'a pas pu
-        reprendre, le dit. La limite passe avant la surcharge."""
+        reprendre, le dit. La limite passe avant la surcharge. Tout échec reçoit sa nature
+        (`lire_nature` pour la connexion, le budget et la panne) ; une connexion perdue reste
+        « connexion » même quand la session exigée n'a pas répondu."""
         if resultat.ok:
             return resultat
         reste = {"cout_usd": resultat.cout_usd, "tokens": resultat.tokens}
         if self._limite_refusee:
             limite = self._limite or {"limite": LIMITE_INCONNUE, "fin": None}
             return Resultat(ok=False, erreur=LIMITE_ATTEINTE, type_limite=limite["limite"],
-                            fin_limite=limite["fin"], **reste)  # fmt: skip
+                            fin_limite=limite["fin"], nature="limite", **reste)  # fmt: skip
         if self._surcharge:
-            return Resultat(ok=False, erreur=SURCHARGE, **reste)
+            return Resultat(ok=False, erreur=SURCHARGE, nature="surcharge", **reste)
+        source = self._fin if self._fin is not None else exception
+        nature = lire_nature(source, self._erreur_api, resultat.erreur, self._texte_api)
         if self._a_reprendre and not self._session_vue:
-            return Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE, **reste)
+            nature = nature if nature == "connexion" else "reprise"
+            return Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE, nature=nature, **reste)
+        resultat.nature = nature
         return resultat
 
     def _issue(self, travail: asyncio.Future) -> Resultat:
@@ -613,6 +834,12 @@ class SessionSDK:
         from claude_agent_sdk import ClaudeAgentOptions, ClaudeSDKClient
 
         coupure = self._coupure = _Arret(self._boucle)
+        # Claude Code compte le coût depuis le début de la session : une connexion qui en ouvre
+        # une part de zéro ; une connexion qui la reprend repart du total gardé, donc du dernier
+        # cumul vu pour elle dans le registre du processus (`cout_de_session`).
+        self._session_neuve = not self.reprise
+        # Le plafond de dépense, seulement s'il y en a un : sinon le SDK garde son défaut.
+        plafond = {"max_budget_usd": self.budget_usd} if plafond_valide(self.budget_usd) else {}
 
         async def autoriser(outil, entree, contexte=None):
             return await self._autoriser(outil, entree, contexte, coupure)
@@ -639,6 +866,7 @@ class SessionSDK:
             session_id=None if self.reprise else self.session,
             resume=self.session if self.reprise else None,
             settings=self._reglages,  # les refus d'office, en `permissions.deny`
+            **plafond,
         )
         return (self.fabrique_client or ClaudeSDKClient)(options)
 
@@ -668,7 +896,9 @@ class SessionSDK:
 
     def _suivre_fin(self, message) -> None:
         """Le message de fin : la session, les refus du tour, et le signe d'une limite atteinte
-        (statut HTTP 429) ou d'une surcharge (son texte) dans un tour en échec."""
+        (statut HTTP 429) ou d'une surcharge (son texte) dans un tour en échec. Le coût du tour
+        est sa part du cumul annoncé, en erreur comme en succès (`_noter_cout`)."""
+        self._noter_cout(message)
         self._retenir_session(message.session_id)
         self._refus_du_tour(message.permission_denials)
         self._refuses_du_tour(message.permission_denials)
@@ -679,16 +909,33 @@ class SessionSDK:
         elif getattr(message, "api_error_status", None) == STATUT_HTTP_LIMITE:
             self._limite_refusee = True
 
+    def _noter_cout(self, message) -> None:
+        """Retient le message de fin du tour et ce que le tour a coûté : la différence entre le
+        cumul annoncé (`total_cost_usd`, compté par Claude Code depuis le début de la session) et
+        le plus haut cumul vu avant pour la session, dans ce pont ou un autre (`cout_de_session`).
+        Un cumul plus bas (remis à zéro dans un résultat d'erreur au démarrage ou après un
+        plantage) compte 0 et ne baisse pas la référence."""
+        self._fin = message
+        cle = getattr(message, "session_id", None) or self.session or f"pont-{id(self)}"
+        cumul = getattr(message, "total_cost_usd", None)
+        self._cout_tour = cout_de_session(cle, cumul, neuve=self._session_neuve)
+        self._session_neuve = False
+
     def _suivre_assistant(self, message) -> None:
         """Annonce les outils appelés ; une réponse en erreur « rate_limit » est un refus pour
-        limite, ou une surcharge si son texte le dit."""
+        limite, ou une surcharge si son texte le dit. Toute réponse en erreur retient son champ
+        `error` et son texte, pour la nature de l'échec ; une autre réponse est une dépense."""
         import claude_agent_sdk as sdk
 
-        if getattr(message, "error", None) == "rate_limit":
+        erreur = getattr(message, "error", None)
+        if not erreur:
+            self._depense_vue = True
+        else:
             lu = " ".join(b.text for b in message.content if isinstance(b, sdk.TextBlock))
-            if est_surcharge(lu):
+            self._erreur_api, self._texte_api = erreur, lu
+            if erreur == "rate_limit" and est_surcharge(lu):
                 self._surcharge = True
-            else:
+            elif erreur == "rate_limit":
                 self._limite_refusee = True
         for bloc in message.content:
             if isinstance(bloc, sdk.ToolUseBlock):
@@ -877,9 +1124,19 @@ class SessionSDK:
             self._deconnexions.add(tache)
             tache.add_done_callback(self._deconnexions.discard)
 
-    async def _deconnecter(self, client) -> None:
-        with suppress(Exception):
-            await asyncio.wait_for(client.interrupt(), self.delai_interruption_s)
+    async def _deconnecter(self, client, interruption: asyncio.Future | None = None) -> None:
+        """Interrompt le client (au plus `delai_interruption_s`), puis le déconnecte.
+
+        Déjà interrompu (`interruption`, la tâche lancée par `_interrompre`), il ne l'est pas
+        une seconde fois : on attend seulement la fin de cette interruption, bornée elle aussi.
+        """
+        if interruption is None:
+            with suppress(Exception):
+                await asyncio.wait_for(client.interrupt(), self.delai_interruption_s)
+        else:
+            await asyncio.wait({interruption})
+            if not interruption.cancelled():
+                interruption.exception()  # lue : une interruption ratée ne fait pas de bruit
         with suppress(Exception):
             await client.disconnect()  # jamais annulé ni borné ici : voir l'en-tête du module
 
