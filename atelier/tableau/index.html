@@ -1150,7 +1150,7 @@ const boutonValider = `<button class="principal" data-action="valider">Valider l
 
 function demandeHtml(d) {
   const budget = d.nature === "budget" && derniere && derniere.budget;
-  return `${budget ? `<p class="demande-budget" data-demande-budget>Budget du chantier atteint : ${propre(budget.fr)}</p>` : ""}<p>${propre(d.question)}</p><div class="boutons">${d.options.map((o, i) =>
+  return `${budget ? `<p class="demande-budget" data-demande-budget>${budget.atteint ? "Budget du chantier atteint" : "Budget du chantier relevé depuis"} : ${propre(budget.fr)}</p>` : ""}<p>${propre(d.question)}</p><div class="boutons">${d.options.map((o, i) =>
     `<button class="${i ? "" : "principal"}" data-action="decider" data-id="${propre(d.id)}" data-choix="${propre(o)}">${propre(o)}</button>`).join("")}</div>`;
 }
 
@@ -1289,7 +1289,7 @@ function afficherConversation(vue) {
   const arret = document.getElementById("arret-orch");
   arret.hidden = !(vue.occupe || vue.reprise_en_attente) || rejoue;
   habillerArret(arret, "orchestrateur");
-  if (vue.reprise_en_attente && !arretes.has("orchestrateur")) {
+  if (vue.reprise_en_attente && !vue.occupe && !arretes.has("orchestrateur")) {
     arret.textContent = "Arrêter la reprise";
     arret.title = "Empêche les tâches interrompues de repartir seules : elles te reviennent, travail gardé.";
   }
@@ -2170,7 +2170,7 @@ async function repondre(id, choix, message) {
 async function arreter(cle, tache) {
   if (arretes.has(cle)) return;
   if (armee === cle && performance.now() - armeeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
-  const reprise = cle === "orchestrateur" && derniere && derniere.reprise_en_attente; // rien à perdre : un seul clic
+  const reprise = cle === "orchestrateur" && derniere && derniere.reprise_en_attente && !derniere.occupe; // rien à perdre : un seul clic
   if (armee !== cle && !reprise) {
     armee = cle; armeeLe = performance.now();
     clearTimeout(minuteArmee);

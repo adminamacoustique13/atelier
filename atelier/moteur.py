@@ -121,6 +121,36 @@ ATTENTES = {
 }
 
 
+FICHIERS_NOMMES_MAX = 8  # fichiers hors périmètre qu'un verdict peut ouvrir à une sous-tâche
+PLAFOND_AU_DELA = 0.2  # la part du budget laissée à un agent qui part une fois le budget atteint
+COPIE_CHANGEE = (
+    "La copie de travail a changé pendant la vérification : ce qui a été vérifié n'est plus ce "
+    "qui entrerait. Rien n'est enregistré ; le départ suivant reprend cette copie, et elle sera "
+    "vérifiée de nouveau."
+)
+
+
+def _chemin_simple(fichier) -> str:
+    """Le chemin d'un fichier nommé par un verdict, s'il est simple : relatif, sans motif
+    (`*`, `?`, crochets), sans « .. », hors de `.git` et de `.atelier` ; "" sinon."""
+    if not isinstance(fichier, str):
+        return ""
+    chemin = fichier.strip().replace("\\", "/")
+    while chemin.startswith("./"):
+        chemin = chemin[2:]
+    morceaux = chemin.split("/")
+    interdit = (
+        not chemin
+        or len(chemin) > 200
+        or chemin.startswith("/")
+        or chemin.endswith("/")
+        or any(c in chemin for c in "*?[]\n\r\0")
+        or any(m in ("", ".", "..") for m in morceaux)
+        or morceaux[0] in (".git", ".atelier")
+    )
+    return "" if interdit else chemin
+
+
 def _en_liste(noms: list) -> str:
     """« A », « A et B », « A, B et C »."""
     noms = [str(n) for n in noms]
@@ -560,6 +590,7 @@ class Moteur:
         # tâche est devenue prête (dépendance vérifiée, relance décidée, lancement du moteur).
         self._mesure: dict[str, tuple[str, float]] = {}
         self._durees: dict[str, dict[str, float]] = {}
+        self._jugees: dict[str, str] = {}  # par tâche, l'état de la copie jugée par les contrôles
         self._attentes: dict[str, float] = {}
         self._verifiee_a: dict[str, float] = {}
         self._relancee_a: dict[str, float] = {}
@@ -750,14 +781,17 @@ class Moteur:
             return budget > 0 and self.chantier.cout_usd >= budget
 
     def _plafond(self) -> dict:
-        """Ce qu'un appel d'agent ajoute pour qu'il ne dépasse pas ce qui reste du budget ; rien
-        sans budget, ni pour un agent qui ne sait pas tenir un plafond (`plafonne_la_depense`)."""
+        """Ce qu'un appel d'agent ajoute pour qu'il ne dépasse pas ce qui reste du budget (au
+        moins `PLAFOND_AU_DELA` du budget) ; rien sans budget, ni pour un agent qui ne sait pas
+        tenir un plafond (`plafonne_la_depense`)."""
         budget = self._budget()
         if budget <= 0 or not getattr(self.agent, "plafonne_la_depense", False):
             return {}
         with self.verrou:
             reste = budget - self.chantier.cout_usd
-        return {"budget_usd": round(reste, 4)} if reste > 0 else {}
+        # Un travail rendu est jugé jusqu'au bout, même le budget atteint : son vérificateur
+        # garde un plafond, un cinquième du budget, au lieu de partir sans aucune borne.
+        return {"budget_usd": round(max(reste, budget * PLAFOND_AU_DELA), 4)}
 
     def _rendre_pour_budget(self, tache: Tache) -> None:
         """Rend la tâche à la personne parce que le budget est atteint ; son travail, s'il y
@@ -865,6 +899,7 @@ class Moteur:
         """Sous le verrou : rend la tâche après une panne, avec sa trace et sa décision."""
         tache.etat = "revenu"
         self._tracer(tache, PANNE, detail)
+        self._defaire_sous_tache(tache)  # après la trace, qui porte encore son nom
         self.chantier.demandes.append(
             {
                 "id": f"{tache.id}-{len(self.chantier.demandes) + 1}",
@@ -1603,7 +1638,10 @@ class Moteur:
         après une erreur d'agent ou une suspension, le périmètre n'a pas été contrôlé.
         """
         jetee = jugement is not None and (
-            jugement.motif == ARRETEE or jugement.origine in COPIE_JETEE
+            jugement.motif == ARRETEE
+            or jugement.origine in COPIE_JETEE
+            # sous la règle « fond », un travail jugé faux ne se rapièce pas : copie propre
+            or (self._montee() == "fond" and jugement.fond_faux)
         )
         if dossier is None or jetee:
             return self._jeter_copie(tache, dossier)
@@ -1716,6 +1754,8 @@ class Moteur:
         jugement = self._juger(tache, resultat, dossier, precedent)
         jugement = self._avec_empechements(jugement, resultat)
         if jugement.motif is None:
+            jugement = self._intacte(tache, dossier, jugement)
+        if jugement.motif is None:
             jugement = self._enregistrer(tache, dossier, jugement)
         jugement = replace(jugement, reprise=precedent is not None)
         with self.verrou:
@@ -1743,6 +1783,20 @@ class Moteur:
         tous = tuple(dict.fromkeys([*lignes, *outils, *jugement.empechements]))
         seuls = [o for o in outils if o not in lignes and o not in jugement.empechements]
         return replace(jugement, empechements=tous, refuses_seuls=tuple(seuls))
+
+    def _intacte(self, tache: Tache, dossier, jugement: Jugement) -> Jugement:
+        """Le jugement d'un livrable accepté, ou un refus si la copie a changé depuis que le
+        périmètre et les contrôles l'ont jugée : un ouvrier resté ouvert, ou tout autre
+        programme, a pu y écrire pendant que le vérificateur relisait. Sans copie de travail ou
+        sans empreinte (contrôles simulés, git muet), rien ne se compare et le jugement passe."""
+        with self.verrou:
+            jugee = self._jugees.pop(tache.id, "")
+        if not jugee or dossier is None:
+            return jugement
+        maintenant = self._empreinte(dossier)
+        if not maintenant or maintenant == jugee:
+            return jugement
+        return Jugement("ne_sait_pas", COPIE_CHANGEE, "controles", COPIE_CHANGEE)
 
     def _enregistrer(self, tache: Tache, dossier, jugement: Jugement) -> Jugement:
         """Fait entrer le livrable accepté dans la branche principale ; rend le jugement final.
@@ -1834,6 +1888,8 @@ class Moteur:
         """
         faits = {"controles": 0, "autres": 0, "tous": 0}
         while jugement.reprenable:
+            if jugement.origine == "integration" and self._budget_atteint():
+                break
             if jugement.origine != "integration":
                 if self._montee() == "fond" and jugement.fond_faux:
                     break  # un fond jugé faux ne revient jamais au même ouvrier : il fait monter
@@ -1890,6 +1946,13 @@ class Moteur:
         resultat = self._malgre_les_limites(
             tache, self._prendre_place, lambda: self._lancer_reprise(tache, dossier, session, refus)
         )
+        if resultat is not None and self._nature(resultat) == NATURE_BUDGET:
+            self._noter(
+                "Le retour à l'ouvrier a été coupé par le plafond du budget : il ne compte pas, "
+                "et le refus vaut tel quel.",
+                tache,
+            )
+            return replace(refus, reprenable=False)
         if resultat is not None and resultat.ok and self._inchangee(dossier, avant):
             self._noter(
                 "L'ouvrier a rendu la main sans rien changer dans sa copie : le refus vaut tel "
@@ -2120,6 +2183,10 @@ class Moteur:
         (un contrôle rouge, ou un verdict « bâclé » ou « local » avec ses points) ; sinon
         l'efface. Les fichiers qu'une sous-tâche précédente avait le droit de toucher restent
         permis tant que la copie est gardée."""
+        if jugement.origine == "agent":  # l'agent est tombé : rien n'a été jugé, le reste vaut
+            with self.verrou:  # encore, et la sous-tâche coupée rend son numéro
+                self._defaire_sous_tache(tache)
+            return
         genre, points = self._reste_nomme(jugement)
         nomme = bool(points)
         with self.verrou:
@@ -2129,10 +2196,28 @@ class Moteur:
             permis = avant.get("permis", [])
             tache.reste = {}
             if nomme:
-                fichiers = [f for f in jugement.fichiers if isinstance(f, str)]
+                fichiers = self._fichiers_nommes(tache, jugement.fichiers)
                 tache.reste = {"genre": genre, "points": points, "fichiers": fichiers}
             if permis and tache.copie:
                 tache.reste["permis"] = permis
+
+    def _fichiers_nommes(self, tache: Tache, fichiers) -> list[str]:
+        """Sous le verrou : parmi les fichiers que nomme un verdict, ceux qu'une sous-tâche
+        aura le droit de toucher en plus du périmètre. Le verdict est un texte écrit par un
+        modèle : seul un chemin simple est gardé (ni motif, ni chemin absolu, ni « .. », ni
+        dossier de git), `FICHIERS_NOMMES_MAX` au plus, et jamais un fichier du périmètre d'une
+        autre tâche pas encore vérifiée, qui pourrait y écrire en même temps."""
+        autres = [a for a in self.chantier.taches if a.id != tache.id and a.etat != "verifie"]
+        partages = fichiers_partages(self.profil)
+        gardes: list[str] = []
+        for fichier in fichiers:
+            chemin = _chemin_simple(fichier)
+            if not chemin or chemin in gardes:
+                continue
+            if any(se_chevauchent([chemin], a.perimetre, partages) for a in autres):
+                continue
+            gardes.append(chemin)
+        return gardes[:FICHIERS_NOMMES_MAX]
 
     @staticmethod
     def _reste_nomme(jugement: Jugement) -> tuple[str, list[str]]:
@@ -2224,6 +2309,10 @@ class Moteur:
             if refus.origine == "perimetre":
                 self._retenir_releve(tache)
             return refus
+        if dossier is not None:  # l'état de la copie que les contrôles viennent de juger
+            vu = self._empreinte(dossier)
+            with self.verrou:
+                self._jugees[tache.id] = vu
         if self._arretee(tache):  # aucun agent n'est en marche : le vérificateur ne part pas
             return ARRET
         return self._verifier(tache, dossier, precedent, sortie)
@@ -2387,7 +2476,7 @@ class Moteur:
         au-dessus de l'ouvrier au niveau complet, le même au niveau borné. Elle porte l'état de
         la copie que le vérificateur va voir et, pour une retouche, les fichiers changés depuis
         celui qu'avait vu le vérificateur précédent."""
-        modele, effort = dosage.verificateur_selon_niveau(tache.modele, tache.effort, niveau)
+        modele, effort = dosage.verificateur_selon_niveau(*self._dosage_du_tour(tache), niveau)
         vu = self._empreinte(dossier)
         fichiers = ()
         if genre == RETOUCHE:
@@ -2862,6 +2951,8 @@ class Moteur:
             return False
         if self._sous_tache_apres(tache, jugement):
             return True
+        if not jugement.reprise and jugement.reprenable:
+            return True  # la première passe d'un départ : son ouvrier a d'abord son retour
         depart = [(e.get("tentative"), e.get("sous_tache", "")) for e in fenetre[-2:]]
         contrat = self.chantier.contrat
         encore = tache.tentatives < contrat.max_tentatives + tache.rallonge

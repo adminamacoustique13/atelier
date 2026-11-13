@@ -108,6 +108,32 @@ Décisions attendues de la personne responsable :
 4. Les points 3 et 4 de la comparaison avec la ligne « PC et autonomie », à discuter.
 5. L'entrée de cette branche dans `main`.
 
+## Relecture par un vérificateur (Opus), le 2026-11-13 : dix-huit défauts relevés
+Un seul vérificateur, en lecture seule, sur les dix enregistrements faits sans relecture. Sept défauts reproduits par ses scripts, onze lus dans le code. Corrigés aussitôt, chacun avec son test (`tests/test_relecture.py`, 38 tests) :
+- **1. Périmètre ouvert par le verdict.** Le champ `fichiers` d'un verdict, texte libre d'un modèle, entrait tel quel dans le périmètre de la sous-tâche : `["*"]` ouvrait tout, et l'ouverture restait pour l'ouvrier suivant. Seul un chemin simple est maintenant gardé (ni motif, ni chemin absolu, ni « .. », ni dossier de git), huit au plus, et jamais un fichier du périmètre d'une autre tâche pas encore vérifiée.
+- **2. Copie changée pendant la vérification.** Ce qu'un ouvrier resté ouvert (ou tout autre programme) écrivait dans la copie pendant que le vérificateur relisait entrait sans contrôle. L'état de la copie jugée par les contrôles est comparé à celui d'avant l'enregistrement : s'il a changé, rien n'entre, et le départ suivant reprend la copie.
+- **3. Vérificateur sans plafond.** Le budget atteint, le vérificateur partait sans aucune borne. Il garde un plafond d'un cinquième du budget.
+- **4. Retour coupé par son plafond.** Il comptait comme une erreur d'agent, avec une tentative et une « seconde chance ». Il ne compte plus.
+- **5 (en partie).** Le retour pour un conflit de fusion ne part plus au-delà du budget.
+- **6. Erreur d'agent pendant une sous-tâche.** Elle effaçait ce qui restait à régler et consommait la sous-tâche. Le reste est gardé, et la sous-tâche rend son numéro.
+- **7. Blocage avant le retour.** Au départ suivant, un refus identique bloquait la tâche avant que son ouvrier ait eu son retour. La première passe d'un départ ne bloque plus ; trois refus de même forme de suite bloquent toujours.
+- **8. Fond jugé faux.** Sous la règle sans réglage, le travail jugé faux restait dans la copie et le modèle monté devait le rapiécer. Il repart d'une copie propre. C'est un choix, à confirmer : il fait exception à « le travail refusé est gardé ».
+- **10.** Le vérificateur d'une sous-tâche est dosé sur l'ouvrier de la sous-tâche, plus sur le dosage de la tâche.
+- **13.** Après une rallonge, les autres demandes de budget ne disent plus « atteint ».
+- **15.** Une tâche rendue après une panne de l'Atelier ne garde plus de sous-tâche « en cours ».
+- **18.** « Arrêter » vise d'abord l'orchestrateur s'il répond, la reprise annoncée sinon.
+
+Pas corrigés, parce qu'ils demandent plus qu'une correction rapide :
+- **5 (le reste).** Des tâches en parallèle reçoivent chacune tout ce qui reste du budget : leurs dépassements s'additionnent. Un ouvrier resté ouvert garde le plafond de sa connexion. Un retour par reprise de session reçoit le reste du chantier alors que Claude Code compte depuis le début de la session : il peut être coupé trop tôt (il ne compte alors plus contre la tâche, correction 4).
+- **9.** Une sous-tâche ne peut pas reprendre un conflit de fusion si son départ d'origine en a déjà repris un : la copie est alors jetée.
+- **11.** Sous l'ancienne règle d'escalade, une montée de modèle peut être payée puis suivie d'une sous-tâche dosée plus bas.
+- **12.** Un arrêt de l'Atelier entre deux départs rend le numéro d'une tentative déjà jugée (règle d'avant, plus gênante depuis que la copie est gardée).
+- **14.** La Salle ne dit pas ce qu'attend une tâche déjà partie (entre deux départs, ou son vérificateur sans jeton).
+- **16.** Le budget du profil, une fois recopié dans le contrat, ne suit plus le profil ; relancer une demande qui n'est pas de budget, budget atteint, demande un second clic.
+- **17.** `tests/conftest.py` donne l'ancienne règle d'escalade aux tests d'avant : rejoués sous la règle du produit, 32 échouent, presque tous sur le texte ou l'escalade attendus. Ils restent à réécrire.
+- Un ouvrier ordinaire qui suit une sous-tâche peut encore modifier les fichiers qui lui avaient été ouverts : l'affirmation contraire, écrite plus bas dans les écarts de M10, était fausse.
+- Non regardé par le vérificateur : les changements de l'agent simulé, les cas limites de `sdk._vider`, la justesse de `etat_du_depot`, le texte des consignes, les essais du navigateur.
+
 ## Deux défauts de M10 et M11 trouvés en rejouant la démonstration, corrigés (à relire)
 - **M11 bloquait trop tôt.** Sous la règle sans réglage, le même refus deux fois de suite bloquait la tâche dès son premier départ : la passe de l'ouvrier, puis son retour, suffisaient. La démonstration finissait à 5 tâches sur 6, et trois essais du navigateur (D2, D3, G) échouaient sur le compte de ses vues. Je ne l'avais pas vu : je n'avais pas rejoué les essais du navigateur après M11. Corrigé sur le modèle de la ligne « PC et autonomie » : deux refus identiques du même départ ne bloquent pas tant qu'il reste une tentative (un autre ouvrier repart au même niveau, sur le travail gardé) ; le même refus à deux départs de suite bloque (`_suite_au_meme_niveau`).
 - **M10 faussait la fenêtre des refus comparés.** La première écriture faisait grandir la rallonge de la tâche à chaque sous-tâche ; or la rallonge sert aussi à savoir depuis quand comparer les refus (`_fenetre`). Les refus d'avant la sous-tâche sortaient de la comparaison. Corrigé : une sous-tâche ne touche plus ni aux tentatives ni à la rallonge.
@@ -124,7 +150,7 @@ Décisions attendues de la personne responsable :
 ## Écarts de M10 par rapport à sa fiche (à relire)
 - Une sous-tâche prête passe avant le blocage « même refus » et avant le compte des tentatives, comme dans la ligne « PC et autonomie » : la fiche ne le disait pas. Le même refus trois fois de suite bloque quand même (règle « V3b », inchangée) : une tâche que les contrôles refusent toujours pour la même raison reçoit donc une seule sous-tâche, puis revient.
 - La sous-tâche ne prend pas de numéro de tentative : son entrée d'historique garde le numéro de la tentative qu'elle continue, avec `sous_tache`. L'agent, lui, reçoit le rang du passage (`tentatives + sous_taches`), pour que deux ouvriers d'une tâche n'aient pas le même nom ; après une relance par la personne, qui remet les sous-tâches à zéro, ce rang peut reprendre un numéro déjà servi.
-- Les fichiers nommés par le vérificateur sont permis pendant la sous-tâche, puis restent permis sur la copie gardée (`reste["permis"]`) tant qu'elle n'est pas jetée : sinon le départ suivant aurait jeté la copie pour débord. Un ouvrier ordinaire qui suit n'a pas le droit d'y toucher de nouveau, mais ce qui y est déjà n'est pas refusé.
+- Les fichiers nommés par le vérificateur sont permis pendant la sous-tâche, puis restent permis sur la copie gardée (`reste["permis"]`) tant qu'elle n'est pas jetée : sinon le départ suivant aurait jeté la copie pour débord. Un ouvrier ordinaire qui suit peut donc encore les modifier (relevé à la relecture).
 - La place et le jeton du départ sont pris pour le modèle de la tâche, pas pour celui de la sous-tâche (qui peut être Sonnet quand la tâche est en Opus).
 - Sous l'ancienne règle (`"montee": "refus"`), la sous-tâche part aussi quand un départ suit le refus, mais elle ne passe ni avant le blocage ni avant le compte des tentatives.
 - Le vérificateur ne sait pas qu'un fichier hors périmètre a été permis à la sous-tâche : sa consigne ne le dit pas.

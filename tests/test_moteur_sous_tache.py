@@ -15,6 +15,7 @@ from atelier.consignes import SUR_PLACE
 from atelier.moteur import RELANCER_TEL, Moteur
 from tests.test_moteur_garde import (
     PASSES,
+    REPART_PROPRE,
     TROIS_PASSES,
     Controles,
     Heure,
@@ -116,16 +117,20 @@ def test_un_verdict_local_donne_ses_points_mot_pour_mot_et_dit_le_reste_conforme
     assert sous_taches(a)[-1] == "A-a"
 
 
-def test_un_refus_du_fond_efface_le_reste_et_le_depart_suivant_reprend_la_mission(depot):  # noqa: F811
+def test_un_fond_juge_faux_efface_le_reste_et_le_modele_monte_repart_d_une_copie_propre(depot):  # noqa: F811
     scenario = {"A": ["bacle", "ne_sait_pas", "ok"]}
-    c, m, agent, _ = mener(depot, scenario, verdicts={1: LOCAL})
+    c, m, agent, controles = mener(depot, scenario, verdicts={1: LOCAL})
     m.executer()
     a = c.tache("A")
-    assert a.etat == "verifie" and a.sous_taches == 1
-    _, sous, dernier = agent.departs()
+    assert a.etat == "verifie" and a.sous_taches == 1 and c.montees == 1
+    premier, sous, dernier = agent.departs()
     assert "## Sous-tâche A-a" in sous["consigne"]
-    assert "Sous-tâche" not in dernier["consigne"] and SUR_PLACE in dernier["consigne"]
+    # Le fond est jugé faux : le travail n'est pas rapiécé, le modèle monté repart de zéro.
+    assert "Sous-tâche" not in dernier["consigne"] and SUR_PLACE not in dernier["consigne"]
+    assert REPART_PROPRE in dernier["consigne"] and dernier["trouve"] == ""
+    assert controles.preparees == ["A", "A"] and len(controles.annulees) == 1
     assert sous_taches(a)[-1] == ""
+    assert (depot / PASSES).read_text("utf-8").splitlines() == ["passe 4"]
 
 
 def test_un_refus_qui_ne_nomme_rien_n_ouvre_pas_de_sous_tache(depot):  # noqa: F811

@@ -1780,8 +1780,8 @@ class Atelier:
         cette reprise qui est annulée : rien ne repart seul (`annuler_reprise`)."""
         if tache in (None, ""):
             with self.moteur.verrou:
-                en_attente = self._reprise == "attente"
-            if en_attente:
+                en_attente = self._reprise == "attente" and not self.occupe
+            if en_attente:  # l'orchestrateur ne répond à rien : c'est la reprise qu'on arrête
                 return self.annuler_reprise()
             if self.moteur.agent.arreter():
                 return {"fait": True, "phrase": "Arrêt demandé : la réponse en cours s'arrête."}
