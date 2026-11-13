@@ -3,7 +3,7 @@ name = "atelier"
 version = "0.1.0"
 description = "Atelier : un chef de chantier en code pour des agents Claude Code dosés et vérifiés"
 requires-python = ">=3.10"
-dependencies = ["claude-agent-sdk>=0.2.172"]
+dependencies = ["claude-agent-sdk>=0.2.181"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
