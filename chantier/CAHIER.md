@@ -6,17 +6,17 @@
 |---|---|---|---|---|---|
 | P1. Le serveur local refuse une demande venue d'un autre site | vérifié | Opus, effort élevé | complète, Fable : accepté du premier coup, aucun défaut bloquant | 1 | 53 tests de l'ouvrier (44 échouaient avant) et 35 du vérificateur ; attaques réelles depuis Chrome sans aucune réponse 2xx ; 56 mutations, 43 tuées par l'ouvrier, toutes sauf deux avec les compléments ; suite 1 881, ruff propre, huit essais verts |
 | P2. Seul un vrai `true` du vérificateur vaut accord | vérifié | Sonnet, effort moyen | mécanique : 8 tests échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests ajoutés ; suite 1 793, ruff propre ; enregistré 99a111e |
-| P3. Secrets illisibles et git en écriture refusés d'office à tout agent | en cours | Opus, effort élevé | complète, Fable | 1 | |
+| P3. Secrets illisibles et git en écriture refusés d'office à tout agent | en vérification | Opus, effort élevé | complète, Fable | 1 | 216 tests nouveaux, 195 échouaient sur l'ancien code ; réunie à l'essai : 2 156 tests verts |
 | P4. Un fichier au nom accentué est reconnu dans son périmètre | vérifié | Sonnet, effort moyen | mécanique : 9 tests sur 15 échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests nouveaux ; suite 1 778 puis 1 793 avec P2, ruff propre ; enregistré 7b75090 |
 | V1. Maquettes de la Salle à plusieurs agents et de l'état du dépôt (hors produit) | en cours | Fable, effort élevé | par la personne responsable, sur les images | 1 | |
 | M1. Formats (état, résultat d'un agent, dosage) | vérifié | Sonnet, effort moyen | mécanique et lecture du diff par l'orchestrateur, à la place de la vérification bornée prévue : 16 tests sur 21 échouaient sur l'ancien code, les trois fonctions de dosage sont identiques à la référence (arbres de syntaxe comparés), aucun test existant touché | 1 | 59 tests ajoutés, 3 mutations tuées par l'ouvrier ; suite 1 940 avec P1, ruff propre |
-| M2. Consignes (preuve par critère, contrôles non rejoués, sous-tâche, verdict local) | en cours | Sonnet, effort élevé | bornée | 1 | |
-| M3. Agents : l'ouvrier reste ouvert | à lancer (vague 1) | Opus, effort élevé | complète | | |
-| M4. Pont : coût juste et nature des échecs | à lancer (vague 1) | Opus, effort élevé | complète | | |
-| M5. Vérification : niveaux, retouche, contrôles non rejoués | à lancer (vague 1) | Opus, effort élevé | complète | | |
-| M6. Pannes d'agent : patienter | à lancer (vague 1) | Opus, effort élevé | complète | | |
-| M7. Reprise seule après un arrêt | à lancer (vague 1) | Opus, effort élevé | complète | | |
-| M8. Le travail refusé est gardé | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M2. Consignes (preuve par critère, contrôles non rejoués, sous-tâche, verdict local) | rendue, en retouche à chaud (deux précisions de consigne : le genre et les fichiers de la sous-tâche, la vérification bornée qui nomme aussi ce qui reste) | Sonnet, effort élevé | bornée, après la retouche | 1 + 1 retouche | 107 tests ajoutés, 53 échouaient sur l'ancien code ; textes par défaut figés par empreinte |
+| M3. Agents : l'ouvrier reste ouvert | en cours | Opus, effort élevé | complète | 1 | |
+| M4. Pont : coût juste et nature des échecs | en cours | Opus, effort élevé | complète | 1 | |
+| M5. Vérification : niveaux, retouche, contrôles non rejoués | à lancer dès la retouche de M2 rendue | Opus, effort élevé | complète | | |
+| M6. Pannes d'agent : patienter | en cours | Opus, effort élevé | complète | 1 | |
+| M7. Reprise seule après un arrêt | en cours | Opus, effort élevé | complète | 1 | |
+| M8. Le travail refusé est gardé | en cours | Opus, effort élevé | complète | 1 | |
 | M9. Retours à l'ouvrier ouvert | à lancer (vague 2) | Opus, effort élevé | complète | | |
 | M10. Sous-tâche | à lancer (vague 2) | Opus, effort élevé | bornée | | |
 | M11. Après un refus | à lancer (vague 2) | Opus, effort élevé | complète | | |
@@ -69,6 +69,9 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 ## Relevés des ouvriers, hors périmètre
 - P4 : `atelier/essai.py:358` lit `git ls-files` sans `-z` puis coupe aux espaces ; sans effet aujourd'hui (l'essai ne livre que `calcul.py`).
 - P2 : aucun autre booléen venu d'un agent n'est lu par sa seule vérité.
+
+## Bases de travail de la vague 1
+Les tâches partent sans attendre les vérifications en cours. M6 et M7 partent de 7d41ef1 (M1 enregistrée). M3 et M4, qui touchent `agents.py` et `sdk.py`, partent d'une base locale non poussée qui ajoute P3 (8a6ba8a). M8 part de la même base plus M2 (c21b72e). Seul le travail vérifié entre dans la branche poussée ; si une vérification fait changer P3 ou M2, les tâches parties dessus sont réunies sur la version corrigée.
 
 ## Incident de lancement
 Les quatre copies de travail des ouvriers ont été créées sur `main` (9d4cf2c) au lieu de la branche de travail. Vu avant toute modification : l'orchestrateur les a replacées sur a862a2f et a prévenu chaque ouvrier de relire ses fichiers. À refaire à chaque lancement en copie isolée : vérifier le commit de départ.
