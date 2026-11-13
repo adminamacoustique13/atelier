@@ -569,6 +569,153 @@ CHANTIER_OCCUPE = (
 )
 CHANTIER_VIDE = "Ce chantier est encore vide : il n'y a rien à archiver."
 
+# --- le verrou par dépôt : un seul Atelier sur un même dépôt ------------------------------------
+
+VERROU_DEPOT = Path(".atelier") / "verrou"  # le fichier verrouillé, dans le dossier du projet
+DEPOT_OCCUPE = (
+    "un autre Atelier travaille déjà sur le projet « {nom} » ({dossier}). Je ne l'ouvre pas une "
+    "seconde fois : je ne relance rien et je ne touche pas à son chantier. Ferme l'autre Atelier, "
+    "ou sers-toi de son tableau de bord."
+)
+
+
+class DepotOccupe(ProjetImpossible):
+    """Un autre Atelier tient le verrou de ce dépôt ; le message le dit en clair."""
+
+
+def _verrouiller(flux) -> bool:
+    """Pose sans attendre un verrou exclusif du système sur le fichier ouvert ; rend False s'il
+    est déjà tenu, par un autre processus ou par une autre ouverture du même processus.
+
+    Sous Windows, `msvcrt.locking` verrouille le premier octet ; ailleurs, `fcntl.flock`. Le
+    système relâche l'un et l'autre quand le fichier est fermé ou que le processus meurt, même
+    tué : aucun numéro de processus n'est écrit ni relu.
+    """
+    try:
+        if os.name == "nt":
+            import msvcrt
+
+            flux.seek(0)
+            msvcrt.locking(flux.fileno(), msvcrt.LK_NBLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(flux.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        return False
+    return True
+
+
+def _deverrouiller(flux) -> None:
+    """Relâche le verrou de `_verrouiller` ; la fermeture du fichier le relâcherait aussi."""
+    if os.name == "nt":
+        import msvcrt
+
+        flux.seek(0)
+        msvcrt.locking(flux.fileno(), msvcrt.LK_UNLCK, 1)
+    else:
+        import fcntl
+
+        fcntl.flock(flux.fileno(), fcntl.LOCK_UN)
+
+
+class VerrouDepot:
+    """Le verrou d'un dépôt : un verrou de fichier du système sur `.atelier/verrou`.
+
+    Tenu par l'Atelier qui a ouvert le projet (`atelier.verrou_depot`) tant qu'il vit ; le
+    système le relâche à la mort du processus. Le fichier n'est pas hérité par les agents
+    lancés (Python ouvre ses fichiers non héritables), et il reste en place : seul le verrou
+    compte, jamais l'existence du fichier.
+    """
+
+    def __init__(self, depot):
+        self.depot = Path(depot)
+        self.chemin = self.depot / VERROU_DEPOT
+        self._flux = None
+
+    @property
+    def tenu(self) -> bool:
+        """Dit si ce verrou-ci est tenu, par cet objet."""
+        return self._flux is not None and not self._flux.closed
+
+    def prendre(self) -> bool:
+        """Prend le verrou sans attendre ; rend False, sans rien changer, s'il est déjà tenu."""
+        if self.tenu:
+            return True
+        self.chemin.parent.mkdir(parents=True, exist_ok=True)
+        flux = open(self.chemin, "a+b")  # noqa: SIM115 : gardé ouvert tant que le verrou est tenu
+        if not _verrouiller(flux):
+            flux.close()
+            return False
+        self._flux = flux
+        return True
+
+    def relacher(self) -> None:
+        """Relâche le verrou s'il est tenu ; sans effet sinon."""
+        flux, self._flux = self._flux, None
+        if flux is None:
+            return
+        with suppress(OSError):
+            _deverrouiller(flux)
+        flux.close()
+
+    def exiger(self) -> VerrouDepot:
+        """Prend le verrou et se rend ; lève `DepotOccupe`, en clair, s'il est déjà tenu."""
+        if not self.prendre():
+            raise DepotOccupe(DEPOT_OCCUPE.format(nom=self.depot.name, dossier=self.depot))
+        return self
+
+    def __enter__(self) -> VerrouDepot:
+        return self.exiger()
+
+    def __exit__(self, *erreur) -> None:
+        self.relacher()
+
+
+def prendre_le_depot(depot) -> VerrouDepot:
+    """Prend le verrou du dépôt et le rend ; lève `DepotOccupe` si un autre Atelier le tient."""
+    return VerrouDepot(depot).exiger()
+
+
+def depot_verrouille(depot) -> bool:
+    """Dit si un Atelier, celui-ci compris, tient le verrou du dépôt : sert à tout code qui doit
+    le savoir sans le prendre. Ne crée rien dans un dossier qui n'a pas de fichier de verrou."""
+    essai = VerrouDepot(depot)
+    if not essai.chemin.exists():
+        return False
+    if essai.prendre():
+        essai.relacher()
+        return False
+    return True
+
+
+def port_pris(serveur) -> bool:
+    """Dit si `serveur` tient son port : sa prise est ouverte et n'écoute que 127.0.0.1."""
+    prise = getattr(serveur, "socket", None)
+    try:
+        return prise is not None and prise.fileno() >= 0 and prise.getsockname()[0] == "127.0.0.1"
+    except OSError:
+        return False
+
+
+def phrase_de_reprise(identifiants: list[str], delai_s: float) -> str:
+    """L'annonce de la reprise seule : combien de tâches repartent, lesquelles, et quand."""
+    nombre = len(identifiants)
+    sujet = f"{nombre} tâche" if nombre == 1 else f"{nombre} tâches"
+    verbe = "repart seule" if nombre == 1 else "repartent seules"
+    secondes = round(delai_s)
+    quand = "tout de suite" if secondes <= 0 else f"dans {secondes} seconde"
+    quand += "s" if secondes > 1 else ""
+    return (
+        f"L'Atelier s'était arrêté pendant le chantier : {sujet} ({', '.join(identifiants)}) "
+        f"{verbe} {quand}."
+    )
+
+
+def _attendre_le_delai(delai_s: float, annulee: threading.Event) -> bool:
+    """L'attente de la reprise : rend vrai si elle a été annulée avant la fin du délai."""
+    return annulee.wait(delai_s)
+
 
 class Atelier:
     """Relie un dépôt, un chantier, le moteur et le tableau de bord."""
@@ -812,6 +959,126 @@ class Atelier:
         if not self.en_marche():
             self.fil = threading.Thread(target=self.moteur.executer, daemon=True)
             self.fil.start()
+
+    # --- la reprise seule après un arrêt de l'Atelier ----------------------------
+
+    verrou_depot: VerrouDepot | None = None  # posé par la fabrique de « servir » (avec_annonce)
+    fil_reprise: threading.Thread | None = None  # le fil qui attend le délai, puis relance
+    _reprise = ""  # "", "attente", "partie" ou "annulee" ; changé sous `moteur.verrou`
+    _reprise_annulee: threading.Event | None = None
+
+    def reprendre_apres_arret(self, serveur, attendre=None) -> list[str]:
+        """Relance seul, après une annonce et un délai, les tâches qu'un arrêt a interrompues.
+
+        Rien ne part sauf si tout ceci est vrai : un vrai chantier (pas la démonstration),
+        `reprise_auto` au profil, le contrat validé, le port pris par `serveur` (`port_pris`),
+        le verrou du dépôt tenu par cet Atelier (`verrou_depot`), et au moins une tâche qui
+        attend sa reprise (`Moteur.taches_interrompues`). Sinon rien n'est écrit : ni annonce
+        ni délai. Une seule reprise par Atelier : un second appel ne fait rien.
+
+        L'annonce va au fil, puis un fil d'arrière-plan (`fil_reprise`) attend
+        `reprise_apres_arret_s` : `attendre(delai_s, annulee)` rend vrai si la reprise a été
+        annulée entre-temps (par défaut `annulee.wait(delai_s)` ; un test en injecte un qui
+        n'attend pas). Rend les identifiants annoncés, [] si rien ne repart.
+        """
+        with self.moteur.verrou:
+            if self._reprise or not self._reprise_permise(serveur):
+                return []
+            identifiants = self.moteur.taches_interrompues()
+            if not identifiants:
+                return []
+            delai_s = self.moteur.delai_de_reprise()
+            self._reprise, self._reprise_annulee = "attente", threading.Event()
+            self.moteur.chantier.noter(phrase_de_reprise(identifiants, delai_s))
+        self._sauver()
+        self.fil_reprise = threading.Thread(
+            target=self._relancer_apres_delai,
+            args=(serveur, delai_s, attendre or _attendre_le_delai),
+            name="atelier-reprise",
+            daemon=True,
+        )
+        self.fil_reprise.start()
+        return identifiants
+
+    def _reprise_permise(self, serveur) -> bool:
+        """Sous le verrou : les conditions de la reprise seule, hors des tâches à reprendre."""
+        verrou = self.verrou_depot
+        return (
+            self.mode != "démonstration"
+            and self.moteur.reprise_auto()
+            and self.moteur.chantier.contrat.valide
+            and port_pris(serveur)
+            and verrou is not None
+            and verrou.tenu
+        )
+
+    def _relancer_apres_delai(self, serveur, delai_s: float, attendre) -> None:
+        """Le fil de la reprise : attend le délai, puis relance, sauf annulation ou erreur.
+
+        Les conditions sont relues à la fin du délai, sous le verrou du moteur, avec la
+        relance : une annulation arrivée avant passe, une annulation arrivée après ne trouve
+        plus rien qui attende. Sur une erreur, rien ne part seul.
+        """
+        try:
+            if attendre(delai_s, self._reprise_annulee):
+                self.annuler_reprise()  # sans effet si elle l'est déjà : le fil l'a dit
+                return
+            with self.moteur.verrou:
+                if self._reprise != "attente":
+                    return
+                self._reprise = "partie"
+                phrase = self._relancer(serveur)
+                if phrase:
+                    self.moteur.chantier.noter(phrase)
+            if phrase:
+                self._sauver()
+        except Exception as erreur:  # le fil de la reprise ne tombe pas sans le dire
+            self._reprise_en_echec(erreur)
+
+    def _relancer(self, serveur) -> str:
+        """Sous le verrou, à la fin du délai : relance le moteur s'il le faut ; rend la phrase du
+        fil, "" s'il n'y a rien à dire (plus rien n'attend, ou l'Atelier se ferme)."""
+        identifiants = self.moteur.taches_interrompues()
+        if not identifiants or not self._reprise_permise(serveur):
+            return ""
+        liste = ", ".join(identifiants)
+        if self.en_marche():  # un clic pendant le délai l'a déjà lancé : pas de second départ
+            return f"Le chantier tourne déjà : les tâches attendues ({liste}) repartent avec lui."
+        self.lancer()
+        return f"Reprise après l'arrêt : je relance le chantier ({liste})."
+
+    def _reprise_en_echec(self, erreur: Exception) -> None:
+        """Une erreur dans le fil de la reprise : le fil le dit ; si rien n'est encore parti, les
+        tâches qui attendaient reviennent à la personne."""
+        detail = " ".join(f"{type(erreur).__name__} : {erreur}".split())[:300]
+        with suppress(Exception), self.moteur.verrou:
+            partie = self._reprise == "partie"
+            self._reprise = "partie" if partie else "annulee"
+            suite = "" if partie else " Rien n'est reparti seul."
+            phrase = f"La reprise après l'arrêt a rencontré une erreur ({detail}).{suite}"
+            self.moteur.chantier.noter(phrase)
+            if not partie:
+                self.moteur.annuler_reprise()
+        with suppress(Exception):
+            self._sauver()
+
+    def annuler_reprise(self) -> dict:
+        """« Arrêter » pendant le délai de la reprise : rien ne part, le fil le dit, et les tâches
+        qui l'attendaient reviennent à la personne, travail gardé (`Moteur.annuler_reprise`).
+
+        Rend {"fait", "phrase"}, comme `arreter`. Sans reprise en attente, ne change rien.
+        """
+        with self.moteur.verrou:
+            if self._reprise != "attente":
+                phrase = "Aucune reprise n'attend son départ : il n'y a rien à annuler."
+                return {"fait": False, "phrase": phrase}
+            self._reprise = "annulee"
+            self._reprise_annulee.set()
+            phrase = "Reprise annulée : aucune tâche n'est repartie seule."
+            self.moteur.chantier.noter(phrase)
+            self.moteur.annuler_reprise()
+        self._sauver()
+        return {"fait": True, "phrase": phrase}
 
     def valider_contrat(self) -> None:
         with self.moteur.verrou:

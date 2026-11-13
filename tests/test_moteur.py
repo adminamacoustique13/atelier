@@ -851,7 +851,7 @@ def test_un_arret_avant_le_depart_de_l_ouvrier_est_trace_sous_le_verrou_avec_son
 
 def test_une_tache_rendue_au_redemarrage_garde_le_numero_de_sa_derniere_tentative():
     t = tache("A", etat="en_cours", tentatives=2)
-    m, _ = moteur(chantier([t]))
+    Moteur(chantier([t]), AgentSimule(), ControlesSimules(), {"reprise_auto": False})
     assert t.etat == "revenu"
     assert [(e["tentative"], e["issue"]) for e in t.historique] == [(2, "panne")]
 
@@ -1525,7 +1525,7 @@ def test_apres_un_redemarrage_en_pleine_reprise_la_tache_repart_d_une_copie_prop
     t = relu.tache("A")
     assert t.etat == "en_cours" and traces(t) == [(1, "bacle", False)]
     neuf, controles = AgentSimule(perimetres={"A": ["a.py"]}), ControlesComptes()
-    m = Moteur(relu, neuf, controles)  # le redémarrage : la tâche revient à la personne
+    m = Moteur(relu, neuf, controles, {"reprise_auto": False})  # la tâche revient à la personne
     assert t.etat == "revenu" and traces(t)[-1] == (1, "panne", False)
     assert neuf.appels == []  # rien n'est relancé seul
     m.repondre(relu.demandes[-1]["id"], RELANCER_TEL)

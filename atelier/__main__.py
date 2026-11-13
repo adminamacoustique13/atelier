@@ -16,10 +16,10 @@ from atelier.agents import AgentClaude, AgentSimule
 from atelier.controles import ControlesSimules
 from atelier.guichet import Guichet
 from atelier.mise_a_jour import MiseAJour, MiseAJourSimulee
-from atelier.modele import Chantier, Contrat
+from atelier.modele import Chantier, Contrat, ProjetImpossible
 from atelier.moteur import RELANCER, planifier
 from atelier.projets import Projets, creer_depot, lire_profil, ouvrir_depot
-from atelier.serveur import PAGE, POLICES, Atelier, SuiviMiseAJour, creer_serveur
+from atelier.serveur import PAGE, POLICES, Atelier, SuiviMiseAJour, creer_serveur, prendre_le_depot
 
 OBJECTIF_DEMO = "Moteur de calcul : formules de la norme, validées sur les cas de référence."
 
@@ -121,12 +121,36 @@ def commande_planifier(arguments) -> None:
     print(f"{len(taches)} tâches proposées. Lance « servir » pour relire et valider le contrat.")
 
 
-def avec_annonce(fabrique):
-    """Enveloppe une fabrique de projets : chaque projet ouvert annonce sa source de connexion."""
+class Lancement:
+    """Ce que sait « servir » de son serveur : None tant que son port n'est pas pris."""
 
-    def fabriquer(*arguments) -> Atelier:
-        atelier = fabrique(*arguments)
+    serveur = None
+
+
+LANCEMENT = Lancement()
+
+
+def avec_annonce(fabrique):
+    """Enveloppe une fabrique de projets : chaque projet ouvert annonce sa source de connexion.
+
+    Le dépôt est d'abord verrouillé (`prendre_le_depot`), avant que son état ne soit relu ou
+    écrit : si un autre Atelier le tient, le projet n'est pas ouvert, rien n'est écrit et
+    l'erreur (`DepotOccupe`) le dit en clair. Le verrou reste à l'Atelier ouvert
+    (`verrou_depot`). Si le serveur de « servir » a déjà pris son port, le projet ouvert reprend
+    seul le chantier qu'un arrêt a interrompu (`Atelier.reprendre_apres_arret`).
+    """
+
+    def fabriquer(dossier, *arguments) -> Atelier:
+        verrou = prendre_le_depot(dossier)
+        try:
+            atelier = fabrique(dossier, *arguments)
+        except BaseException:
+            verrou.relacher()
+            raise
+        atelier.verrou_depot = verrou
         atelier.annoncer_connexion()
+        if LANCEMENT.serveur is not None:
+            atelier.reprendre_apres_arret(LANCEMENT.serveur)
         return atelier
 
     return fabriquer
@@ -155,15 +179,32 @@ def arreter_le_processus() -> None:
 
 
 def commande_servir(arguments) -> None:
-    projets, racine = monter_projets(arguments)
+    """Ouvre les projets (chacun verrouillé), prend le port, puis seulement reprend les chantiers
+    qu'un arrêt a interrompus : un second Atelier sur le même dépôt s'arrête avant, en clair."""
+    try:
+        projets, racine = monter_projets(arguments)
+    except ProjetImpossible as erreur:  # un dépôt déjà tenu par un autre Atelier, par exemple
+        raise SystemExit(f"Atelier ne peut pas démarrer : {erreur}") from erreur
     # La mise à jour vise le dossier d'Atelier lui-même (celui qui contient le paquet), jamais
     # le dépôt d'un projet servi.
     suivi = SuiviMiseAJour(MiseAJour(Path(__file__).resolve().parent.parent), arreter_le_processus)
     suivi.demarrer()
-    serveur = creer_serveur(projets, arguments.port, suivi)
+    try:
+        serveur = creer_serveur(projets, arguments.port, suivi)
+    except OSError as erreur:  # le port est déjà pris : rien ne repart, rien n'est relancé
+        raise SystemExit(
+            f"Atelier ne peut pas démarrer : le port {arguments.port} n'a pas pu être pris "
+            f"({erreur.strerror or erreur}). Un autre Atelier tourne peut-être déjà."
+        ) from erreur
     print(f"Tableau de bord : http://127.0.0.1:{arguments.port}")
     print(f"Les nouveaux projets seront créés dans : {racine}")
-    serveur.serve_forever()
+    LANCEMENT.serveur = serveur
+    try:
+        for atelier in list(projets.ateliers.values()):
+            atelier.reprendre_apres_arret(serveur)
+        serveur.serve_forever()
+    finally:
+        LANCEMENT.serveur = None
 
 
 def _attendre_une_autorisation(atelier: Atelier, delai_s: float = 10.0) -> str:

@@ -59,6 +59,24 @@ MOTIF_REDEMARRAGE = (
     "l'agent avait fait sans l'enregistrer est perdu."
 )
 DETAIL_REDEMARRAGE = "Interrompue par un arrêt de l'Atelier."
+# La reprise seule après un arrêt (décision du 2026-11-13, qui remplace la règle ci-dessus sauf
+# avec `reprise_auto: false` au profil) : au chargement, une tâche laissée active redevient « à
+# lancer » avec une entrée d'issue `interrompue`, et le serveur la relance après une annonce et
+# un délai (`reprise_apres_arret_s`). Au-delà de `INTERRUPTIONS_MAX` interruptions d'une même
+# tâche, la suivante la rend à la personne : un Atelier qui tomberait en boucle ne la relance pas
+# sans fin.
+INTERROMPUE = "interrompue"
+INTERRUPTIONS_MAX = 3
+REPRISE_APRES_ARRET_S = 30
+DETAIL_INTERROMPUE = "Interrompue par un arrêt de l'Atelier ; elle repart seule."
+MOTIF_TROP_D_ARRETS = (
+    f"l'Atelier s'est arrêté {INTERRUPTIONS_MAX + 1} fois pendant qu'elle travaillait. Je ne la "
+    "relance plus seule, pour ne pas tourner en boucle : dis-moi si je la relance."
+)
+MOTIF_REPRISE_ANNULEE = (
+    "tu as arrêté sa reprise après l'arrêt de l'Atelier : elle n'est pas repartie et attend ta "
+    "décision."
+)
 RELANCER, ABANDONNER = "Relancer un cran plus haut", "Abandonner cette tâche"
 RELANCER_TEL = "Relancer au même niveau"
 # Le motif d'une tâche que la personne responsable a arrêtée : ni seconde chance, ni montée.
@@ -558,17 +576,89 @@ class Moteur:
         self.chantier.noter(f"J'ai besoin de toi : {raison}", tache.id)
 
     def _reprendre(self) -> None:
-        """Au chargement : rend les tâches qu'un arrêt de l'Atelier a laissées actives.
+        """Au chargement : remet en ordre les tâches qu'un arrêt de l'Atelier a laissées actives.
 
         Un moteur neuf n'a encore lancé aucun agent : une tâche « en cours » ou « en
         vérification » vient donc d'un état relu, et plus rien ne travaille pour elle. Sans cela
         elle ne repartirait jamais, et retiendrait celles qui dépendent d'elle ou partagent son
-        périmètre. Rien n'est sauvé ici : celui qui monte le moteur sauve ensuite.
+        périmètre. Par défaut elle redevient « à lancer » (`_interrompre`) ; avec
+        `reprise_auto: false` au profil, elle est rendue à la personne, comme avant le
+        2026-11-13. Rien n'est lancé ni sauvé ici : celui qui monte le moteur sauve ensuite, et
+        seul le serveur relance (`Atelier.reprendre_apres_arret`).
         """
+        auto = self.reprise_auto()
         with self.verrou:
             for tache in self.chantier.taches:
-                if tache.etat in ACTIFS:
+                if tache.etat not in ACTIFS:
+                    continue
+                if auto:
+                    self._interrompre(tache)
+                else:
                     self._demander(tache, MOTIF_REDEMARRAGE, DETAIL_REDEMARRAGE)
+
+    def _interrompre(self, tache: Tache) -> None:
+        """Sous le verrou, au chargement : une tâche active redevient « à lancer ».
+
+        Son historique reçoit une entrée d'issue `interrompue`, au numéro de la tentative
+        coupée. Ce numéro est rendu (la tentative ne compte pas), sauf si la tâche était en
+        vérification avec une copie gardée : l'ouvrier avait rendu son travail, l'entrée porte
+        `pendant: "verification"` et seul le jugement reste à refaire. Après `INTERRUPTIONS_MAX`
+        interruptions, la suivante rend la tâche à la personne, avec la raison en clair.
+        """
+        if self.interruptions(tache) >= INTERRUPTIONS_MAX:
+            self._demander(tache, MOTIF_TROP_D_ARRETS, DETAIL_REDEMARRAGE)
+            return
+        rejugee = tache.etat == "en_verification" and bool(tache.copie)
+        self._tracer(tache, INTERROMPUE, DETAIL_INTERROMPUE)
+        if rejugee:
+            tache.historique[-1]["pendant"] = "verification"
+        elif tache.tentatives > 0:
+            tache.tentatives -= 1
+        tache.etat = "a_lancer"
+
+    @staticmethod
+    def interruptions(tache: Tache) -> int:
+        """Le nombre d'entrées `interrompue` de l'historique de la tâche : ses arrêts subis."""
+        return sum(1 for entree in tache.historique if entree.get("issue") == INTERROMPUE)
+
+    def reprise_auto(self) -> bool:
+        """Dit si une tâche interrompue repart seule : vrai sauf `reprise_auto: false` au profil
+        (seul le booléen faux compte ; toute autre valeur vaut vrai)."""
+        return self.profil.get("reprise_auto") is not False
+
+    def delai_de_reprise(self) -> float:
+        """Les secondes entre l'annonce de la reprise et la relance : `reprise_apres_arret_s` du
+        profil, un nombre positif ou nul ; absent ou mal formé, `REPRISE_APRES_ARRET_S`."""
+        valeur = self.profil.get("reprise_apres_arret_s", REPRISE_APRES_ARRET_S)
+        nombre = isinstance(valeur, (int, float)) and not isinstance(valeur, bool)
+        if not nombre or not 0 <= valeur < float("inf"):  # NaN échoue aussi la comparaison
+            return float(REPRISE_APRES_ARRET_S)
+        return float(valeur)
+
+    def taches_interrompues(self) -> list[str]:
+        """Les tâches qui attendent leur reprise seule : « à lancer », et dont la dernière entrée
+        d'historique est `interrompue`. Relu de l'état, cela survit à un nouvel arrêt pendant
+        le délai ; une tâche revenue, bloquée ou arrêtée par la personne n'en est jamais."""
+        with self.verrou:
+            return [
+                t.id
+                for t in self.chantier.taches
+                if t.etat == "a_lancer"
+                and t.historique
+                and t.historique[-1].get("issue") == INTERROMPUE
+            ]
+
+    def annuler_reprise(self) -> list[str]:
+        """Rend à la personne les tâches qui attendent leur reprise seule, sans rien lancer.
+
+        Aucune entrée n'est ajoutée : la dernière reste `interrompue`, et le travail gardé l'est
+        encore quand la personne relance. Rend leurs identifiants.
+        """
+        with self.verrou:
+            identifiants = self.taches_interrompues()
+            for identifiant in identifiants:
+                self._rendre(self.chantier.tache(identifiant), MOTIF_REPRISE_ANNULEE)
+        return identifiants
 
     def _panne(self, tache: Tache, erreur: Exception) -> None:
         """Rend à la personne responsable une tâche coupée par une erreur de l'Atelier.

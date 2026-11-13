@@ -83,7 +83,7 @@ def test_au_chargement_les_taches_actives_reviennent_a_la_personne():
     )
     relu = Chantier.depuis_dict(json.loads(json.dumps(c.en_dict())))  # comme relu sur le disque
 
-    moteur = Moteur(relu, AgentSimule(), ControlesSimules())
+    moteur = Moteur(relu, AgentSimule(), ControlesSimules(), {"reprise_auto": False})
 
     etats = {t.id: t.etat for t in relu.taches}
     assert etats == {"A": "revenu", "B": "revenu", "C": "a_lancer", "D": "verifie"}
@@ -100,7 +100,7 @@ def test_au_chargement_les_taches_actives_reviennent_a_la_personne():
 
 def test_un_second_chargement_ne_redemande_rien():
     c = chantier([tache("A", etat="en_cours", tentatives=1)])
-    Moteur(c, AgentSimule(), ControlesSimules())
+    Moteur(c, AgentSimule(), ControlesSimules(), {"reprise_auto": False})
     Moteur(c, AgentSimule(), ControlesSimules())
     assert len(c.demandes) == 1
 
@@ -160,6 +160,8 @@ def test_un_projet_rouvert_apres_un_arret_rend_sa_tache_et_le_sauve(tmp_path):
     depot_git(tmp_path)
     interrompu = chantier([tache("A", etat="en_cours", tentatives=1), tache("B", depend_de=["A"])])
     interrompu.sauver(tmp_path / ".atelier" / "etat.json")
+    (tmp_path / "chantier").mkdir()
+    (tmp_path / "chantier" / "profil.json").write_text('{"reprise_auto": false}', "utf-8")
 
     atelier = ouvrir_depot(tmp_path)
 
