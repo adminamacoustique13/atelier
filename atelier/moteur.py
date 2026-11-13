@@ -132,6 +132,47 @@ NON_REFUS = ("valide", ARRETEE, PANNE)  # les issues d'historique qui ne sont pa
 # La boucle d'`executer` et les tâches qui attendent une place, un jeton ou la fin d'une
 # suspension dorment au plus ce temps ; un changement les réveille aussitôt (`_signaler`).
 PAS_VEILLE_S = 5.0
+# Une panne d'agent (`Resultat.nature` « panne » : réseau, service) ne dit rien du travail : la
+# tâche patiente, de plus en plus longtemps, puis repart seule au même niveau, sans compter ni
+# tentative, ni agent, ni refus (`Moteur._apres_une_panne`). Une panne de plus après la dernière
+# pause compte comme une erreur d'agent ordinaire. Réglable par le profil (`pauses_panne_s`).
+PAUSES_PANNE_S = (60, 300, 900, 1800, 3600)
+NATURE_PANNE, NATURE_CONNEXION = "panne", "connexion"
+# L'issue d'historique d'une passe qu'une panne d'agent a coupée : ni un essai, ni un refus ; la
+# passe suivante reprend son numéro de tentative.
+ATTENTE_PANNE = "attente_panne"
+NON_REFUS += (ATTENTE_PANNE,)
+# Une connexion à Claude perdue ne revient pas seule : seule la personne peut se reconnecter. Le
+# fil le lui dit une fois, avec le geste, et les lancements sont réessayés toutes les cinq minutes
+# (`places.PAUSE_CONNEXION_S`).
+CONNEXION_PERDUE = (
+    "Ta connexion à Claude a expiré ou manque : aucun agent ne peut travailler tant que tu ne "
+    "t'es pas reconnecté. Ouvre un terminal (PowerShell sous Windows), tape « claude », puis "
+    "« /login », et choisis ton compte avec abonnement. Je réessaie seul toutes les cinq "
+    "minutes, sans rien compter contre les tâches."
+)
+
+
+def pauses_du_profil(profil: dict) -> tuple[float, ...]:
+    """Les pauses après une panne d'agent, en secondes : celles du profil (`pauses_panne_s`),
+    une liste de nombres positifs ou nuls ; absente ou mal formée, `PAUSES_PANNE_S`. Une liste
+    vide coupe la patience : la première panne compte alors comme une erreur d'agent."""
+    lues = profil.get("pauses_panne_s") if isinstance(profil, dict) else None
+    if not isinstance(lues, (list, tuple)):
+        return PAUSES_PANNE_S
+    bonnes = all(  # ni texte, ni booléen, ni négatif, ni infini, ni « nan » (aucune comparaison)
+        isinstance(p, (int, float)) and not isinstance(p, bool) and 0 <= p < float("inf")
+        for p in lues
+    )
+    return tuple(lues) if bonnes else PAUSES_PANNE_S
+
+
+def _quand_repart(pause: float, reprise: float, heure: float) -> str:
+    """« à 14:05 (dans 5 minutes) » ; « dans un instant » sous une minute."""
+    if pause < 60:
+        return "dans un instant"
+    minutes = round(pause / 60)
+    return f"{heure_dite(reprise, heure)} (dans {minutes} minute{'s' if minutes > 1 else ''})"
 
 
 @dataclass(frozen=True)
@@ -339,6 +380,7 @@ PHASES = {
     "place": "Attend une place d'écriture",
     "jeton": "Attend qu'un agent se libère",
     "pause": "En pause : les lancements reprennent {}",
+    "panne": "Patiente après une panne de l'agent : nouvel essai {}",
 }
 # La clé de l'attente avant le départ, rangée avec les durées des phases (voir `_tracer`).
 ATTENTE = "attente"
@@ -412,6 +454,7 @@ class Moteur:
         self._reveil = threading.Condition()
         self._generation = 0
         for tache in chantier.taches:
+            tache.pannes = 0  # une série de pannes ne survit pas à un redémarrage
             if not tache.modele:
                 tache.modele, tache.effort = dosage.depart(tache.type, self.profil.get("dosage"))
         self._reprendre()
@@ -945,9 +988,9 @@ class Moteur:
 
     def _malgre_les_limites(self, tache: Tache, attendre, lancer):
         """Lance un agent dès que `attendre(tache)` rend la main ; refusé pour limite ou
-        surcharge, l'attend à nouveau (la fin de la suspension) et le relance, sans rien
-        compter. Rend le résultat du dernier lancé, ou None si l'arrêt l'a retenu (`lancer`
-        rend alors None)."""
+        surcharge, sans connexion ou en panne (`_suspendre`, qui patiente le temps de la pause),
+        l'attend à nouveau (la fin de la suspension) et le relance, sans rien compter. Rend le
+        résultat du dernier lancé, ou None si l'arrêt l'a retenu (`lancer` rend alors None)."""
         while True:
             attendre(tache)
             resultat = lancer()
@@ -955,14 +998,27 @@ class Moteur:
                 return resultat
 
     def _suspendre(self, tache: Tache, resultat) -> bool:
-        """Dit si l'agent a été refusé pour limite ou surcharge ; si oui, suspend les lancements
-        visés (`Places.refus`) et le retire du compte des agents lancés.
+        """Dit si l'agent a été arrêté par ce qui ne dit rien du travail ; si oui, le retire du
+        compte des agents lancés, et l'agent repartira au même niveau.
 
-        Rien d'autre n'est compté : ni tentative, ni refus, ni montée, ni blocage. L'agent
-        repartira à la fin de la suspension, au même niveau. Une surcharge de Claude arrête tous
-        les lancements deux minutes (`Places.surcharge`). Le fil le dit une fois par suspension.
+        Refusé pour limite ou surcharge : les lancements visés sont suspendus (`Places.refus`,
+        `Places.surcharge`, deux minutes pour tous). Sans connexion à Claude (`nature`
+        « connexion ») : tous les lancements sont suspendus cinq minutes (`_sans_connexion`). En
+        panne (`nature` « panne ») : la tâche seule patiente avant de rendre la main
+        (`_apres_une_panne`), tant qu'il reste des pauses. Rien d'autre n'est compté : ni
+        tentative, ni refus, ni montée, ni blocage. Le fil le dit une fois par suspension, et
+        l'ouvrier resté ouvert est fermé (`_liberer`). Seul un résultat qui sera jugé (rendu
+        False, hors panne) met fin à la série de pannes de la tâche (`Tache.pannes`) : une
+        suspension ne la coupe pas, pour que la patience reste bornée. Seule `nature` est lue,
+        jamais le texte de l'erreur.
         """
+        nature = getattr(resultat, "nature", "") or ""
+        if not resultat.ok and nature == NATURE_PANNE:
+            return self._apres_une_panne(tache, resultat)
+        if not resultat.ok and nature == NATURE_CONNEXION:
+            return self._sans_connexion(tache)
         if resultat.erreur not in (LIMITE_ATTEINTE, SURCHARGE):
+            self._fin_des_pannes(tache, resultat)
             return False
         heure = self.heure()
         with self.verrou:
@@ -973,6 +1029,7 @@ class Moteur:
                 limite, fin = resultat.type_limite, resultat.fin_limite
                 suspension = self.places.refus(tache.id, limite, fin, heure)
             self._reveiller()
+        self._liberer(tache)
         if suspension["nouvelle"]:
             phrase = phrase_de_suspension(suspension["portee"], suspension["reprise"], heure)
             self._noter(
@@ -981,6 +1038,95 @@ class Moteur:
                 tache,
             )
         return True
+
+    def _fin_des_pannes(self, tache: Tache, resultat) -> None:
+        """L'agent a rendu un travail qui sera jugé (réussite, ou échec qui n'est ni une panne
+        ni une suspension) : la série de pannes de la tâche est finie. Seule une vraie réussite
+        dit que la connexion à Claude marche : sa perte suivante sera de nouveau dite au fil
+        (`Places.connexion_retablie`)."""
+        with self.verrou:
+            tache.pannes = 0
+            if resultat.ok:
+                self.places.connexion_retablie()
+
+    def _apres_une_panne(self, tache: Tache, resultat) -> bool:
+        """L'agent (ouvrier, reprise ou vérificateur) est tombé en panne : la tâche patiente,
+        puis rend vrai pour que le même agent reparte, au même niveau et au même numéro.
+
+        Ni tentative, ni agent, ni refus n'est compté ; l'historique reçoit une entrée
+        `ATTENTE_PANNE`, `Tache.pannes` augmente, et la place et le jeton sont rendus pendant la
+        pause (`Places.pause`) : les autres tâches avancent. La pause suit `pauses_du_profil`.
+        Rend False, sans rien changer d'autre que le compte, quand les pauses sont épuisées : la
+        règle des erreurs d'agent s'applique. Rend False aussi, sans rien compter, si l'arrêt de
+        la tâche est déjà demandé : il l'emporte.
+        """
+        heure = self.heure()
+        with self.verrou:
+            if tache.id in self._arretees:
+                return False
+            pauses = pauses_du_profil(self.profil)
+            rang, tache.pannes = tache.pannes, tache.pannes + 1
+            if rang >= len(pauses):
+                return False
+            pause = pauses[rang]
+            self.chantier.agents_lances -= 1
+            verificateur = tache.etat == "en_verification"
+            qui = "Le vérificateur" if verificateur else "L'ouvrier"
+            detail = f"{qui} s'est arrêté sur une panne : {str(resultat.erreur).rstrip(' .')}."
+            self._tracer(tache, ATTENTE_PANNE, detail)
+            self.places.pause(tache.id, heure + pause, heure)
+            self._reveiller()
+        self._liberer(tache)
+        quand = _quand_repart(pause, heure + pause, heure)
+        suite = (
+            f"seul le vérificateur repart {quand}, et le travail de l'ouvrier reste tel quel"
+            if verificateur
+            else f"nouvel essai {quand}, au même niveau, sans compter cette tentative"
+        )
+        self._noter(f"{detail} C'est une panne, pas un refus du travail : {suite}.", tache)
+        self._patienter(tache)
+        return True
+
+    def _patienter(self, tache: Tache) -> None:
+        """Attend la fin de la pause de la tâche après une panne (`Places.en_pause`), ou son arrêt.
+
+        Pendant la pause, elle ne tient ni place ni jeton, et ne retient pas les tâches neuves ;
+        sa phase dit qu'elle patiente et jusqu'à quelle heure. Une suspension qui tombe pendant
+        ce temps s'ajoute : l'agent attend encore sa fin avant de repartir (`_prendre_place`,
+        `_attendre_jeton`).
+        """
+
+        def phrase_d_attente(heure: float) -> str:
+            fin = self.places.en_pause(tache.id, heure)
+            return PHASES["panne"].format(heure_dite(heure if fin is None else fin, heure))
+
+        self._attendre(
+            tache, lambda heure: self.places.en_pause(tache.id, heure) is None, phrase_d_attente
+        )
+
+    def _sans_connexion(self, tache: Tache) -> bool:
+        """La connexion à Claude est perdue : tous les lancements sont suspendus cinq minutes
+        (`Places.connexion`), puis réessayés ; rien n'est compté contre la tâche. Le fil dit une
+        seule fois, pour toutes les tâches et tous les essais, la perte et le geste qui la
+        répare (`CONNEXION_PERDUE`). Rend True."""
+        heure = self.heure()
+        with self.verrou:
+            self.chantier.agents_lances -= 1
+            suspension = self.places.connexion(tache.id, heure)
+            self._reveiller()
+        self._liberer(tache)
+        if suspension["premiere"]:
+            self._noter(CONNEXION_PERDUE)
+        return True
+
+    def _liberer(self, tache: Tache) -> None:
+        """Hors du verrou, à chaque suspension (panne, connexion, limite, surcharge) : demande à
+        l'agent de fermer l'ouvrier resté ouvert pour la tâche (`agent.liberer`). Un agent qui
+        n'a pas cette méthode, ou qui lève, ne change rien."""
+        liberer = getattr(self.agent, "liberer", None)
+        if callable(liberer):
+            with suppress(Exception):
+                liberer(tache.id)
 
     def _conclure(self) -> None:
         taches = self.chantier.taches
@@ -1165,8 +1311,13 @@ class Moteur:
         return replace(refus, detail=detail, complet=conflits_en_clair(conflits), reprenable=True)
 
     def _passes_du_depart(self, tache: Tache) -> list[dict]:
-        """Sous le verrou : les entrées d'historique du départ en cours, reprises comprises."""
-        return [e for e in tache.historique if e.get("tentative") == tache.tentatives]
+        """Sous le verrou : les entrées d'historique du départ en cours, reprises comprises. Une
+        passe coupée par une panne d'agent (`ATTENTE_PANNE`) est neutre : elle n'y entre pas."""
+        return [
+            e
+            for e in tache.historique
+            if e.get("tentative") == tache.tentatives and e.get("issue") != ATTENTE_PANNE
+        ]
 
     def _repris_hors_fusion(self, tache: Tache) -> bool:
         """Dit si ce départ a eu une reprise après un refus autre qu'un conflit de fusion : elle
@@ -1563,8 +1714,13 @@ class Moteur:
 
     def _fenetre(self, tache: Tache) -> list[dict]:
         """Sous le verrou : les entrées d'historique depuis la dernière relance décidée (par la
-        personne, ou seule un cran plus haut). Un refus d'avant ne compte pas contre la suite."""
-        return [e for e in tache.historique if (e.get("tentative") or 0) > tache.rallonge]
+        personne, ou seule un cran plus haut). Un refus d'avant ne compte pas contre la suite.
+        Une passe coupée par une panne d'agent (`ATTENTE_PANNE`) est neutre : elle n'y entre pas."""
+        return [
+            e
+            for e in tache.historique
+            if (e.get("tentative") or 0) > tache.rallonge and e.get("issue") != ATTENTE_PANNE
+        ]
 
     def _cause_de_blocage(self, tache: Tache, jugement: Jugement) -> str:
         """Sous le verrou, la passe tracée : la cause qui bloque la tâche, ou "".
@@ -1728,6 +1884,7 @@ class Moteur:
                 if suivant and choix == RELANCER:
                     tache.modele, tache.effort = suivant
                 tache.rallonge = tache.tentatives
+                tache.pannes = 0  # la patience après une panne repart d'une minute
                 tache.etat = "a_lancer"
                 self._relancee_a[tache.id] = self.horloge()  # la mesure de l'attente seulement
             else:

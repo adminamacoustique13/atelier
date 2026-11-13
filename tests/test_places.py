@@ -732,3 +732,269 @@ def test_au_hasard_aucune_suite_conforme_au_contrat_ne_finit_en_interblocage():
         graine += 1
     assert not trouves, trouves[:3]
     assert graine >= 300  # assez de suites jouées pour que l'essai dise quelque chose
+
+
+# --- les pannes d'agent : la tâche patiente seule (M6) ---------------------------------------
+
+
+def test_une_pause_rend_place_et_jeton_et_ne_retient_que_sa_tache():
+    places = Places(paralleles=2, agents_max=2)
+    assert lancer(places, "AB") == ["A", "B"]
+    issue = places.pause("A", T0 + MIN, T0)
+    assert issue == {"reprise": T0 + MIN, "servis": []}
+    assert (places.en_ecriture(), places.agents_en_marche()) == (1, 1)
+    assert places.partir("C", "sonnet", T0)  # la place de A va à une autre tâche
+    assert places.suspension("sonnet", T0) is None  # ce n'est pas une limite
+    assert places.en_pause("A", T0) == T0 + MIN and places.en_pause("C", T0) is None
+    places.finir("C", T0)
+    assert not places.peut_partir("sonnet", T0 + MIN - 1, "A")
+    assert not places.partir("A", "sonnet", T0 + MIN - 1)
+    assert places.partir("A", "sonnet", T0 + MIN)  # la pause est finie : elle repart
+    assert places.en_pause("A", T0 + MIN) is None
+
+
+def test_un_verificateur_en_pause_sort_de_la_file_et_n_est_servi_qu_apres_sa_pause():
+    places = Places(paralleles=2, agents_max=1)
+    lancer(places, "A")
+    assert places.en_verification("A", "opus", T0)  # le jeton de l'ouvrier passe au vérificateur
+    issue = places.pause("A", T0 + MIN, T0)
+    assert issue["reprise"] == T0 + MIN and places.agents_en_marche() == 0
+    assert places.etat(T0)["verificateurs_en_attente"] == 0
+    assert places.partir("B", "sonnet", T0)  # le jeton rendu va à un ouvrier
+    places.rendre_jeton("B", T0)
+    assert places.en_verification("A", "opus", T0 + 1) is False  # encore en pause : il attend
+    assert places.servir(T0 + MIN - 1) == []
+    assert places.peut_partir("sonnet", T0 + MIN - 1)  # en pause, il ne retient pas les ouvriers
+    assert not places.peut_partir("sonnet", T0 + MIN)  # sa pause finie, son tour vient d'abord
+    assert places.servir(T0 + MIN) == ["A"]
+
+
+def test_une_pause_mal_formee_ou_deja_passee_ne_retient_pas_la_tache_mais_rend_sa_place():
+    places = Places(paralleles=1)
+    for reprise in (None, "demain", math.nan, math.inf, T0, T0 - 1, True):
+        lancer(places, "A")
+        assert places.pause("A", reprise, T0)["reprise"] is None
+        assert places.en_ecriture() == 0 and places.en_pause("A", T0) is None
+        assert places.peut_partir("sonnet", T0, "A")
+
+
+def test_finir_efface_la_pause_et_une_tache_inconnue_peut_patienter():
+    places = Places()
+    assert places.pause("Z", T0 + MIN, T0)["servis"] == []  # jamais partie : rien à rendre
+    assert places.en_pause("Z", T0) == T0 + MIN
+    places.finir("Z", T0)
+    assert places.en_pause("Z", T0) is None and places.prochaine_echeance(T0) is None
+
+
+def test_une_limite_pendant_une_pause_s_y_ajoute_et_la_plus_tardive_l_emporte():
+    places = Places()
+    places.pause("A", T0 + 5 * MIN, T0)
+    places.refus("B", "five_hour", None, T0 + MIN)  # 15 minutes, sans heure
+    assert places.suspension("sonnet", T0 + MIN, "A") == T0 + 16 * MIN
+    assert places.suspension("sonnet", T0 + MIN) == T0 + 16 * MIN
+    assert not places.peut_partir("sonnet", T0 + 6 * MIN, "A")  # la pause est finie, pas la limite
+    autre = Places()
+    autre.pause("A", T0 + 30 * MIN, T0)
+    autre.refus("B", "seven_day_opus", T0 + MIN, T0)
+    assert autre.suspension("opus", T0, "A") == T0 + 30 * MIN  # la pause est la plus tardive
+    assert autre.suspension("opus", T0) == T0 + 2 * MIN
+    assert autre.suspension("sonnet", T0) is None
+
+
+def test_la_prochaine_echeance_compte_les_pauses():
+    places = Places()
+    places.pause("A", T0 + 5 * MIN, T0)
+    places.surcharge("B", T0)
+    assert places.prochaine_echeance(T0) == T0 + 2 * MIN
+    assert places.prochaine_echeance(T0 + 2 * MIN) == T0 + 5 * MIN
+    assert places.prochaine_echeance(T0 + 5 * MIN) is None
+
+
+def test_l_etat_dit_les_pauses_et_les_oublie_a_leur_fin():
+    places = Places()
+    lancer(places, "AB")
+    places.pause("A", T0 + MIN, T0)
+    etat = places.etat(T0)
+    assert etat["pauses"] == {"A": T0 + MIN} and etat["en_ecriture"] == 1
+    attendu = "Une tâche patiente après une panne de son agent : elle repart à "
+    assert etat["phrase"].endswith(f"{attendu}{heure_dite(T0 + MIN)}.")
+    places.pause("B", T0 + 5 * MIN, T0)
+    assert places.etat(T0)["phrase"].endswith(
+        "2 tâches patientent après une panne de leur agent : la première repart à "
+        f"{heure_dite(T0 + MIN)}."
+    )
+    assert places.etat(T0 + 2 * MIN)["pauses"] == {"B": T0 + 5 * MIN}
+    fin = places.etat(T0 + 5 * MIN)
+    assert "pauses" not in fin and "panne" not in fin["phrase"]
+
+
+def test_une_connexion_perdue_suspend_tous_les_modeles_cinq_minutes():
+    places = Places()
+    lancer(places, "AB")
+    issue = places.connexion("A", T0)
+    assert (issue["portee"], issue["reprise"]) == ("connexion", T0 + 5 * MIN)
+    assert issue["nouvelle"] and issue["premiere"] and module.PAUSE_CONNEXION_S == 5 * MIN
+    assert places.en_ecriture() == 1  # l'ouvrier sans connexion rend sa place, B continue
+    for modele in ("sonnet", "opus", "haiku", "fable", ""):
+        assert places.suspension(modele, T0 + 5 * MIN - 1) == T0 + 5 * MIN
+        assert not places.peut_partir(modele, T0 + 5 * MIN - 1)
+    assert places.peut_partir("sonnet", T0 + 5 * MIN)
+    etat = places.etat(T0)
+    assert etat["suspensions"] == {"connexion": T0 + 5 * MIN} and etat["reprise"] is None
+    assert etat["phrase"].endswith(
+        "La connexion à Claude est perdue : plus aucun lancement, un nouvel essai part à "
+        f"{heure_dite(T0 + 5 * MIN)}."
+    )
+
+
+def test_une_connexion_perdue_n_est_premiere_qu_une_fois_jusqu_a_ce_qu_elle_revienne():
+    places = Places()
+    assert places.connexion_retablie() is False
+    assert places.connexion("A", T0)["premiere"]
+    deuxieme = places.connexion("B", T0 + MIN)  # une autre tâche, pendant la pause
+    assert not deuxieme["premiere"] and deuxieme["reprise"] == T0 + 6 * MIN
+    troisieme = places.connexion("A", T0 + 6 * MIN)  # le nouvel essai échoue encore
+    assert not troisieme["premiere"] and troisieme["nouvelle"]
+    assert troisieme["reprise"] == T0 + 11 * MIN
+    assert places.connexion_retablie() is True and places.connexion_retablie() is False
+    assert places.connexion("A", T0 + 20 * MIN)["premiere"]  # perdue de nouveau : à redire
+
+
+def test_un_verificateur_sans_connexion_reprend_la_tete_de_la_file():
+    places = Places(paralleles=6, agents_max=1)
+    lancer(places, "A")
+    assert places.en_verification("A", "opus", T0)
+    places.connexion("A", T0)
+    assert places.agents_en_marche() == 0 and places._attente == ["A"]
+    assert places.servir(T0 + 5 * MIN - 1) == []
+    assert places.servir(T0 + 5 * MIN) == ["A"]
+
+
+GESTES_AVEC_PANNES = (
+    lambda p, h, nom, modele, heure: p.partir(nom, modele, heure),
+    lambda p, h, nom, modele, heure: p.en_verification(nom, modele, heure),
+    lambda p, h, nom, modele, heure: p.finir(nom, heure),
+    lambda p, h, nom, modele, heure: p.rendre_jeton(nom, heure),
+    lambda p, h, nom, modele, heure: p.servir(heure),
+    lambda p, h, nom, modele, heure: p.pause(nom, heure + h.choice([0, 1, MIN, 3600]), heure),
+    lambda p, h, nom, modele, heure: p.connexion(nom, heure),
+    lambda p, h, nom, modele, heure: p.connexion_retablie(),
+    lambda p, h, nom, modele, heure: p.refus(nom, h.choice(["five_hour", None]), None, heure),
+    lambda p, h, nom, modele, heure: p.peut_partir(modele, heure, nom),
+)
+
+
+def verifier_les_pauses(places, hasard, taches, modeles, heure) -> None:
+    """Une tâche en pause ne tient ni place ni jeton, ne peut pas partir, et l'état la dit."""
+    en_pause = {t: places.en_pause(t, heure) for t in taches}
+    en_pause = {t: fin for t, fin in en_pause.items() if fin is not None}
+    assert places.etat(heure).get("pauses", {}) == en_pause
+    for nom, fin in en_pause.items():
+        suivie = places._taches.get(nom)
+        assert suivie is None or not (suivie.ecrit or suivie.jeton)
+        assert not places.peut_partir(hasard.choice(modeles), heure, nom)
+        assert places.suspension(hasard.choice(modeles), heure, nom) >= fin
+        assert heure < places.prochaine_echeance(heure) <= fin
+
+
+@pytest.mark.parametrize("graine", range(20))
+def test_au_hasard_avec_pannes_une_tache_en_pause_ne_tient_ni_place_ni_jeton(graine):
+    hasard = random.Random(graine)
+    places = Places(paralleles=hasard.randint(1, 4), agents_max=hasard.randint(1, 5))
+    taches, modeles = list("ABCDEFGH"), ["sonnet", "opus", "claude-opus-4-1", ""]
+    heure = T0
+    for _ in range(400):
+        heure += hasard.choice([0, 1, 30, MIN, 5 * MIN])
+        nom, modele = hasard.choice(taches), hasard.choice(modeles)
+        hasard.choice(GESTES_AVEC_PANNES)(places, hasard, nom, modele, heure)
+        etat = places.etat(heure)
+        assert 0 <= etat["agents_en_marche"] <= places.agents_max
+        assert 0 <= etat["en_ecriture"] <= places.paralleles
+        assert not any(places.a_son_jeton(t) for t in places._attente)
+        verifier_les_pauses(places, hasard, taches, modeles, heure)
+
+
+def avancer_avec_pannes(places, hasard, nom, phase, modele, heure, verifs) -> str:
+    """Un pas d'un moteur conforme au contrat, pannes et connexion perdue comprises.
+
+    Une fin d'agent peut être une panne (la tâche patiente : « pause_ouvrier »,
+    « pause_verificateur ») ou une connexion perdue (comme un refus pour limite). À la fin de sa
+    pause, l'ouvrier repart écrire et le vérificateur repasse en vérification. Sans `hasard`
+    (relance après les échéances), seules les pauses finies avancent.
+    """
+    if phase.startswith("pause_"):
+        if places.en_pause(nom, heure) is not None:
+            return phase
+        if phase == "pause_ouvrier":
+            return avancer(places, hasard, nom, "reprise", modele, heure)
+        verifie = places.en_verification(nom, verifs[nom], heure)
+        return "verificateur" if verifie else "attend_jeton"
+    if phase in ("ouvrier", "verificateur") and hasard is not None:
+        tirage = hasard.random()
+        if tirage < 0.12:
+            verifs[nom] = hasard.choice(MODELES_VERIFICATEURS)
+            places.pause(nom, heure + hasard.choice([0, 1, MIN, 5 * MIN, 3600]), heure)
+            return f"pause_{phase}"
+        if tirage < 0.18:
+            places.connexion(nom, heure)
+            return "prete" if phase == "ouvrier" else "attend_jeton"
+        if tirage < 0.25:
+            places.connexion_retablie()
+    return avancer(places, hasard, nom, phase, modele, heure)
+
+
+def _pause_qui_tient(places, phases) -> str:
+    """Une tâche en pause qui tient une place ou un jeton, "" s'il n'y en a pas."""
+    for nom, phase in phases.items():
+        suivie = places._taches.get(nom)
+        if phase.startswith("pause_") and suivie is not None and (suivie.ecrit or suivie.jeton):
+            return nom
+    return ""
+
+
+def _relancer_apres_les_pauses(places, phases, modeles, heure, verifs) -> bool:
+    """Après les échéances : les pauses finies avancent, puis le moteur réessaie le reste."""
+    for nom, phase in phases.items():
+        if phase.startswith("pause_"):
+            phases[nom] = avancer_avec_pannes(places, None, nom, phase, modeles[nom], heure, verifs)
+    if any(p in QUI_AVANCENT for p in phases.values()):
+        return True
+    return relancer_tout(places, phases, modeles, heure)
+
+
+def interblocage_avec_pannes(graine: int) -> str:
+    """Comme `interblocage`, avec des pannes et des connexions perdues ; une tâche en pause qui
+    tient une place ou un jeton compte aussi comme un défaut."""
+    hasard = random.Random(graine)
+    places = Places(hasard.randint(1, 2), hasard.choice([None, 1, 2, 3]))
+    phases = {f"T{i}": "prete" for i in range(hasard.randint(3, 7))}
+    modeles = {nom: hasard.choice(MODELES_OUVRIERS) for nom in phases}
+    verifs: dict[str, str] = {}
+    heure = T0
+    for _ in range(160):
+        heure += hasard.choice([0, 1, 30, MIN, 5 * MIN])
+        places.servir(heure)
+        nom = hasard.choice([n for n, p in phases.items() if p != "finie"])
+        phases[nom] = avancer_avec_pannes(
+            places, hasard, nom, phases[nom], modeles[nom], heure, verifs
+        )
+        if tient := _pause_qui_tient(places, phases):
+            return f"graine {graine} : {tient} en pause tient une place ou un jeton"
+        if all(p == "finie" for p in phases.values()):
+            return ""
+        if not any(p in QUI_AVANCENT for p in phases.values()):
+            while (echeance := places.prochaine_echeance(heure)) is not None:
+                heure = echeance
+            if not _relancer_apres_les_pauses(places, phases, modeles, heure, verifs):
+                return f"graine {graine} : {phases}, {places.etat(heure)['phrase']}"
+    return ""
+
+
+def test_au_hasard_avec_pannes_aucune_suite_conforme_ne_finit_en_interblocage():
+    debut, graine, trouves = time.monotonic(), 0, []
+    while graine < 3000 and time.monotonic() - debut < 5:
+        if bloque := interblocage_avec_pannes(graine):
+            trouves.append(bloque)
+        graine += 1
+    assert not trouves, trouves[:3]
+    assert graine >= 300

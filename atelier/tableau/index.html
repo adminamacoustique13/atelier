@@ -1545,9 +1545,9 @@ function fiche(vue) {
   const etat = etatVu(t, attendDe(vue));
   const liste = (elements, classe) => `<ul class="${classe || ""}">${elements.map((e) => `<li>${propre(e)}</li>`).join("")}</ul>`;
   const essais = (t.historique || []).map((h) => {
-    const ok = h.issue === "valide", stoppee = h.issue === "arretee";
+    const ok = h.issue === "valide", stoppee = h.issue === "arretee", neutre = stoppee || h.issue === "attente_panne";
     const modele = String(h.modele || "");
-    return `<li><span class="${ok ? "ok" : stoppee ? "neutre" : "non"}">${ok ? "✓" : stoppee ? "–" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(modele.charAt(0).toUpperCase() + modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
+    return `<li><span class="${ok ? "ok" : neutre ? "neutre" : "non"}">${ok ? "✓" : neutre ? "–" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(modele.charAt(0).toUpperCase() + modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
       stoppee ? `<br><span class="petit">Arrêtée par toi.</span>` : h.detail ? `<br><span class="petit">${propre(h.detail)}</span>` : ""}</span></li>`;
   }).join("");
   const demandes = autorisationsDe(vue).filter((a) => tacheDeAgent(a.agent) === t.id).map(autorisationHtml).join("");

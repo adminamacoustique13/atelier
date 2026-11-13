@@ -23,8 +23,15 @@ Le régulateur lit les limites de l'abonnement Claude, telles que le SDK les nom
   tâche neuve quand la suspension se lèvera ; le vérificateur refusé reprend la tête de la file.
   Un refus pour limite n'est jamais un échec de la tâche : rien n'est compté contre elle ;
 - Claude surchargé (pas une limite de l'abonnement) : plus aucun lancement pendant deux minutes
-  (`surcharge`).
+  (`surcharge`) ;
+- la connexion à Claude perdue : plus aucun lancement d'aucun modèle pendant cinq minutes, puis
+  un nouvel essai (`connexion`) ; seule la première perte depuis la dernière connexion rétablie
+  est à dire au fil (`connexion_retablie`).
 Une heure de remise à zéro mal formée ou déjà passée compte comme inconnue.
+
+Une panne d'agent (réseau, service) n'est pas une limite : seule sa tâche patiente (`pause`). Elle
+rend sa place et son jeton, et n'en reçoit plus avant la fin de sa pause ; une suspension qui
+tombe pendant la pause s'y ajoute, la plus tardive des deux échéances l'emporte.
 
 Aucun interblocage, si l'appelant tient le contrat : à la fin de chaque agent, il appelle
 `en_verification`, `partir`, `rendre_jeton` ou `finir`, et une tâche qui veut repartir écrire
@@ -53,8 +60,10 @@ MARGE_REPRISE_S = 60  # attente après l'heure de remise à zéro annoncée
 ATTENTE_SANS_HEURE_S = 15 * 60  # premier refus sans heure ; doublé à chaque refus suivant
 ATTENTE_SANS_HEURE_MAX_S = 60 * 60
 PAUSE_SURCHARGE_S = 2 * 60  # plus aucun lancement quand Claude est surchargé
+PAUSE_CONNEXION_S = 5 * 60  # plus aucun lancement quand la connexion à Claude est perdue
 TOUS = ""  # la portée d'une suspension qui vaut pour tous les modèles
 SURCHARGE = "surcharge"  # la portée de la pause pour surcharge, qui vaut aussi pour tous
+CONNEXION = "connexion"  # la portée de la pause pour connexion perdue, qui vaut aussi pour tous
 LIMITE_INCONNUE = "inconnue"
 LIMITES_PAR_MODELE = {"seven_day_opus": "opus", "seven_day_sonnet": "sonnet"}
 # Les familles que suspend une limite propre à un modèle. Celle d'Opus suspend aussi Fable, par
@@ -97,10 +106,11 @@ def famille(modele) -> str:
 
 
 def portees(modele) -> set[str]:
-    """Les portées de suspension qui touchent `modele` : TOUS, la surcharge, et la limite propre
-    à sa famille."""
+    """Les portées de suspension qui touchent `modele` : TOUS, la surcharge, la connexion perdue,
+    et la limite propre à sa famille."""
     nom = famille(modele)
-    return {TOUS, SURCHARGE} | {p for p, familles in FAMILLES_SUSPENDUES.items() if nom in familles}
+    communes = {TOUS, SURCHARGE, CONNEXION}
+    return communes | {p for p, familles in FAMILLES_SUSPENDUES.items() if nom in familles}
 
 
 def portee_de_limite(type_limite) -> str:
@@ -161,6 +171,8 @@ class Places:
         self._paliers: dict[str, int] = {}  # portée -> refus sans heure depuis le dernier succès
         self._refus_au_rang: dict[str, int] = {}  # portée -> rang du dernier lancement au refus
         self._rang = 0  # le nombre de jetons donnés depuis le début
+        self._pauses: dict[str, float] = {}  # tâche en pause après une panne -> fin de la pause
+        self._connexion_perdue = False  # une perte de connexion dite, pas encore rétablie
         self.regler(paralleles, agents_max)
 
     def regler(self, paralleles=PARALLELES, agents_max=None) -> None:
@@ -193,22 +205,34 @@ class Places:
             return max(1, self.paralleles // 2)
         return self.paralleles
 
-    def suspension(self, modele: str, heure: float) -> float | None:
-        """L'heure de reprise des lancements de `modele`, ou None s'ils sont permis."""
+    def suspension(self, modele: str, heure: float, tache: str | None = None) -> float | None:
+        """L'heure de reprise des lancements de `modele`, ou None s'ils sont permis.
+
+        Avec `tache`, compte aussi sa pause après une panne (`pause`) : la plus tardive des
+        échéances l'emporte.
+        """
         visees = portees(modele) & self._suspensions.keys()
         reprises = [self._suspensions[p] for p in visees if heure < self._suspensions[p]]
-        return max(reprises, default=None)
+        if tache is not None:
+            reprises.append(self.en_pause(tache, heure))
+        return max((r for r in reprises if r is not None), default=None)
+
+    def en_pause(self, tache: str, heure: float) -> float | None:
+        """La fin de la pause de `tache` après une panne, si elle court encore ; sinon None."""
+        fin = self._pauses.get(tache)
+        return fin if fin is not None and heure < fin else None
 
     def prochaine_echeance(self, heure: float) -> float | None:
-        """La prochaine heure où une alerte ou une suspension prend fin, ou None."""
+        """La prochaine heure où une alerte, une suspension ou une pause prend fin, ou None."""
         heures = [jusqu for _, jusqu in self._alertes.values()] + list(self._suspensions.values())
+        heures += self._pauses.values()
         return min((h for h in heures if h > heure), default=None)
 
     def _jetons_libres(self) -> int:
         return max(0, self.agents_max - self.agents_en_marche())
 
     def _servable(self, tache: str, heure: float) -> bool:
-        return self.suspension(self._taches[tache].modele, heure) is None
+        return self.suspension(self._taches[tache].modele, heure, tache) is None
 
     def _jetons_pour_ouvriers(self, heure: float, sauf: str | None) -> int:
         """Les jetons libres une fois servis les vérificateurs qui attendent et peuvent partir."""
@@ -222,12 +246,12 @@ class Places:
 
         Il faut une place d'écriture libre, un jeton qu'aucun vérificateur en attente ne doit
         recevoir avant lui, et aucune suspension pour ce modèle. Pour une tâche déjà suivie
-        (`tache`), la place ou le jeton qu'elle tient déjà comptent comme acquis. Ne change rien :
-        une tâche qui tient un jeton et veut repartir écrire appelle `partir`, qui le rend au
-        besoin.
+        (`tache`), la place ou le jeton qu'elle tient déjà comptent comme acquis, et sa pause
+        après une panne la retient. Ne change rien : une tâche qui tient un jeton et veut
+        repartir écrire appelle `partir`, qui le rend au besoin.
         """
         etat = self._taches.get(tache) if tache is not None else None
-        if self.suspension(modele, heure) is not None:
+        if self.suspension(modele, heure, tache) is not None:
             return False
         if not (etat and etat.ecrit) and self.en_ecriture() >= self.places_effectives(heure):
             return False
@@ -267,7 +291,7 @@ class Places:
         if etat.jeton:
             self._reussite(etat)  # l'ouvrier a fini sans refus pour limite
         etat.modele = modele
-        if etat.jeton and self.suspension(modele, heure) is None:
+        if etat.jeton and self.suspension(modele, heure, tache) is None:
             self._donner_jeton(etat)  # le jeton de l'ouvrier passe à son vérificateur
             return True
         etat.jeton = False
@@ -303,9 +327,11 @@ class Places:
         return self.servir(heure)
 
     def finir(self, tache: str, heure: float) -> list[str]:
-        """`tache` quitte les places (vérifiée, rendue, arrêtée…). Rend les tâches servies."""
+        """`tache` quitte les places (vérifiée, rendue, arrêtée…), et sa pause avec elle. Rend
+        les tâches servies."""
         etat = self._taches.pop(tache, None)
         self._retirer_de_l_attente(tache)
+        self._pauses.pop(tache, None)
         if etat is not None and etat.jeton:
             self._reussite(etat)
         return self.servir(heure)
@@ -381,6 +407,46 @@ class Places:
         reprise = heure + PAUSE_SURCHARGE_S
         return self._suspendre(tache, SURCHARGE, max(reprise, avant or reprise), heure)
 
+    def connexion(self, tache: str, heure: float) -> dict:
+        """L'agent de `tache` n'a pas pu travailler : la connexion à Claude est perdue ou expirée.
+
+        Plus aucun lancement, d'aucun modèle, pendant `PAUSE_CONNEXION_S`, puis un nouvel essai ;
+        une perte suivante prolonge la pause. Le reste comme `refus` (portée CONNEXION), qui dit
+        ce qu'elle rend, plus `premiere` : vrai seulement pour la première perte depuis la
+        dernière connexion rétablie (`connexion_retablie`), la seule à dire au fil.
+        """
+        premiere, self._connexion_perdue = not self._connexion_perdue, True
+        avant = self._suspensions.get(CONNEXION)
+        reprise = heure + PAUSE_CONNEXION_S
+        suspension = self._suspendre(tache, CONNEXION, max(reprise, avant or reprise), heure)
+        return {**suspension, "premiere": premiere}
+
+    def connexion_retablie(self) -> bool:
+        """Un agent a pu travailler : la connexion à Claude marche. Rend vrai si elle était dite
+        perdue ; la perte suivante sera de nouveau à dire au fil."""
+        perdue, self._connexion_perdue = self._connexion_perdue, False
+        return perdue
+
+    def pause(self, tache: str, reprise, heure: float) -> dict:
+        """L'agent de `tache` est tombé en panne (réseau, service) : sa tâche patiente, seule.
+
+        Ce n'est pas une limite : aucun autre lancement n'est suspendu. Ouvrier ou vérificateur,
+        la tâche rend sa place et son jeton, sort de la file des vérificateurs, et rien ne lui en
+        donne avant `reprise` (heure Unix). Ensuite, `partir` ou `en_verification` la reprennent
+        comme une tâche neuve. Une reprise mal formée ou déjà passée ne retient pas la tâche.
+        Rend :
+        - `reprise` : la fin de la pause, ou None si elle ne retient rien ;
+        - `servis` : les vérificateurs qui reçoivent un jeton.
+        """
+        self._taches.pop(tache, None)  # place et jeton rendus
+        self._retirer_de_l_attente(tache)
+        fin = _fin_a_venir(reprise, heure)
+        if fin is None:
+            self._pauses.pop(tache, None)
+        else:
+            self._pauses[tache] = fin
+        return {"reprise": fin, "servis": self.servir(heure)}
+
     def _suspendre(self, tache: str, portee: str, reprise: float, heure: float) -> dict:
         """Suspend `portee` jusqu'à `reprise` et retire l'agent refusé de `tache` (`refus`)."""
         avant = self._suspensions.get(portee)
@@ -432,9 +498,12 @@ class Places:
 
         `reprise` est l'heure Unix de reprise d'une suspension de tous les modèles pour limite
         (None sans elle) ; `suspensions` donne les autres (portée -> heure Unix) : celles propres
-        à un modèle (sa famille) et la pause pour surcharge (SURCHARGE).
+        à un modèle (sa famille), la pause pour surcharge (SURCHARGE) et celle pour connexion
+        perdue (CONNEXION). `pauses`, présente seulement si une tâche patiente après une panne
+        de son agent, donne ces tâches (tâche -> heure Unix de la fin de leur pause).
         """
         suspensions = {p: r for p, r in self._suspensions.items() if heure < r}
+        pauses = {t: r for t, r in self._pauses.items() if heure < r}
         alertes = [jusqu for _, jusqu in self._alertes.values() if heure < jusqu]
         etat = {
             "places": self.paralleles,
@@ -447,6 +516,8 @@ class Places:
             "reprise": suspensions.pop(TOUS, None),
             "suspensions": suspensions,
         }
+        if pauses:  # absente sans pause en cours : l'état garde la forme qu'il avait avant elles
+            etat["pauses"] = pauses
         etat["phrase"] = _phrase(etat, heure)
         return etat
 
@@ -469,7 +540,20 @@ def _phrase(etat: dict, heure: float) -> str:
         phrases.append(phrase_de_suspension(TOUS, etat["reprise"], heure))
     for portee, reprise in sorted(etat["suspensions"].items()):
         phrases.append(phrase_de_suspension(portee, reprise, heure))
+    if etat.get("pauses"):
+        phrases.append(phrase_de_pauses(etat["pauses"], heure))
     return " ".join(phrases)
+
+
+def phrase_de_pauses(pauses: dict, heure: float) -> str:
+    """La phrase des tâches qui patientent après une panne de leur agent (tâche -> fin)."""
+    premiere = heure_dite(min(pauses.values()), heure)
+    if len(pauses) == 1:
+        return f"Une tâche patiente après une panne de son agent : elle repart {premiere}."
+    return (
+        f"{len(pauses)} tâches patientent après une panne de leur agent : la première repart "
+        f"{premiere}."
+    )
 
 
 def phrase_de_suspension(portee: str, reprise: float, heure: float) -> str:
@@ -485,6 +569,11 @@ def phrase_de_suspension(portee: str, reprise: float, heure: float) -> str:
         return (
             "Claude est surchargé pour un moment (ce n'est pas une limite de l'abonnement) : plus "
             f"aucun lancement, ils reprennent {quand}."
+        )
+    if portee == CONNEXION:
+        return (
+            "La connexion à Claude est perdue : plus aucun lancement, un nouvel essai part "
+            f"{quand}."
         )
     touchees = " ni ".join(_de(f) for f in FAMILLES_SUSPENDUES.get(portee, (portee,)))
     return (

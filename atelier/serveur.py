@@ -275,7 +275,7 @@ def statistiques(chantier: Chantier) -> list[dict]:
         if not taches:
             continue
         issues = [h["issue"] for t in taches for h in t.historique]
-        refus = sum(issue not in ("valide", ARRETEE) for issue in issues)
+        refus = sum(issue not in ("valide", ARRETEE, "attente_panne") for issue in issues)
         premier_coup = sum(t.etat == "verifie" and t.tentatives == 1 for t in taches)
         lignes.append({"type": nom, "premier_coup": premier_coup, "refus": refus})
     return lignes
