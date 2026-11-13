@@ -10,9 +10,10 @@ Porter dans le moteur sept règles de la ligne « PC et autonomie » : l'ouvrier
 
 Demandée en plus le même jour (« Lance la maquette en parallèle dès maintenant ») : une tâche V1 de maquettes, sans code du produit, pour la Salle avec plusieurs agents en même temps et pour l'état du dépôt git.
 
+Choisie le 2026-11-13 (« On part sur la piste B si le moteur autorise autant de multi agents ») : la Salle en postes (piste B) et l'onglet « Dépôt » entrent dans le chantier, en quatre tâches (D1, D2, S1, S2), après les tâches du moteur dont elles montrent les données.
+
 ## Hors périmètre
 - Les points 3 et 4 de la comparaison, à discuter ensuite avec la personne responsable : les contrôles après envoi, le verrou de branche, le socle Windows, le juge de commandes, le plan de pilotage, la forme des fichiers partagés.
-- Coder dans le produit ce que montrent les maquettes, avant que la personne responsable en ait choisi une.
 - Les restes du chantier « débit » et les tâches reportées du chantier « ménage ».
 
 ## Enveloppe
