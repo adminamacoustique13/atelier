@@ -1,7 +1,10 @@
 /* Maquettes V1 : la Salle à plusieurs agents (pistes A et B) et l'état du dépôt.
    Même palette et mêmes polices que le tableau de bord : noir, bleu nuit, ambre, gris clair, blanc.
-   Ambre = ce qui t'attend. Blanc = vérifié, entré dans la branche. Bleu acier = en cours.
-   Un refus se dit par des points creux, ce qui n'est pas parti par un pointillé. */
+   La teinte dit le rôle : gris clair pour l'orchestrateur, bleu acier pour l'ouvrier (et l'ouvrier de
+   sous-tâche), vert d'eau pour le vérificateur, la seule teinte ajoutée.
+   L'état ne se dit jamais par la teinte d'un rôle : il tient à l'anneau, au signe et au mot.
+   Ambre = ce qui t'attend, rien d'autre. Blanc = entré dans la branche. Un refus se dit par des points
+   creux, ce qui n'est pas parti par un pointillé. */
 @font-face { font-family: "Geist"; src: url("../atelier/tableau/polices/geist.woff2") format("woff2"); font-weight: 300 700; }
 @font-face { font-family: "Geist Mono"; src: url("../atelier/tableau/polices/geist-mono.woff2") format("woff2"); font-weight: 400 600; }
 @font-face { font-family: "Doto"; src: url("../atelier/tableau/polices/doto.woff") format("woff"); font-weight: 900; }
@@ -11,7 +14,8 @@
   --surface: #0e1220; --surface-haut: #151b2d;
   --bord: rgba(220, 220, 220, 0.09); --bord-fort: rgba(220, 220, 220, 0.17);
   --texte: var(--blanc); --discret: rgba(220, 220, 220, 0.74); --faible: rgba(220, 220, 220, 0.52); --eteint: rgba(220, 220, 220, 0.12);
-  --attend: var(--ambre); --verifie: var(--blanc); --en-cours: #8297c4;
+  --attend: var(--ambre); --verifie: var(--blanc);
+  --orchestrateur: #dcdcdc; --ouvrier: #8297c4; --verificateur: #79bfae;
   --sans: "Geist", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace; --points: "Doto", "Geist Mono", monospace;
 }
 * { box-sizing: border-box; }
@@ -28,9 +32,14 @@ code { font: 400 12px var(--mono); background: rgba(255, 255, 255, 0.06); paddin
 .etiquette { font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); }
 .etiquette.ambre { color: var(--attend); }
 .points { font-family: var(--points); font-weight: 900; letter-spacing: 0.02em; }
-.calme { color: var(--discret); } .fort { font-size: 14px; font-weight: 500; line-height: 1.4; }
+.calme { color: var(--discret); } .fort { font-size: 14px; font-weight: 500; line-height: 1.55; }
 .id { font: 500 11.5px var(--mono); color: var(--discret); margin-right: 7px; }
-.signe { flex: none; vertical-align: -2px; }
+.signe, .marque { flex: none; vertical-align: -2px; }
+/* Le libellé d'un rôle : son signe et son nom, dans sa teinte. Toujours la première ligne d'une étiquette. */
+.role { display: inline-flex; align-items: center; gap: 5px; font: 600 9.5px/13px var(--mono); letter-spacing: 0.09em; text-transform: uppercase; white-space: nowrap; vertical-align: 1px; }
+.role .marque { vertical-align: 0; }
+.etq .role { white-space: normal; align-items: flex-start; } .etq .role .marque { margin-top: 1px; }
+.r-orchestrateur { color: var(--orchestrateur); } .r-ouvrier, .r-sous { color: var(--ouvrier); } .r-verificateur { color: var(--verificateur); }
 /* « Bientôt » : décidé pour le chantier suivant, pas encore dans le moteur. « À venir » : pas décidé. */
 .bientot { display: inline-block; font: 500 9px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; font-style: normal; color: var(--discret);
   border: 1px dashed var(--bord-fort); border-radius: 5px; padding: 0 5px; line-height: 14px; vertical-align: 1px; white-space: nowrap; }
@@ -46,31 +55,27 @@ code { font: 400 12px var(--mono); background: rgba(255, 255, 255, 0.06); paddin
 .tete nav { display: flex; gap: 2px; margin-left: 4px; }
 .tete nav a { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-radius: 8px; color: var(--faible); font: 500 11px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; }
 .tete nav a.on { color: var(--texte); background: rgba(220, 220, 220, 0.08); }
-.tete nav a.neuf { border: 1px dashed var(--bord-fort); }
 .tete nav .pt { width: 6px; height: 6px; border-radius: 50%; background: var(--attend); box-shadow: 0 0 10px var(--attend); }
 .tete .pousse { flex: 1; }
 .tete .vif { display: flex; align-items: center; gap: 8px; font: 500 11px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--discret); }
-.tete .vif i { width: 7px; height: 7px; border-radius: 50%; background: var(--en-cours); box-shadow: 0 0 10px var(--en-cours); }
+.tete .vif i { width: 7px; height: 7px; border-radius: 50%; background: var(--gris); box-shadow: 0 0 10px var(--gris); }
 .tete .demo { font: 500 10.5px var(--mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--faible); border: 1px dashed var(--bord-fort); padding: 5px 10px; border-radius: 7px; }
 
-/* ---------- Le bandeau : la phrase, puis les comptes ---------- */
-.bandeau { display: flex; align-items: stretch; gap: 0; padding: 12px 6px 12px 18px; }
-.bandeau .resume { flex: 1 1 320px; min-width: 0; display: flex; flex-direction: column; gap: 5px; justify-content: center; padding-right: 16px; }
-.bandeau .resume .calme { display: none; }
-.bandeau .phrase { font-size: 16.5px; font-weight: 500; line-height: 1.3; letter-spacing: -0.005em; }
-.cpt { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 0 15px; border-left: 1px solid var(--bord); min-width: 96px; }
+/* ---------- Le bandeau : la phrase, un compte par rôle, puis les autres comptes ---------- */
+.bandeau { display: flex; align-items: stretch; gap: 0; padding: 12px 4px 12px 18px; }
+.bandeau .resume { flex: 1 1 230px; min-width: 0; display: flex; flex-direction: column; gap: 5px; justify-content: center; padding-right: 14px; }
+.bandeau .phrase { font-size: 15.5px; font-weight: 500; line-height: 1.3; letter-spacing: -0.005em; }
+.cpt { flex: none; display: flex; flex-direction: column; gap: 3px; padding: 0 13px; border-left: 1px solid var(--bord); min-width: 90px; }
 .cpt b { display: flex; align-items: baseline; gap: 6px; font-weight: 400; line-height: 1; height: 28px; white-space: nowrap; }
+.cpt b .marque { align-self: center; }
 .cpt b .points { font-size: 27px; line-height: 28px; }
 .cpt b small { font: 400 12px var(--mono); color: var(--faible); }
 .cpt .sous { font: 400 10.5px var(--mono); color: var(--faible); white-space: nowrap; }
 .cpt.attend .points, .cpt.attend .etiquette { color: var(--attend); }
 .cases { display: flex; align-items: center; gap: 3px; height: 9px; }
 .cases i { width: 8px; height: 8px; border-radius: 2px; box-shadow: inset 0 0 0 1px var(--faible); }
-.cases i.pris { background: var(--en-cours); box-shadow: none; }
-.cases i.rond { border-radius: 50%; background: transparent; box-shadow: inset 0 0 0 1.6px var(--en-cours); }
 .cases i.vide { box-shadow: none; border: 1px dashed var(--faible); }
-.cases em { width: 5px; }
-.cases.fin i { width: 5px; } .cases.fin i.pris { background: var(--verifie); }
+.cases.fin i { width: 5px; } .cases.fin i.pris { background: var(--verifie); box-shadow: none; }
 .jauge { display: block; height: 4px; margin-top: 3px; border-radius: 2px; background: var(--eteint); overflow: hidden; }
 .jauge i { display: block; height: 100%; background: var(--gris); border-radius: 2px; }
 
@@ -79,66 +84,106 @@ code { font: 400 12px var(--mono); background: rgba(255, 255, 255, 0.06); paddin
 .sol { position: relative; height: 676px; min-width: 934px; }
 .sol-cadre { overflow-x: auto; scrollbar-width: none; }
 .sol svg.plan { position: absolute; left: 0; top: 0; width: 934px; height: 676px; }
-.etq { position: absolute; transform: translateY(-50%); width: 160px; padding: 7px 10px 8px; border-radius: 11px; background: rgba(14, 18, 32, 0.88); border: 1px solid var(--bord); box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.9); }
+/* L'étiquette : le rôle en première ligne et en liseré, puis la tâche, l'état (signe et mot), le modèle et la durée. */
+.etq { --role: transparent; position: absolute; transform: translateY(-100%); width: 160px; padding: 7px 9px 8px 12px; border-radius: 10px; border: 1px solid var(--bord-fort);
+  background: linear-gradient(var(--role), var(--role)) left / 3px 100% no-repeat, rgba(14, 18, 32, 0.9); box-shadow: 0 12px 24px -12px rgba(0, 0, 0, 0.9); }
+.etq.de-ouvrier, .etq.de-sous { --role: var(--ouvrier); } .etq.de-verificateur { --role: var(--verificateur); } .etq.de-orchestrateur { --role: var(--orchestrateur); }
 .etq::after { content: ""; position: absolute; top: 50%; left: -13px; width: 12px; height: 1px; background: rgba(220, 220, 220, 0.3); }
+.etq .qui { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 3px 6px; min-height: 14px; margin-bottom: 3px; }
 .etq .t { font-size: 12px; font-weight: 500; line-height: 1.3; }
-.etq .coin { position: absolute; top: -8px; right: 8px; background: #101524; }
 .etq .t .id { margin-right: 6px; }
-.etq .m { display: flex; align-items: center; gap: 5px; font: 500 10.5px var(--mono); margin-top: 3px; white-space: nowrap; color: var(--en-cours); }
+.etq .m { display: flex; align-items: center; gap: 5px; font: 500 10.5px var(--mono); margin-top: 3px; white-space: nowrap; color: var(--texte); }
+.etq .m.toi { color: var(--attend); } .etq .m.file, .etq .m.ouvert { color: var(--discret); }
 .etq .d { font: 400 10.5px var(--mono); color: var(--faible); margin-top: 2px; white-space: nowrap; }
 .etq .d b { font-weight: 500; color: var(--discret); }
-.etq.fusionnee .m { color: var(--verifie); } .etq.fusionnee { border-color: rgba(255, 255, 255, 0.26); }
-.etq.toi .m { color: var(--attend); } .etq.toi { border-color: color-mix(in srgb, var(--attend) 55%, transparent); }
-.etq.file .m { color: var(--faible); } .etq.file { border-style: dashed; border-color: rgba(255, 255, 255, 0.14); background: rgba(8, 10, 18, 0.7); box-shadow: none; }
-.etq.file .t { color: var(--discret); }
-.etq.corrige { border-style: dotted; border-color: rgba(130, 151, 196, 0.6); }
-.etq.conflit { border-color: rgba(130, 151, 196, 0.5); box-shadow: 3px 3px 0 -1px rgba(14, 18, 32, 1), 3px 3px 0 0 rgba(130, 151, 196, 0.4), 0 12px 24px -12px rgba(0, 0, 0, 0.9); }
-.etq.ecrit, .etq.ouvert, .etq.verif { border-color: rgba(130, 151, 196, 0.34); }
-.etq.sobre { background: none; border: 0; box-shadow: none; padding: 0; width: auto; } .etq.sobre::after { display: none; }
+.etq .second { margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--bord-fort); }
+.etq.fusionnee { border-color: rgba(255, 255, 255, 0.3); }
+.etq.toi { border-color: color-mix(in srgb, var(--attend) 60%, transparent); }
+.etq.file { border-style: dashed; background: rgba(8, 10, 18, 0.7); box-shadow: none; } .etq.file .t { color: var(--discret); }
+.etq.corrige { border-style: dotted; border-color: rgba(220, 220, 220, 0.45); }
+.etq.conflit { box-shadow: 3px 3px 0 -1px rgba(14, 18, 32, 1), 3px 3px 0 0 rgba(220, 220, 220, 0.3), 0 12px 24px -12px rgba(0, 0, 0, 0.9); }
+.etq.ouvert { border-style: dashed; }
 .zone-titre { position: absolute; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--faible); white-space: nowrap; }
 .zone-titre b { font: 900 17px/1 var(--points); color: var(--texte); letter-spacing: 0.02em; margin-right: 6px; vertical-align: -2px; }
+.zone-titre .marque { margin-right: 6px; vertical-align: -1px; }
 .zone-titre small { display: block; font: 400 10.5px var(--mono); letter-spacing: 0; text-transform: none; color: var(--faible); margin-top: 4px; white-space: normal; }
 
 .cote { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .cote .panneau { padding: 14px 16px; display: flex; flex-direction: column; gap: 9px; }
 .cote .attente { border-color: color-mix(in srgb, var(--attend) 34%, transparent); }
+.cote .fort .role { margin-right: 2px; }
 .entre { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
-.lecture { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--discret); }
-.lecture li { display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 8px; align-items: center; }
-.lecture svg { display: block; margin: auto; }
-.lecture li.mots { display: block; }
+.lecture { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--discret); }
+.lecture li { display: grid; grid-template-columns: 26px auto minmax(0, 1fr); gap: 8px; align-items: center; }
+.lecture li > span:last-child { text-align: right; color: var(--faible); }
+.lecture svg { display: block; }
+.lecture li.mots { display: block; margin-top: 5px; font-size: 11px; line-height: 1.5; color: var(--faible); }
 .fil { display: flex; flex-direction: column; gap: 6px; font-size: 11.5px; color: var(--discret); }
-.fil li { display: grid; grid-template-columns: 40px 16px minmax(0, 1fr); gap: 4px; }
+.fil li { display: grid; grid-template-columns: 36px 12px 12px minmax(0, 1fr); gap: 5px; align-items: start; }
 .fil time, .fil b { font: 400 10.5px var(--mono); color: var(--faible); line-height: 16px; } .fil b { color: var(--texte); font-weight: 500; }
+.fil .marque { margin-top: 3px; }
 
 /* ---------- Écran étroit : la même Salle en liste ---------- */
 .liste { display: none; }
 .groupe { padding: 14px 14px 6px; }
 .groupe > h2 { display: flex; align-items: baseline; gap: 8px; font: 500 10.5px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--discret); padding-bottom: 8px; }
-.groupe > h2 b { font: 900 19px/1 var(--points); color: var(--texte); letter-spacing: 0.02em; }
+.groupe > h2 b { font: 900 19px/1 var(--points); color: var(--texte); letter-spacing: 0.02em; white-space: nowrap; }
+.groupe > h2 .marque { align-self: center; }
 .groupe > h2 small { font: 400 10.5px var(--mono); letter-spacing: 0; text-transform: none; color: var(--faible); margin-left: auto; text-align: right; }
 .ligne { position: relative; display: grid; grid-template-columns: 26px minmax(0, 1fr); gap: 10px; padding: 9px 0; border-top: 1px solid var(--bord); }
-.ligne .noeud { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #0b0f1b; border: 1.5px solid var(--en-cours); color: var(--en-cours); position: relative; z-index: 1; }
+/* Le rond porte le signe de l'état, sans teinte de rôle. */
+.ligne .noeud { width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; background: #0b0f1b; border: 1.5px solid rgba(220, 220, 220, 0.6); color: var(--texte); position: relative; z-index: 1; }
 .ligne p { font-size: 13px; font-weight: 500; line-height: 1.35; }
-.ligne .mot { font: 500 11px var(--mono); color: var(--en-cours); margin-top: 1px; }
+.ligne .mot { font: 500 11px var(--mono); color: var(--texte); }
+.ligne p.mot { margin-top: 1px; }
 .ligne small { display: block; font: 400 11px/1.45 var(--mono); color: var(--faible); }
-.ligne small .signe { vertical-align: -2px; color: var(--en-cours); }
-.ligne small.detail { font-family: var(--sans); font-size: 11.5px; color: var(--discret); margin-top: 2px; }
-.ligne.fusionnee .noeud { background: var(--verifie); border-color: var(--verifie); color: #000; } .ligne.fusionnee .mot { color: var(--verifie); }
-.ligne.toi .noeud { border-color: var(--attend); color: var(--attend); box-shadow: 0 0 0 3px rgba(232, 149, 58, 0.18); } .ligne.toi .mot { color: var(--attend); }
+.ligne small.detail { font-family: var(--sans); font-size: 11.5px; color: var(--discret); margin-top: 3px; }
+.ligne .agent { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 8px; margin-top: 3px; }
+.ligne .agent .qui { display: inline-flex; align-items: center; gap: 6px; }
+.ligne .agent small { flex-basis: 100%; }
+.ligne .mot.toi { color: var(--attend); } .ligne .mot.ouvert { color: var(--discret); }
+.ligne.fusionnee .noeud { background: var(--verifie); border-color: var(--verifie); color: #000; }
+.ligne.toi .noeud { border-color: var(--attend); color: var(--attend); box-shadow: 0 0 0 3px rgba(232, 149, 58, 0.18); }
 .ligne.file .noeud { border: 1.5px dashed var(--faible); color: var(--faible); } .ligne.file .mot { color: var(--faible); } .ligne.file p:first-child { color: var(--discret); }
 .ligne.corrige .noeud { border-style: dotted; border-width: 2px; }
-.ligne.conflit .noeud { box-shadow: 4px 0 0 -1.5px #0b0f1b, 4px 0 0 0 var(--en-cours); }
-.ligne.ouvert .noeud { background: transparent; border-width: 1px; }
+.ligne.conflit .noeud { box-shadow: 4px 0 0 -1.5px #0b0f1b, 4px 0 0 0 rgba(220, 220, 220, 0.6); }
 .ligne.verif .noeud { border-width: 1px; }
 .ligne.autre .noeud { border-color: var(--bord-fort); color: var(--discret); }
 /* Piste A, écran étroit : la route descend le long des tâches. */
 .route .ligne { border-top: 0; padding: 8px 0; }
-.route .ligne::before { content: ""; position: absolute; left: 12px; top: 0; bottom: 0; border-left: 2px solid var(--en-cours); opacity: 0.55; }
-.route .ligne.fusionnee::before, .route .ligne.depart::before { border-left-color: var(--verifie); opacity: 1; }
-.route .ligne.file::before, .route .ligne.fin::before { border-left: 2px dashed var(--faible); opacity: 0.6; }
+.route .ligne::before { content: ""; position: absolute; left: 12px; top: 0; bottom: 0; border-left: 2px solid rgba(220, 220, 220, 0.3); }
+.route .ligne.fusionnee::before, .route .ligne.depart::before { border-left-color: var(--verifie); }
+.route .ligne.file::before, .route .ligne.fin::before { border-left: 2px dashed rgba(220, 220, 220, 0.3); }
 .route .ligne.depart::before { top: 20px; } .route .ligne.fin::before { bottom: calc(100% - 20px); }
 .route .etape-titre { padding: 12px 0 2px; }
+
+/* ---------- À forte charge (32 places) : cases serrées, étiquettes réduites, lignes courtes ---------- */
+.nb { white-space: nowrap; }
+.cases.dense { flex-wrap: wrap; height: auto; width: 136px; gap: 2px 1.5px; }
+.cases.fin.dense { width: 100px; gap: 2px; } .cases.fin.dense i { width: 3px; height: 7px; border-radius: 1px; }
+.bandeau.dense .cpt { padding: 0 11px; min-width: 80px; }
+.bandeau.dense .resume { flex-basis: 300px; }
+.cote .demande { display: flex; flex-direction: column; gap: 6px; padding-top: 9px; border-top: 1px solid var(--bord); }
+.cote .demande:first-of-type { border-top: 0; padding-top: 0; }
+.cote .demande.courte .fort { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* L'étiquette réduite : le signe de l'état s'il sort de l'ordinaire, la tâche, la durée. */
+.mini { position: absolute; transform: translateX(-50%); display: flex; align-items: center; gap: 4px; font: 500 10px/13px var(--mono); color: var(--texte); white-space: nowrap;
+  background: rgba(8, 11, 20, 0.8); padding: 1px 5px; border-radius: 5px; border: 1px solid transparent; }
+.mini b { font-weight: 500; } .mini span { color: var(--faible); } .mini .signe, .mini .marque { vertical-align: 0; }
+.mini.toi { color: var(--attend); border-color: color-mix(in srgb, var(--attend) 60%, transparent); } .mini.toi span { color: var(--attend); }
+.mini.corrige { border: 1px dotted rgba(220, 220, 220, 0.45); } .mini.conflit { box-shadow: 2px 2px 0 0 rgba(220, 220, 220, 0.3); border-color: var(--bord-fort); }
+.mini.file, .mini.fusionnee { color: var(--faible); }
+.mini.pile { flex-direction: column; gap: 0; line-height: 12px; padding: 1px 3px; } .mini.pile span { font-size: 9.5px; }
+/* L'étiquette complète, ouverte au survol d'un poste. */
+.etq.survol { z-index: 5; border-color: rgba(255, 255, 255, 0.4); box-shadow: 0 18px 34px -8px #000, 0 0 0 4px rgba(8, 11, 20, 0.6); background: linear-gradient(var(--role), var(--role)) left / 3px 100% no-repeat, #10162a; }
+.etq.survol::before { content: "au survol"; position: absolute; top: -9px; right: 8px; font: 500 9px/14px var(--mono); letter-spacing: 0.08em; text-transform: uppercase; color: var(--discret); background: #10162a; border: 1px dashed var(--bord-fort); border-radius: 5px; padding: 0 5px; }
+.ligne.courte { grid-template-columns: 20px minmax(0, 1fr) auto auto; align-items: center; gap: 8px; padding: 5px 0; }
+.ligne.courte .noeud { width: 20px; height: 20px; }
+.ligne.courte p { font-size: 12px; font-weight: 400; line-height: 1.3; }
+.ligne.courte em { font-style: normal; font-size: 10px; margin-left: 4px; white-space: nowrap; }
+.ligne.courte small { white-space: nowrap; font-size: 10.5px; }
+.ligne.courte.file p, .ligne.courte.fusionnee p { color: var(--discret); }
+.route .ligne.courte { padding: 5px 0; } .route .ligne.courte::before { left: 9px; }
 
 @media (max-width: 999px) {
   .app { padding: 0 10px 12px; gap: 10px; }
@@ -147,14 +192,15 @@ code { font: 400 12px var(--mono); background: rgba(255, 255, 255, 0.06); paddin
   .tete .mot { font-size: 22px; } .tete nav a { padding: 8px 9px; }
   .bandeau { flex-wrap: wrap; padding: 14px 4px 4px 14px; }
   .bandeau .resume { flex-basis: 100%; padding-bottom: 12px; }
-  .bandeau .phrase { font-size: 16px; } .bandeau .resume .calme { display: block; }
+  .bandeau .phrase { font-size: 16px; }
   .cpt b .points { font-size: 23px; } .cpt b small { font-size: 11px; }
   .cpt { flex: 1 1 30%; min-width: 0; padding: 0 8px 12px 0; border-left: 0; }
   .cpt .etiquette { font-size: 9.5px; letter-spacing: 0.05em; white-space: nowrap; }
   .cpt .sous { white-space: normal; }
+  .bandeau.dense .cpt { padding: 0 8px 12px 0; min-width: 0; } .bandeau.dense .resume { flex-basis: 100%; }
+  .cases.dense, .cases.fin.dense { width: auto; max-width: 100%; }
   .salle2 { grid-template-columns: minmax(0, 1fr); }
   .sol-cadre { display: none; }
   .liste { display: flex; flex-direction: column; gap: 10px; }
-  .cote { display: contents; } .cote .attente { order: -1; } .cote .suite { order: 5; }
-  .cote .panneau.lire { display: none; }
+  .cote { display: contents; } .cote .attente { order: -2; } .cote .lire { order: -1; } .cote .suite { order: 5; }
 }

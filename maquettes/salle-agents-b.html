@@ -4,110 +4,139 @@
 <link rel="stylesheet" href="salle-agents.css">
 <style>
 /* Piste B : les étiquettes se rangent sous les postes d'écriture et au-dessus des vérificateurs. */
-.etq.bas { transform: none; width: 122px; padding: 7px 8px 8px; }
+.etq.bas { transform: none; width: 122px; padding: 7px 7px 8px 11px; }
 .etq.bas::after { left: 50%; top: -8px; width: 1px; height: 7px; }
 .etq.bas .m, .etq.haut .m { white-space: normal; align-items: flex-start; line-height: 1.3; }
 .etq.bas .m .signe, .etq.haut .m .signe { margin-top: 1px; }
 .etq.bas .d, .etq.haut .d { white-space: normal; }
-.etq.haut { transform: translate(-50%, -100%); width: 124px; padding: 7px 8px 8px; }
+.etq.haut { transform: translate(-50%, -100%); width: 124px; padding: 7px 7px 8px 11px; }
 .etq.haut::after { left: 50%; top: 100%; width: 1px; height: 8px; }
+.etq.cote-droit { transform: translateY(-50%); width: 150px; }
 .etq.large { width: 158px; }
 .case { position: absolute; top: 28px; width: 70px; height: 30px; border-radius: 8px; border: 1px solid var(--bord-fort); display: flex; align-items: center; justify-content: center; gap: 5px; font: 500 11.5px var(--mono); color: var(--discret); background: rgba(14, 18, 32, 0.6); }
 .case.fusionnee { background: var(--blanc); color: #000; border-color: transparent; font-weight: 600; box-shadow: 0 0 18px -4px rgba(255, 255, 255, 0.55); }
 .case.file { border-style: dashed; color: var(--faible); }
 .case small { font: 400 9.5px var(--mono); opacity: 0.7; }
+.case.petite { top: 26px; width: 12px; height: 16px; border-radius: 3px; box-shadow: none; }
 .note { position: absolute; font: 400 10.5px var(--mono); color: var(--discret); white-space: nowrap; background: rgba(8, 11, 20, 0.85); padding: 1px 6px; border-radius: 5px; }
+.note.a-gauche { transform: translateX(-100%); }
 .lettre { position: absolute; transform: translate(-50%, -100%); font: 500 11px var(--mono); color: var(--faible); }
 </style>
 </head><body>
 <!-- Piste B. La salle est rangée par postes, pour le travail à plusieurs : au premier rang les six places
-     d'écriture côte à côte, en face les vérificateurs (qui ne prennent pas de place), à gauche la file
-     d'attente, au fond la branche du chantier et sa porte d'entrée. Un travail avance vers le fond ;
-     un refus ou un conflit redescend vers le poste de l'ouvrier. Mêmes données que la piste A. -->
+     d'écriture côte à côte (colonnes carrées des ouvriers), en face les vérificateurs (colonnes rondes
+     cerclées, hors place), à gauche l'orchestrateur (pyramide) et la file d'attente, au fond la branche du
+     chantier et sa porte d'entrée. Un travail avance vers le fond ; un refus ou un conflit redescend vers le
+     poste. L'ouvrier qui attend un verdict se tient devant son vérificateur, sans place. Mêmes données que la piste A.
+     Avec « ?charge=32 » dans l'adresse : l'épreuve de charge. Les mêmes rangs, resserrés : quatre rangées de
+     huit places, ce qui demande la personne en tête, douze vérificateurs en face, l'étiquette réduite. -->
 <div class="app" id="app"></div>
 <script src="salle-agents-donnees.js"></script>
 <script>
-const L = 934, H = 676, S = 30;
-const Y_PORTE = 88, Y_VERIF = 262, Y_POSTE = 488;
-/* Les six places, de gauche à droite. Le moteur ne numérote pas ses places : l'ordre est celui de l'affichage. */
-const postes = ["C", "D", "I", "J", "G", "F"].map((id, i) => ({ t: T[id], x: 232 + 128 * i, y: Y_POSTE }));
+const L = 934, H = 676, S = CHARGE ? 21 : 30, RX = CHARGE ? 19 : 28;
+const Y_PORTE = CHARGE ? 64 : 88, Y_VERIF = CHARGE ? 172 : 276, Y_POSTE = CHARGE ? 314 : 478;
+/* Les places, de gauche à droite. Le moteur ne numérote pas ses places : l'ordre est celui de l'affichage.
+   À forte charge, quatre rangées de huit, et l'ordre met en tête ce qui demande un regard : ce qui t'attend,
+   les conflits, les corrections, les sous-tâches, puis les ouvriers qui écrivent, du plus ancien au plus récent. */
+const POIDS = (a) => (a.etat === "toi" ? 0 : a.etat === "conflit" ? 1 : a.etat === "corrige" ? 2 : a.role === "sous" ? 3 : 4);
+const rangees = CHARGE ? [...enPlace].sort((a, b) => POIDS(a) - POIDS(b) || b.depuis - a.depuis) : enPlace;
+const postes = rangees.map((a, i) => (CHARGE ? { a, t: a.t, x: 232 + 96 * (i % 8), y: Y_POSTE + 88 * Math.floor(i / 8) } : { a, t: a.t, x: 232 + 128 * i, y: Y_POSTE }));
 const lieu = Object.fromEntries(postes.map((p) => [p.t.id, p]));
-/* Les vérificateurs : celui de F en face de son ouvrier resté ouvert, les deux autres entre deux postes. */
-const relecteurs = [{ t: T.E, x: 552 }, { t: T.H, x: 680 }, { t: T.F, x: lieu.F.x }].map((r) => ({ ...r, y: Y_VERIF }));
-const file = enFile.map((t, i) => ({ t, x: 46 + 62 * i, y: Y_POSTE }));
+/* Les vérificateurs, en face, entre deux postes pour ne faire face à aucun ouvrier en particulier. */
+const face = relecteurs.map((a, i) => ({ a, t: a.t, x: CHARGE ? 232 + 61 * i : 424 + 128 * i, y: Y_VERIF }));
+/* L'ouvrier resté ouvert : devant son vérificateur, hors du rang des places. */
+const attente = sansPlace.map((a) => { const v = face.find((f) => f.t === a.t); return { a, t: a.t, x: v.x, y: v.y + 84, v }; });
+const file = enFile.map((t, i) => (CHARGE ? { t, x: 44 + 56 * (i % 3), y: 446 + 96 * Math.floor(i / 3) } : { t, x: 60 + 62 * i, y: Y_POSTE }));
+const orch = CHARGE ? { x: 46, y: 262 } : { x: 52, y: 326 }; // hors des rangs : il suit tout le chantier
 const fleche = (x, y, c) => `<path d="M${x - 4.5},${y - 7} L${x},${y} L${x + 4.5},${y - 7}" fill="none" stroke="${c}" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>`;
-function traits() {
-  const haut = (p) => p.y - HAUTEUR[p.t.effort] * S - 22;
+const haut = (p) => p.y - HAUTEUR[p.a.effort] * S - 22;
+function refus(p) { // le refus redescend du rang des vérificateurs au poste, en points creux
   let d = "";
-  /* Les rails : la porte au fond, le rang des vérificateurs, le rang des places, la file en pointillé. */
+  for (let y = Y_VERIF + 16; y < haut(p) - 10; y += 10) d += `<circle cx="${p.x}" cy="${y}" r="2.3" fill="#0b0f1b" stroke="${GRIS}" stroke-opacity=".8" stroke-width="1.2"/>`;
+  return d + fleche(p.x, haut(p), GRIS) + anneau(p.x, Y_VERIF, 20, "corrige", false, GRIS) + anneau(p.x, Y_VERIF, 20, "corrige", true, GRIS);
+}
+function traits() {
+  let d = "";
+  /* Les rails : la porte au fond, le rang des vérificateurs, les rangs des places, la file en pointillé. */
   d += `<line x1="16" y1="${Y_PORTE - 2}" x2="${L - 6}" y2="${Y_PORTE - 2}" stroke="#fff" stroke-opacity=".55"/><line x1="16" y1="${Y_PORTE + 2}" x2="${L - 6}" y2="${Y_PORTE + 2}" stroke="#fff" stroke-opacity=".25"/>`;
-  d += `<line x1="330" y1="${Y_VERIF}" x2="${L - 30}" y2="${Y_VERIF}" stroke="${BLEU}" stroke-opacity=".3"/>`;
-  d += `<line x1="200" y1="${Y_POSTE}" x2="${L - 30}" y2="${Y_POSTE}" stroke="${BLEU}" stroke-opacity=".45" stroke-width="1.5"/>`;
+  d += `<line x1="${CHARGE ? 204 : 330}" y1="${Y_VERIF}" x2="${L - (CHARGE ? 6 : 150)}" y2="${Y_VERIF}" stroke="${VERT}" stroke-opacity=".3"/>`;
+  for (const y of new Set(postes.map((p) => p.y))) d += `<line x1="200" y1="${y}" x2="${L - 6}" y2="${y}" stroke="${BLEU}" stroke-opacity=".45" stroke-width="1.5"/>`;
+  if (CHARGE) return d + `<line x1="192" y1="${Y_POSTE - 12}" x2="192" y2="${Y_POSTE + 88 * 3 + 12}" stroke="rgba(220,220,220,.5)" stroke-width="2" stroke-linecap="round"/>`;
   d += `<line x1="16" y1="${Y_POSTE}" x2="186" y2="${Y_POSTE}" stroke="rgba(220,220,220,.34)" stroke-dasharray="4 5"/><line x1="192" y1="${Y_POSTE - 12}" x2="192" y2="${Y_POSTE + 12}" stroke="rgba(220,220,220,.6)" stroke-width="2" stroke-linecap="round"/>`;
   /* C : acceptée, puis conflit à la porte. Le travail redescend au poste, en double trait. */
   const c = lieu.C;
-  d += `<line x1="${c.x - 2.5}" y1="${Y_PORTE + 12}" x2="${c.x - 2.5}" y2="${haut(c) - 8}" stroke="${BLEU}" stroke-width="1.2"/><line x1="${c.x + 2.5}" y1="${Y_PORTE + 12}" x2="${c.x + 2.5}" y2="${haut(c) - 8}" stroke="${BLEU}" stroke-width="1.2"/>${fleche(c.x, haut(c), BLEU)}`;
-  d += `<circle cx="${c.x}" cy="${Y_PORTE}" r="9" fill="#0b0f1b" stroke="${BLEU}" stroke-width="1.4"/><path d="M${c.x - 3.6},${Y_PORTE - 3.6} l7.2,7.2 M${c.x + 3.6},${Y_PORTE - 3.6} l-7.2,7.2" stroke="${BLEU}" stroke-width="1.6" stroke-linecap="round"/>`;
-  /* D : refusée par son vérificateur. Le refus redescend en points creux. */
-  const r = lieu.D;
-  for (let y = Y_VERIF + 16; y < haut(r) - 10; y += 10) d += `<circle cx="${r.x}" cy="${y}" r="2.3" fill="#0b0f1b" stroke="${BLEU}" stroke-width="1.2"/>`;
-  d += fleche(r.x, haut(r), BLEU) + anneau(r.x, Y_VERIF, 20, "corrige", false) + anneau(r.x, Y_VERIF, 20, "corrige", true);
-  /* F : l'ouvrier reste ouvert, relié à son vérificateur d'en face. */
-  d += `<line x1="${lieu.F.x}" y1="${Y_VERIF}" x2="${lieu.F.x}" y2="${Y_POSTE}" stroke="${BLEU}" stroke-width="1.6"/>`;
+  d += `<line x1="${c.x - 2.5}" y1="${Y_PORTE + 12}" x2="${c.x - 2.5}" y2="${haut(c) - 8}" stroke="${GRIS}" stroke-opacity=".7" stroke-width="1.2"/><line x1="${c.x + 2.5}" y1="${Y_PORTE + 12}" x2="${c.x + 2.5}" y2="${haut(c) - 8}" stroke="${GRIS}" stroke-opacity=".7" stroke-width="1.2"/>${fleche(c.x, haut(c), GRIS)}`;
+  d += `<circle cx="${c.x}" cy="${Y_PORTE}" r="9" fill="#0b0f1b" stroke="${GRIS}" stroke-width="1.4"/><path d="M${c.x - 3.6},${Y_PORTE - 3.6} l7.2,7.2 M${c.x + 3.6},${Y_PORTE - 3.6} l-7.2,7.2" stroke="${GRIS}" stroke-width="1.6" stroke-linecap="round"/>`;
+  /* D et J : refusées par leur vérificateur. D est reprise par son ouvrier, J par un ouvrier de sous-tâche. */
+  d += refus(lieu.D) + refus(lieu.J);
   /* Les relectures en cours : si le vérificateur accepte, le travail ira à la porte (pas encore). */
-  for (const v of relecteurs) d += `<line x1="${v.x}" y1="${Y_PORTE + 4}" x2="${v.x}" y2="${v.y - 4}" stroke="rgba(220,220,220,.3)" stroke-dasharray="3 5"/>`;
+  for (const v of face) d += `<line x1="${v.x}" y1="${Y_PORTE + 4}" x2="${v.x}" y2="${v.y - 4}" stroke="rgba(220,220,220,.3)" stroke-dasharray="3 5"/>`;
+  /* F : son ouvrier attend le verdict, relié à son vérificateur. */
+  for (const o of attente) d += `<line x1="${o.x}" y1="${o.v.y}" x2="${o.x}" y2="${o.y}" stroke="${BLEU}" stroke-width="1.2" stroke-dasharray="3 3"/>`;
   return d;
 }
 function figures() {
-  let d = "";
-  for (const v of relecteurs) d += anneau(v.x, v.y, 22, "verif", false) + verificateurDessin(v.x, v.y, S) + anneau(v.x, v.y, 22, "verif", true);
-  for (const f of file) d += anneau(f.x, f.y, 24, "file", false) + colonne(f.x, f.y, S, 0.36, HAUTEUR[f.t.effort], GRIS, "pointille") + anneau(f.x, f.y, 24, "file", true);
-  for (const p of postes) {
-    const t = p.t, c = COULEUR[t.etat];
-    if (t.etat === "toi") d += `<ellipse cx="${p.x}" cy="${p.y}" rx="38" ry="22" fill="${c}" opacity=".16" filter="url(#halo)"/>`;
-    d += anneau(p.x, p.y, 28, t.etat, false) + colonne(p.x, p.y, S, 0.42, HAUTEUR[t.effort], c, t.etat === "ouvert" ? "contour" : "plein") + anneau(p.x, p.y, 28, t.etat, true);
-  }
+  let d = anneau(orch.x, orch.y, RX, "ecrit", false, GRIS) + orchestrateurDessin(orch.x, orch.y, S) + anneau(orch.x, orch.y, RX, "ecrit", true, GRIS);
+  for (const v of face) d += agentDessin(v.a, v.x, v.y, S, RX);
+  for (const o of attente) d += agentDessin(o.a, o.x, o.y, S, 18);
+  for (const f of file) d += anneau(f.x, f.y, RX - 4, "file", false) + colonne(f.x, f.y, S, 0.36, HAUTEUR[f.t.effort], GRIS, "pointille") + anneau(f.x, f.y, RX - 4, "file", true);
+  for (const p of postes) d += agentDessin(p.a, p.x, p.y, S, RX);
   return d;
 }
+const caseDe = (t) => (t.etat === "fusionnee" ? "fusionnee" : t.etat === "file" ? "file" : "");
 function etiquettes() {
   let h = "";
-  for (const p of postes) {
-    const t = p.t, e = ETATS[t.etat];
-    h += `<div class="etq bas ${t.etat}" style="left:${p.x - 61}px;top:${p.y + 26}px" title="${t.phase}"><div class="t"><b class="id">${t.id}</b>${t.titre}</div>
-      <div class="m">${signe(e.signe, 13)}<span>${e.mot}</span></div><div class="d">${t.modele} ${t.effort}<br><b>${duree(t.ouvrier.depuis)}</b></div>${t.etat === "ouvert" ? '<i class="bientot coin">bientôt</i>' : ""}</div>`;
-  }
-  for (const v of relecteurs) {
-    const t = v.t, r = t.verificateur;
-    h += `<div class="etq haut verif" style="left:${v.x}px;top:${v.y - 62}px" title="${t.phase}"><div class="t">${t.ouvrier ? `Vérificateur de ${t.id}` : `<b class="id">${t.id}</b>${t.titre}`}</div>
-      <div class="m">${signe("verif", 13)}<span>en relecture</span></div><div class="d">${r.modele} ${r.effort}<br><b>${duree(r.depuis)}</b></div></div>`;
-  }
-  file.forEach((f, i) => {
+  for (const p of postes) h += `<div class="etq bas ${p.a.etat} de-${p.a.role}" style="left:${p.x - 61}px;top:${p.y + 26}px" title="${p.t.phase}">${blocAgent(p.a, titreDe(p.t), true)}</div>`;
+  for (const v of face) h += `<div class="etq haut verif de-verificateur" style="left:${v.x}px;top:${v.y - 62}px" title="${v.t.phase}">${blocAgent(v.a, titreDe(v.t), true)}</div>`;
+  for (const o of attente) h += `<div class="etq cote-droit ouvert de-ouvrier" style="left:${o.x + 30}px;top:${o.y - 14}px">${blocAgent(o.a, titreDe(o.t))}</div>`;
+  h += `<div class="etq cote-droit de-orchestrateur" style="left:${orch.x + 36}px;top:${orch.y - 20}px;width:136px"><div class="qui">${libelle("orchestrateur")}</div><div class="m">${signe("suit", 13)}<span>suit ${enMarche} agents</span></div><div class="d">${E.orchestrateur.modele} ${E.orchestrateur.effort}</div></div>`;
+  file.forEach((f) => {
     h += `<span class="lettre" style="left:${f.x}px;top:${f.y - HAUTEUR[f.t.effort] * S - 20}px">${f.t.id}</span>
-      <div class="etq bas large file" style="left:10px;top:${f.y + 58 + i * 54}px"><div class="t"><b class="id">${f.t.id}</b>${f.t.titre}</div><div class="d">${f.t.modele} ${f.t.effort} · <b>${duree(f.t.attend)}</b></div></div>`;
+      <div class="etq bas large file" style="left:10px;top:${f.y + 30}px">${titreDe(f.t)}<div class="m file">${signe("file", 13)}<span>attend une place</span></div><div class="d">${f.t.modele} ${f.t.effort} · <b>${duree(f.t.attend)}</b></div></div>`;
   });
   /* Le fond de la salle : la branche du chantier, une case par tâche. */
   E.taches.forEach((t, i) => {
-    h += `<span class="case ${t.etat === "fusionnee" ? "fusionnee" : t.etat === "file" ? "file" : ""}" style="left:${16 + i * 76}px">${t.id}${t.etat === "fusionnee" ? signe("fusionnee", 12) + `<small>${t.entree}</small>` : ""}</span>`;
+    h += `<span class="case ${caseDe(t)}" style="left:${16 + i * 76}px">${t.id}${t.etat === "fusionnee" ? signe("fusionnee", 12) + `<small>${t.entree}</small>` : ""}</span>`;
   });
   h += `<span class="zone-titre" style="left:16px;top:2px"><b>${fusionnees.length} / ${E.taches.length}</b>dans ${E.branche}, la branche du chantier</span>
     <span class="zone-titre" style="left:16px;top:${Y_PORTE + 12}px">Porte d'entrée<small>contrôles rejoués si main<br>a bougé, puis fusion</small></span>
-    <span class="zone-titre" style="left:16px;top:${Y_VERIF - 46}px"><b>${verificateurs.length}</b>vérificateurs<small>en face des postes,<br>sans prendre de place</small></span>
-    <span class="zone-titre" style="left:16px;top:${Y_POSTE - 118}px"><b>${ouvriers.length} / ${E.places}</b>places d'écriture</span>
-    <span class="zone-titre" style="left:16px;top:${Y_POSTE + 30}px"><b>${enFile.length}</b>attendent une place</span>
-    <span class="note" style="left:${lieu.C.x + 16}px;top:${Y_PORTE + 12}px">conflit à l'entrée · src/routes.py</span>
-    <span class="note" style="left:${lieu.D.x + 28}px;top:${Y_VERIF - 9}px">refus · 14:41</span>`;
+    <span class="zone-titre r-verificateur" style="left:16px;top:${Y_VERIF - 60}px">${marque("verificateur", 13)}<b>${relecteurs.length}</b>vérificateurs<small>en face des postes,<br>sans prendre de place</small></span>
+    <span class="zone-titre r-ouvrier" style="left:16px;top:${Y_POSTE - 100}px">${marque("ouvrier", 13)}<b>${enPlace.length} / ${E.places}</b>places d'écriture</span>
+    <span class="note" style="left:${lieu.C.x + 16}px;top:${Y_PORTE - 24}px">conflit à l'entrée · src/routes.py</span>
+    <span class="note a-gauche" style="left:${lieu.D.x - 26}px;top:${Y_VERIF - 9}px">refus · 14:41</span>
+    <span class="note" style="left:${lieu.J.x + 26}px;top:${Y_VERIF - 9}px">refus · ${T.J.refus}</span>
+    <span class="note" style="left:${lieu.J.x + 12}px;top:${Y_VERIF + 58}px">travail gardé ${BIENTOT}</span>`;
   return h;
 }
-/* Écran étroit : les mêmes rangs, l'un sous l'autre. */
-const rang = (n, titre, note, lignes) => `<section class="panneau groupe"><h2><b>${n}</b>${titre}<small>${note}</small></h2><ul>${lignes}</ul></section>`;
-const rangs = rang(`${ouvriers.length} / ${E.places}`, "places d'écriture", "une place par ouvrier", postes.map((p) => ligne(p.t)).join(""))
-  + rang(verificateurs.length, "vérificateurs", "sans prendre de place", relecteurs.map((v) => `<li class="ligne verif"><span class="noeud">${signe("verif")}</span><div><p><b class="id">${v.t.id}</b>${v.t.titre}</p>
-      <p class="mot">relu par ${v.t.verificateur.modele}</p><small>${v.t.verificateur.modele} · ${v.t.verificateur.effort} · ${duree(v.t.verificateur.depuis)}</small><small>${v.t.ouvrier ? "son ouvrier reste ouvert, à sa place" : "l'ouvrier a fini, sa place est rendue"}</small></div></li>`).join(""))
-  + rang(enFile.length, "attendent une place", "prêtes, aucune place libre", enFile.map(ligne).join(""))
-  + rang(`${fusionnees.length} / ${E.taches.length}`, `dans ${E.branche}`, "la branche du chantier", fusionnees.map(ligne).join(""));
-document.getElementById("app").innerHTML = `${entete("Salle", "Maquette · piste B")}${bandeau()}
-  <main class="salle2"><div class="sol-cadre"><div class="sol"><svg class="plan" viewBox="0 0 ${L} ${H}" role="img" aria-label="La salle par postes : ${ouvriers.length} ouvriers sur ${E.places} places, ${verificateurs.length} vérificateurs en face">${DEFS}${grille(L, H)}<g>${traits()}</g><g>${figures()}</g></svg>
-    ${etiquettes()}</div></div>
-  <div class="liste">${rangs}</div>${cote(LECTURE)}</main>`;
+/* À forte charge : les mêmes rangs, l'étiquette réduite à la tâche et à la durée, le rôle écrit en tête de rang. */
+function etiquettesCharge() {
+  let h = "";
+  for (const p of postes) h += etqMini(p.t, p.x, p.y + 13);
+  for (const v of face) h += etqMini(v.t, v.x, v.y + 13, true);
+  for (const f of file) h += etqMini(f.t, f.x, f.y + 13, true);
+  E.taches.forEach((t, i) => (h += `<span class="case petite ${caseDe(t)}" style="left:${16 + i * 15.1}px" title="${t.id} · ${t.titre}"></span>`));
+  h += `<div class="etq cote-droit de-orchestrateur" style="left:${orch.x + 30}px;top:${orch.y - 16}px;width:136px"><div class="qui">${libelle("orchestrateur")}</div><div class="m">${signe("suit", 13)}<span>suit ${enMarche} agents</span></div><div class="d">${E.orchestrateur.modele} ${E.orchestrateur.effort}</div></div>`;
+  h += `<span class="zone-titre" style="left:16px;top:2px"><b>${fusionnees.length} / ${E.taches.length}</b>dans ${E.branche}, la branche du chantier</span>
+    <span class="zone-titre" style="left:16px;top:${Y_PORTE + 10}px">Porte d'entrée<small>contrôles rejoués si main<br>a bougé, puis fusion</small></span>
+    <span class="zone-titre r-verificateur" style="left:16px;top:${Y_VERIF - 44}px">${marque("verificateur", 13)}<b>${relecteurs.length}</b>vérificateurs<small>en face, hors place</small></span>
+    <span class="zone-titre r-ouvrier" style="left:16px;top:${Y_POSTE - 6}px">${marque("ouvrier", 13)}<b>${enPlace.length} / ${E.places}</b>places<small>ce qui t'attend d'abord,<br>puis les plus anciens</small></span>
+    <span class="zone-titre" style="left:16px;top:${file[0].y - 68}px"><b>${enFile.length}</b>attendent une place</span>`;
+  const p = lieu.B7; // l'étiquette complète du poste survolé
+  return h + `<div class="etq survol ecrit de-ouvrier" style="left:${p.x + 26}px;top:${p.y - 8}px">${blocAgent(p.a, titreDe(p.t))}</div>`;
+}
+/* Écran étroit : les mêmes rangs, l'un sous l'autre, chacun sous le signe de son rôle. */
+const uneLigne = CHARGE ? ligneCourte : ligne;
+const rang = (signeRole, n, titre, note, lignes) => `<section class="panneau groupe"><h2>${signeRole}<b>${n}</b>${titre}<small>${note}</small></h2><ul>${lignes}</ul></section>`;
+const orchestre = `<li class="ligne autre"><span class="noeud">${signe("suit")}</span><div><div class="agent"><span class="qui">${libelle("orchestrateur")}</span><span class="mot">suit ${enMarche} agents</span><small>${E.orchestrateur.modele} · ${E.orchestrateur.effort}</small></div></div></li>`;
+const relues = E.taches.filter((t) => t.etat === "verif");
+const rangs = rang(marque("orchestrateur", 13), 1, "orchestrateur", "hors place", orchestre)
+  + rang(marque("ouvrier", 13), `${enPlace.length} / ${E.places}`, "places d'écriture", "une place par ouvrier", postes.map((p) => uneLigne(p.t)).join(""))
+  + rang(marque("verificateur", 13), relecteurs.length, "vérificateurs", "sans prendre de place", relues.map(uneLigne).join(""))
+  + rang("", enFile.length, enFile.length > 1 ? "attendent une place" : "attend une place", "prêtes, aucune place libre", enFile.map(uneLigne).join(""))
+  + rang("", `${fusionnees.length} / ${E.taches.length}`, `dans ${E.branche}`, "la branche du chantier", fusionnees.map(uneLigne).join(""));
+document.getElementById("app").innerHTML = `${entete("Salle", CHARGE ? "Piste B · 32 places" : "Maquette · piste B")}${bandeau()}
+  <main class="salle2"><div class="sol-cadre"><div class="sol"><svg class="plan" viewBox="0 0 ${L} ${H}" role="img" aria-label="La salle par postes : ${enPlace.length} ouvriers sur ${E.places} places, ${relecteurs.length} vérificateurs en face, un orchestrateur">${DEFS}${grille(L, H)}<g>${traits()}</g><g>${figures()}</g></svg>
+    ${CHARGE ? etiquettesCharge() : etiquettes()}</div></div>
+  <div class="liste">${rangs}</div>${cote()}</main>`;
 </script>
 </body></html>

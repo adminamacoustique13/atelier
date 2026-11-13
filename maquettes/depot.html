@@ -3,21 +3,26 @@
 <title>Atelier · Dépôt : les branches et les fusions du chantier</title>
 <link rel="stylesheet" href="salle-agents.css">
 <style>
-.rang { position: absolute; left: 14px; width: 168px; transform: translateY(-50%); line-height: 1.25; }
+.rang { position: absolute; left: 14px; width: 150px; transform: translateY(-50%); line-height: 1.25; }
 .rang b { display: block; font: 500 11.5px var(--mono); color: var(--texte); white-space: nowrap; }
 .rang small { display: block; font-size: 11px; color: var(--faible); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .rang.partie b { color: var(--discret); } .rang.absente b { color: var(--faible); }
-.dit { position: absolute; left: 610px; width: 316px; transform: translateY(-50%); display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; font-size: 11px; line-height: 1.35; color: var(--discret); }
-.dit .signe { margin-top: 1px; color: var(--en-cours); }
-.dit.fusionnee { color: var(--texte); } .dit.fusionnee .signe { color: var(--verifie); }
-.dit.file, .dit.file .signe { color: var(--faible); } .dit.toi .signe { color: var(--attend); }
+/* À droite de chaque branche : qui y travaille (le rôle d'abord), son état, puis ce que git en sait. */
+.dit { position: absolute; left: 540px; width: 388px; transform: translateY(-50%); font-size: 11px; line-height: 1.35; color: var(--discret); }
+.dit .qui { display: flex; align-items: center; gap: 6px; height: 15px; white-space: nowrap; font: 500 10.5px var(--mono); color: var(--texte); }
+.dit .qui .signe { color: var(--discret); } .dit .qui .toi { color: var(--attend); } .dit .qui .ouvert { color: var(--discret); }
+.dit .qui em { font-style: normal; color: var(--faible); margin: 0 2px; }
+.dit p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dit.long p { white-space: normal; }
+.dit.long { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 7px; } .dit.long .signe { margin-top: 1px; }
+.dit.file, .dit.file .qui { color: var(--faible); }
 .dit.souci b { color: var(--attend); font-weight: 500; }
 .heure { position: absolute; top: 4px; transform: translateX(-50%); font: 400 10px var(--mono); color: var(--faible); white-space: nowrap; }
-.heure.la { color: var(--texte); }
+.heure.la { color: var(--texte); transform: none; }
 .regle { position: absolute; left: 14px; right: 8px; border-top: 1px solid var(--bord); }
-.fantome { position: absolute; left: 186px; width: 408px; top: 28px; height: 42px; border: 1px dashed var(--bord-fort); border-radius: 10px; display: flex; align-items: center; gap: 6px; padding: 0 10px;
+.fantome { position: absolute; left: 166px; width: 358px; top: 28px; height: 42px; border: 1px dashed var(--bord-fort); border-radius: 10px; display: flex; align-items: center; gap: 5px; padding: 0 8px;
   background: repeating-linear-gradient(135deg, rgba(220, 220, 220, 0.035) 0 6px, transparent 6px 12px); }
-.fantome span { font: 400 10.5px var(--mono); color: var(--faible); border: 1px dashed var(--bord-fort); border-radius: 6px; padding: 2px 7px; white-space: nowrap; background: rgba(8, 11, 20, 0.7); }
+.fantome span { font: 400 10px var(--mono); color: var(--faible); border: 1px dashed var(--bord-fort); border-radius: 6px; padding: 2px 6px; white-space: nowrap; background: rgba(8, 11, 20, 0.7); }
 .pastille { font: 500 9.5px var(--mono); letter-spacing: 0.04em; border: 1px solid var(--bord-fort); border-radius: 5px; padding: 0 5px; line-height: 15px; color: var(--discret); white-space: nowrap; }
 .pastille.ici { background: var(--blanc); color: #000; border-color: transparent; }
 .enr { display: flex; flex-direction: column; font-size: 11.5px; }
@@ -39,32 +44,34 @@
   .depot-etroit { display: flex; flex-direction: column; gap: 9px; padding: 14px 16px; }
   .ligne p code { background: none; padding: 0; font-size: 12px; color: var(--texte); margin-right: 7px; }
   .ligne p { font-weight: 400; color: var(--discret); }
-  .ligne small.detail { color: var(--discret); }
 }
 </style>
 </head><body>
 <!-- Le dépôt du chantier. En haut, ce qui demanderait d'interroger GitHub (à venir). Dessous, ce qui se lit dans git
      dès maintenant : origin/main, main (la branche du chantier), puis une ligne par branche de tâche, du départ à
      l'entrée dans main. Une branche entrée revient sur main, en blanc ; une branche en cours s'arrête à
-     « maintenant » sur un rond creux. Mêmes données que les deux maquettes de la Salle. -->
+     « maintenant », sur le signe de l'agent qui y travaille (carré de l'ouvrier, anneau du vérificateur).
+     Mêmes données et mêmes signes que les deux maquettes de la Salle. -->
 <div class="app" id="app"></div>
 <script src="salle-agents-donnees.js"></script>
 <script>
-const L = 934, H = 676, D = E.depot;
+const L = 934, H = 676, D = E.depot, TRAIT = "#868c9c";
 const minutes = (hhmm) => { const [h, m] = hhmm.split(":").map(Number); return h * 60 + m; };
-const X = (hhmm) => 190 + (minutes(hhmm) - minutes("13:38")) * 5.8;
+const X = (hhmm) => 172 + (minutes(hhmm) - minutes("13:38")) * 5;
 const MAINTENANT = X(E.heure), Y_ORIGINE = 112, Y_MAIN = 152;
-const entrees = fusionnees, enCours = E.taches.filter((t) => t.base && t.etat !== "fusionnee"), absentes = enFile;
+const entrees = fusionnees, enCours = E.taches.filter((t) => t.agents.length), absentes = enFile;
 const Y = {};
-entrees.forEach((t, i) => (Y[t.id] = 211 + i * 38));
-enCours.forEach((t, i) => (Y[t.id] = 314 + i * 35));
-absentes.forEach((t, i) => (Y[t.id] = 618 + i * 30));
-const Y_TITRES = { dans: 182, pas: 284, sans: 590 };
+entrees.forEach((t, i) => (Y[t.id] = 211 + i * 36));
+enCours.forEach((t, i) => (Y[t.id] = 311 + i * 34));
+absentes.forEach((t, i) => (Y[t.id] = 641 + i * 30));
+const Y_TITRES = { dans: 182, pas: 282, sans: 612 };
 const pt = (x, y, r, plein, c = BLANC) => `<circle cx="${x.toFixed(1)}" cy="${y}" r="${r}" fill="${plein ? c : "#0b0f1b"}" stroke="${plein ? "#0b0f1b" : c}" stroke-width="${plein ? 1.5 : 1.6}"/>`;
+/* Le signe d'un rôle, posé au bout d'une branche. */
+const bout = (a, x, y) => `<circle cx="${x}" cy="${y}" r="8" fill="#101525"/><svg x="${x - 6}" y="${y - 6}" width="12" height="12" viewBox="0 0 12 12" style="color:${ROLES[a.role].teinte}">${MARQUES[a.sansPlace ? "ouvert" : a.role]}</svg>`;
 function graphe() {
   let fond = "", traits = "", noeuds = "";
   /* Les heures qui comptent, et la ligne de « maintenant ». */
-  for (const h of ["13:38", "14:02", "14:16", "14:25", "14:31"]) fond += `<line x1="${X(h)}" y1="24" x2="${X(h)}" y2="${H - 8}" stroke="rgba(220,220,220,.05)"/>`;
+  for (const h of ["13:38", "14:02", "14:16", "14:31"]) fond += `<line x1="${X(h)}" y1="24" x2="${X(h)}" y2="${H - 8}" stroke="rgba(220,220,220,.05)"/>`;
   fond += `<line x1="${MAINTENANT}" y1="20" x2="${MAINTENANT}" y2="${H - 8}" stroke="rgba(220,220,220,.4)" stroke-dasharray="2 4"/>`;
   /* origin/main : là où en est le dépôt en ligne, lu dans git. */
   const envoye = X(D.dernierEnvoi) + 4, rate = X(D.envoiRate) + 7;
@@ -89,41 +96,44 @@ function graphe() {
     const x0 = X(t.depart) + (t.depart === "14:02" ? 4 : t.depart === "14:16" ? 7 : 0), y = Y[t.id];
     if (!vus.has(x0)) traits += `<line x1="${x0}" y1="${Y_MAIN + 12}" x2="${x0}" y2="${y - 10}" stroke="#101525" stroke-width="7"/>`;
     vus.add(x0);
-    traits += depart(x0, y, BLEU, 1.8) + `<line x1="${x0 + 9}" y1="${y}" x2="${MAINTENANT}" y2="${y}" stroke="${BLEU}" stroke-width="1.8"/>`;
+    traits += depart(x0, y, TRAIT, 1.7) + `<line x1="${x0 + 9}" y1="${y}" x2="${MAINTENANT}" y2="${y}" stroke="${TRAIT}" stroke-width="1.7"/>`;
     if (!["14:02", "14:16"].includes(t.depart)) noeuds += pt(x0, Y_MAIN, 2.6, true);
     if (t.conflit) {
       const xc = X(t.conflit);
-      traits += `<line x1="${xc}" y1="${y}" x2="${xc}" y2="${Y_MAIN + 22}" stroke="${BLEU}" stroke-width="1.3" stroke-dasharray="2 4"/>`;
-      noeuds += `<circle cx="${xc}" cy="${Y_MAIN + 18}" r="8" fill="#0b0f1b" stroke="${BLEU}" stroke-width="1.4"/><path d="M${xc - 3.2},${Y_MAIN + 14.8} l6.4,6.4 M${xc + 3.2},${Y_MAIN + 14.8} l-6.4,6.4" stroke="${BLEU}" stroke-width="1.6" stroke-linecap="round"/>` + pt(xc, y, 3, false, BLEU);
+      traits += `<line x1="${xc}" y1="${y}" x2="${xc}" y2="${Y_MAIN + 22}" stroke="${TRAIT}" stroke-width="1.3" stroke-dasharray="2 4"/>`;
+      noeuds += `<circle cx="${xc}" cy="${Y_MAIN + 18}" r="8" fill="#0b0f1b" stroke="${GRIS}" stroke-width="1.4"/><path d="M${xc - 3.2},${Y_MAIN + 14.8} l6.4,6.4 M${xc + 3.2},${Y_MAIN + 14.8} l-6.4,6.4" stroke="${GRIS}" stroke-width="1.6" stroke-linecap="round"/>` + pt(xc, y, 3, false, GRIS);
     }
-    noeuds += pt(MAINTENANT, y, 4.6, false, BLEU);
+    if (t.refus) noeuds += pt(X(t.refus), y, 3, false, GRIS);
+    /* Au bout : le signe de qui y travaille ; l'ouvrier qui attend son verdict, juste avant, en tirets. */
+    t.agents.slice().reverse().forEach((a, i, liste) => (noeuds += bout(a, MAINTENANT - (liste.length - 1 - i) * 17, y)));
   }
   for (const t of absentes) noeuds += `<circle cx="${MAINTENANT}" cy="${Y[t.id]}" r="4.6" fill="#0b0f1b" stroke="rgba(220,220,220,.5)" stroke-dasharray="2 2.4"/>`;
   return fond + traits + noeuds;
 }
-/* Le dépôt ne dit que ce que git sait : un ouvrier resté ouvert y est une branche en relecture comme une autre. */
-const SIGNE_DEPOT = (t) => (t.etat === "ouvert" ? "verif" : ETATS[t.etat].signe);
-const MOT_DEPOT = (t) => (t.etat === "ouvert" ? "en relecture" : ETATS[t.etat].mot);
+/* Qui travaille sur la branche : le libellé du rôle, puis l'état en mots. */
+const quiTravaille = (t) => t.agents.map((a) => `${libelle(a.role, a.sansPlace)}<span class="${a.etat}">${a.sansPlace ? "attend" : motDe(a)}</span>${a.bientot ? BIENTOT : ""}`).join("<em>·</em>");
 function textes() {
   let h = "";
-  for (const [heure, mot] of [["13:38", "13:38"], ["14:02", "14:02"], ["14:16", "14:16"], ["14:25", "14:25"], ["14:31", "14:31"]]) h += `<span class="heure" style="left:${X(heure)}px">${mot}</span>`;
-  h += `<span class="heure la" style="left:${MAINTENANT}px">maintenant · ${E.heure}</span>`;
+  for (const heure of ["13:38", "14:02", "14:16", "14:31"]) h += `<span class="heure" style="left:${X(heure)}px">${heure}</span>`;
+  h += `<span class="heure la" style="left:${MAINTENANT - 22}px">maintenant · ${E.heure}</span>`;
   /* La zone à venir : ce qui demanderait d'interroger GitHub. */
   h += `<div class="rang absente" style="top:49px"><b>GitHub <i class="bientot">à venir</i></b><small>pas lu aujourd'hui</small></div>
     <div class="fantome"><span>demandes de fusion</span><span>contrôles du robot</span><span>relectures</span></div>
-    <div class="dit file" style="top:49px">${signe("nuage")}<span>Il faudrait interroger GitHub, ce que l'Atelier ne fait pas. Il n'envoie que ${E.branche} : les branches des tâches restent sur l'ordinateur.</span></div>
+    <div class="dit long file" style="top:49px">${signe("nuage")}<p>Il faudrait interroger GitHub, ce que l'Atelier ne fait pas. Il n'envoie que ${E.branche} : les branches des tâches restent sur l'ordinateur.</p></div>
     <span class="zone-titre" style="left:14px;top:80px">Lu dans git, dès maintenant</span><span class="regle" style="top:76px"></span>`;
   h += `<div class="rang" style="top:${Y_ORIGINE}px"><b>origin/${E.branche}</b><small>le dépôt en ligne</small></div>
-    <div class="dit souci" style="top:${Y_ORIGINE}px">${signe("nuage")}<span>À ${D.origine} (envoi de ${D.dernierEnvoi}). <b>L'envoi de ${D.envoiRate} a échoué</b> : ${E.branche} a ${D.avance} enregistrements d'avance.</span></div>
+    <div class="dit long souci" style="top:${Y_ORIGINE}px">${signe("nuage")}<p>À ${D.origine} (envoi de ${D.dernierEnvoi}). <b>L'envoi de ${D.envoiRate} a échoué</b> : ${E.branche} a ${D.avance} enregistrements d'avance.</p></div>
     <div class="rang" style="top:${Y_MAIN}px"><b>${E.branche}</b><small>la branche du chantier</small></div>
-    <div class="dit fusionnee" style="top:${Y_MAIN}px">${signe("branche")}<span>À ${D.tete} depuis ${D.envoiRate}. ${fusionnees.length} tâches sur ${E.taches.length} y sont entrées ; rien n'y entre sans vérification.</span></div>`;
+    <div class="dit long" style="top:${Y_MAIN}px;color:var(--texte)">${signe("branche")}<p>À ${D.tete} depuis ${D.envoiRate}. ${fusionnees.length} tâches sur ${E.taches.length} y sont entrées ; rien n'y entre sans vérification.</p></div>`;
   h += `<span class="regle" style="top:${Y_TITRES.dans - 12}px"></span><span class="zone-titre" style="left:14px;top:${Y_TITRES.dans - 6}px"><b>${entrees.length}</b>dans ${E.branche}</span>
     <span class="regle" style="top:${Y_TITRES.pas - 12}px"></span><span class="zone-titre" style="left:14px;top:${Y_TITRES.pas - 6}px"><b>${enCours.length}</b>pas encore dans ${E.branche}</span>
     <span class="regle" style="top:${Y_TITRES.sans - 12}px"></span><span class="zone-titre" style="left:14px;top:${Y_TITRES.sans - 6}px"><b>${absentes.length}</b>sans branche</span>`;
   for (const t of E.taches) {
     const genre = t.etat === "fusionnee" ? "partie" : t.etat === "file" ? "absente" : "";
+    const qui = t.etat === "fusionnee" ? `${signe("fusionnee", 13)}<span>dans ${E.branche} depuis ${t.entree}</span><em>·</em><span>${t.commit}</span>`
+      : t.etat === "file" ? `${signe("file", 13)}<span>pas partie, aucun agent</span>` : quiTravaille(t);
     h += `<div class="rang ${genre}" style="top:${Y[t.id]}px"><b>tache/${t.id}</b><small>${t.titre}</small></div>
-      <div class="dit ${t.etat}" style="top:${Y[t.id]}px">${signe(SIGNE_DEPOT(t))}<span>${t.depot}</span></div>`;
+      <div class="dit ${t.etat}" style="top:${Y[t.id]}px"><div class="qui">${qui}</div><p>${t.fait}${t.retard ? ` En retard de ${t.retard} sur ${E.branche}.` : ""}</p></div>`;
   }
   return h;
 }
@@ -132,31 +142,34 @@ const enLigne = `<section class="panneau attente"><div class="entre"><span class
     <p class="fort">L'envoi de ${D.envoiRate} a échoué.</p><p class="calme">${D.probleme}</p>
     <p class="calme">Rien n'est perdu : ${E.branche} garde ses ${D.avance} enregistrements d'avance, et l'Atelier renvoie la branche après la prochaine tâche vérifiée.</p>
     <code style="align-self:flex-start">${D.distant}</code></section>`;
-const journal = `<section class="panneau"><span class="etiquette">Derniers enregistrements de ${E.branche}</span><ul class="enr">${D.enregistrements.map((e, i) => `${e.marque === "origin/main" ? `<li class="seuil" style="display:block">au-dessus : pas encore en ligne</li>` : ""}<li class="${i < D.avance ? "pas-en-ligne" : ""}"><code>${e.h}</code><span class="m" title="${e.m}">${e.m}</span><span class="s">${e.marque ? `<i class="pastille ${e.marque === "main" ? "ici" : ""}" style="font-style:normal">${e.marque}</i>` : ""}${e.t}</span></li>`).join("")}</ul></section>`;
-const partages = `<section class="panneau"><span class="etiquette">Fichiers partagés du profil</span><ul class="partages">${D.partages.map((p) => `<li><span><code>${p.motif}</code> · fusion « ${p.fusion} »</span><span>${p.phrase[0].toUpperCase()}${p.phrase.slice(1)}</span></li>`).join("")}</ul></section>`;
-/* Le bandeau du dépôt. */
+const journal = `<section class="panneau suite"><span class="etiquette">Derniers enregistrements de ${E.branche}</span><ul class="enr">${D.enregistrements.slice(0, 5).map((e, i) => `${e.marque === "origin/main" ? `<li class="seuil" style="display:block">au-dessus : pas encore en ligne</li>` : ""}<li class="${i < D.avance ? "pas-en-ligne" : ""}"><code>${e.h}</code><span class="m" title="${e.m}">${e.m}</span><span class="s">${e.marque ? `<i class="pastille ${e.marque === "main" ? "ici" : ""}" style="font-style:normal">${e.marque}</i>` : ""}${e.t}</span></li>`).join("")}</ul></section>`;
+const partages = `<section class="panneau suite"><span class="etiquette">Fichiers partagés du profil</span><ul class="partages">${D.partages.map((p) => `<li><span><code>${p.motif}</code> · fusion « ${p.fusion} »</span><span>${p.phrase}</span></li>`).join("")}</ul></section>`;
+/* Le bandeau du dépôt. Les branches en cours portent le signe de qui y travaille. */
 const cases = (n, total) => Array.from({ length: total }, (_, i) => `<i class="${i < n ? "pris" : ""}"></i>`).join("");
+const signes = [...enPlace, ...relecteurs].map((a) => marque(a.role, 9)).join("");
 const resume = `<section class="bandeau panneau" aria-label="L'état du dépôt">
     <div class="resume"><span class="etiquette">Le dépôt · ${E.heure}</span>
-      <p class="phrase">${entrees.length} tâches sont dans ${E.branche}, ${enCours.length} branches sont en cours, dont 1 reprend un conflit.</p>
-      <p class="calme">Le dernier envoi vers le dépôt en ligne a échoué.</p></div>
+      <p class="phrase">${entrees.length} tâches sont dans ${E.branche}, ${enCours.length} branches sont en cours, dont 1 reprend un conflit.</p></div>
     <div class="cpt"><span class="etiquette">Dans ${E.branche}</span><b><span class="points">${entrees.length}</span><small>/ ${E.taches.length}</small></b><span class="cases fin">${cases(entrees.length, E.taches.length)}</span></div>
-    <div class="cpt"><span class="etiquette">Branches en cours</span><b><span class="points">${enCours.length}</span></b><span class="sous">pas encore dans ${E.branche}</span></div>
-    <div class="cpt"><span class="etiquette">Conflit</span><b><span class="points">1</span></b><span class="sous">C · l'ouvrier résout</span></div>
-    <div class="cpt"><span class="etiquette">Sans branche</span><b><span class="points">${absentes.length}</span></b><span class="sous">K, L · pas parties</span></div>
-    <div class="cpt attend"><span class="etiquette">Pas encore en ligne</span><b><span class="points">${D.avance}</span><small>enregistrements</small></b><span class="sous">envoi en échec · ${D.envoiRate}</span></div>
+    <div class="cpt"><span class="etiquette">Branches en cours</span><b><span class="points">${enCours.length}</span></b><span class="cases">${signes}</span><span class="sous">${enPlace.length} ouvriers, ${pluriel(relecteurs.length, "vérificateur")}</span></div>
+    <div class="cpt"><span class="etiquette">Conflit</span><b><span class="points">1</span></b><span class="cases"></span><span class="sous">C · l'ouvrier résout</span></div>
+    <div class="cpt"><span class="etiquette">Sans branche</span><b><span class="points">${absentes.length}</span></b><span class="cases"></span><span class="sous">${absentes.map((t) => t.id).join(", ")} · pas partie</span></div>
+    <div class="cpt attend"><span class="etiquette">Pas encore en ligne</span><b><span class="points">${D.avance}</span><small>enregistrements</small></b><span class="cases"></span><span class="sous">envoi en échec · ${D.envoiRate}</span></div>
   </section>`;
 /* Écran étroit : la même lecture en liste, groupe par groupe. */
-const rangee = (t) => `<li class="ligne ${t.etat}"><span class="noeud">${signe(SIGNE_DEPOT(t))}</span><div><p><code>tache/${t.id}</code>${t.titre}</p><p class="mot">${t.etat === "fusionnee" ? "dans " + E.branche : t.etat === "file" ? "pas de branche" : "pas encore dans " + E.branche + " · " + MOT_DEPOT(t)}</p><small class="detail">${t.depot}</small></div></li>`;
+const rangee = (t) => `<li class="ligne ${t.etat}"><span class="noeud">${signe(ETATS[t.etat].signe)}</span><div><p><code>tache/${t.id}</code>${t.titre}</p>
+    ${t.etat === "fusionnee" ? `<p class="mot">dans ${E.branche} depuis ${t.entree} · ${t.commit}</p>` : t.etat === "file" ? `<p class="mot">pas partie, aucun agent</p>` : ""}
+    ${t.agents.map((a) => `<div class="agent"><span class="qui">${libelle(a.role, a.sansPlace)}${a.bientot ? BIENTOT : ""}</span><span class="mot ${a.etat}">${motDe(a)}</span></div>`).join("")}
+    <small class="detail">${t.fait}${t.retard ? ` En retard de ${t.retard} sur ${E.branche}.` : ""}</small></div></li>`;
 const groupe = (n, titre, note, lignes) => `<section class="panneau groupe"><h2><b>${n}</b>${titre}<small>${note}</small></h2><ul>${lignes}</ul></section>`;
 const etroit = `<section class="panneau depot-etroit"><span class="etiquette">Lu dans git, dès maintenant</span>
     <p><code>${E.branche}</code> est la branche du chantier, à ${D.tete} depuis ${D.envoiRate}.</p>
-    <p class="calme"><code>origin/${E.branche}</code> est à ${D.origine}, envoyé à ${D.dernierEnvoi} : ${D.avance} enregistrements d'avance, aucun retard connu.</p></section>`;
+    <p class="calme"><code>origin/${E.branche}</code> est à ${D.origine}, envoyé à ${D.dernierEnvoi} : ${D.avance} enregistrements d'avance.</p></section>`;
 const avenir = `<section class="panneau avenir depot-etroit"><span class="etiquette">GitHub <i class="bientot">à venir</i></span>
     <p>Demandes de fusion, contrôles du robot, relectures : il faudrait interroger GitHub, ce que l'Atelier ne fait pas. Il n'envoie que ${E.branche} ; les branches des tâches restent sur l'ordinateur.</p></section>`;
 document.getElementById("app").innerHTML = `${entete("Dépôt", "Maquette · dépôt")}${resume}
   <main class="salle2"><div class="sol-cadre"><div class="sol panneau"><svg class="plan" viewBox="0 0 ${L} ${H}" role="img" aria-label="Les branches du chantier : ${entrees.length} entrées dans ${E.branche}, ${enCours.length} en cours">${DEFS}${graphe()}</svg>${textes()}</div></div>
-  <div class="liste">${etroit}${groupe(entrees.length, `dans ${E.branche}`, "branche revenue, supprimée", entrees.map(rangee).join(""))}${groupe(enCours.length, `pas encore dans ${E.branche}`, "branches en cours", enCours.map(rangee).join(""))}${groupe(absentes.length, "sans branche", "tâches pas parties", absentes.map(rangee).join(""))}${avenir}</div>
-  <aside class="cote">${enLigne}${journal.replace('class="panneau"', 'class="panneau suite"')}${partages.replace('class="panneau"', 'class="panneau suite"')}</aside></main>`;
+  <div class="liste">${etroit}${groupe(entrees.length, `dans ${E.branche}`, "branche revenue, supprimée", entrees.map(rangee).join(""))}${groupe(enCours.length, `pas encore dans ${E.branche}`, "branches en cours", enCours.map(rangee).join(""))}${groupe(absentes.length, "sans branche", "tâche pas partie", absentes.map(rangee).join(""))}${avenir}</div>
+  <aside class="cote">${enLigne}${journal}${partages}</aside></main>`;
 </script>
 </body></html>

@@ -4,75 +4,95 @@
 <link rel="stylesheet" href="salle-agents.css">
 </head><body>
 <!-- Piste A. La route en lacets de la Salle actuelle est gardée : un arrêt par tâche, dans l'ordre du plan,
-     de l'orchestrateur à l'entrée dans main. Ce qui change : le bandeau des comptes, un agent dessiné par
-     agent en marche (colonne large pour l'ouvrier, colonne fine cerclée pour le vérificateur), et un trait
-     d'anneau par état. Les données viennent de salle-agents-donnees.js, les mêmes que la piste B et le dépôt. -->
+     de l'orchestrateur à l'entrée dans main. Ce qui change : le bandeau des comptes, une silhouette par
+     agent en marche (pyramide pour l'orchestrateur, colonne carrée pour l'ouvrier, colonne ronde cerclée
+     pour le vérificateur), son rôle écrit en tête de chaque étiquette, et un trait d'anneau par état.
+     Les données viennent de salle-agents-donnees.js, les mêmes que la piste B et le dépôt.
+     Avec « ?charge=32 » dans l'adresse : l'épreuve de charge, soixante tâches et 32 places. La même route,
+     huit arrêts par rangée au lieu de quatre, et l'étiquette réduite à la tâche et à la durée. -->
 <div class="app" id="app"></div>
 <script src="salle-agents-donnees.js"></script>
 <script>
-const L = 934, H = 676, S = 30;
-const XS = [40, 268, 496, 724], YS = [124, 290, 456, 622];
+const L = 934, H = 676, S = CHARGE ? 21 : 30, PAR = CHARGE ? 8 : 4, RX = CHARGE ? 19 : 28;
+const XS = CHARGE ? Array.from({ length: PAR }, (_, i) => 40 + 122 * i) : [40, 268, 496, 724];
+const YS = CHARGE ? Array.from({ length: 8 }, (_, r) => 62 + 81 * r) : [130, 296, 462, 626];
+const BORDS = CHARGE ? [12, 916] : [16, 742];
 /* Les arrêts dans l'ordre de la route : une rangée, un virage, la rangée suivante dans l'autre sens. */
 const arrets = ["@orchestrateur", ...E.taches.map((t) => t.id), "@porte"].map((cle, k) => {
-  const r = Math.floor(k / 4), i = k % 4;
-  return { cle, x: XS[r % 2 ? 3 - i : i], y: YS[r], rangee: r };
+  const r = Math.floor(k / PAR), i = k % PAR;
+  return { cle, x: XS[r % 2 ? PAR - 1 - i : i], y: YS[r], rangee: r };
 });
+/* La route n'est pas un agent : blanche jusqu'aux tâches entrées, grise ensuite, ambre vers ce qui t'attend,
+   en pointillé vers ce qui n'est pas parti. */
 const TRAIT = { fusionnee: [BLANC, 2.4, ""], toi: [AMBRE, 2.2, ""], file: ["rgba(220,220,220,.34)", 1.2, "4 5"] };
 function route() {
   let d = "";
   for (let k = 0; k < arrets.length - 1; k++) {
     const a = arrets[k], b = arrets[k + 1], t = T[b.cle];
-    const [c, ep, tirets] = b.cle === "@porte" ? TRAIT.file : TRAIT[t.etat] || [BLEU, 2, ""];
-    const bord = a.rangee % 2 ? 16 : 742, r = 14, bas = b.y - a.y;
+    const [c, ep, tirets] = b.cle === "@porte" ? TRAIT.file : TRAIT[t.etat] || ["rgba(220,220,220,.42)", 1.8, ""];
+    const bord = BORDS[a.rangee % 2 ? 0 : 1], r = CHARGE ? 10 : 14, bas = b.y - a.y;
     const chemin = a.rangee === b.rangee ? `M${a.x},${a.y} L${b.x},${b.y}`
       : `M${a.x},${a.y} L${bord - Math.sign(bord - a.x) * r},${a.y} Q${bord},${a.y} ${bord},${a.y + r} L${bord},${a.y + bas - r} Q${bord},${b.y} ${bord - Math.sign(bord - a.x) * r},${b.y} L${b.x},${b.y}`;
-    if (!tirets) d += `<path d="${chemin}" fill="none" stroke="${c}" stroke-width="${ep * 3}" opacity=".28" filter="url(#flou)"/>`;
-    d += `<path d="${chemin}" fill="none" stroke="${c}" stroke-width="${ep}" ${tirets ? `stroke-dasharray="${tirets}"` : 'opacity=".9"'} stroke-linecap="round"/>`;
+    if (c === BLANC || c === AMBRE) d += `<path d="${chemin}" fill="none" stroke="${c}" stroke-width="${ep * 3}" opacity=".28" filter="url(#flou)"/>`;
+    d += `<path d="${chemin}" fill="none" stroke="${c}" stroke-width="${ep}" ${tirets ? `stroke-dasharray="${tirets}"` : ""} stroke-linecap="round"/>`;
   }
   return d;
 }
 function poste(a) {
-  const { x, y } = a, rx = 28;
-  if (a.cle === "@orchestrateur") return anneau(x, y, rx, "ecrit", false) + colonne(x, y, S, 0.42, 1.1, BLEU) + anneau(x, y, rx, "ecrit", true);
+  const { x, y } = a, rx = RX;
+  if (a.cle === "@orchestrateur") return anneau(x, y, rx, "ecrit", false, GRIS) + orchestrateurDessin(x, y, S) + anneau(x, y, rx, "ecrit", true, GRIS);
   if (a.cle === "@porte") return anneau(x, y, rx, "fusionnee", false) + colonne(x, y, S, 0.42, 0.35, BLANC) + anneau(x, y, rx, "fusionnee", true);
-  const t = T[a.cle], h = HAUTEUR[t.effort], c = COULEUR[t.etat];
-  const halo = t.etat === "toi" ? `<ellipse cx="${x}" cy="${y}" rx="${rx * 1.3}" ry="${rx * 0.75}" fill="${c}" opacity=".16" filter="url(#halo)"/>` : "";
-  let corps;
-  if (t.etat === "fusionnee") corps = colonne(x, y, S, 0.42, 0.35, c);
-  else if (t.etat === "file") corps = colonne(x, y, S, 0.42, h, c, "pointille");
-  else if (t.etat === "verif") corps = verificateurDessin(x, y, S);
-  else if (t.etat === "ouvert") corps = colonne(x, y, S, 0.42, h, c, "contour") + `<line x1="${x - 18}" y1="${y + 10}" x2="${x}" y2="${y}" stroke="${BLEU}" stroke-width="1.2"/>` + verificateurDessin(x - 18, y + 10, S);
-  else corps = colonne(x, y, S, 0.42, h, c);
-  return halo + anneau(x, y, rx, t.etat, false) + corps + anneau(x, y, rx, t.etat, true);
+  const t = T[a.cle];
+  if (t.etat === "fusionnee") return anneau(x, y, rx, "fusionnee", false) + colonne(x, y, S, 0.42, 0.35, BLANC) + anneau(x, y, rx, "fusionnee", true);
+  if (t.etat === "file") return anneau(x, y, rx, "file", false) + colonne(x, y, S, 0.42, HAUTEUR[t.effort], GRIS, "pointille") + anneau(x, y, rx, "file", true);
+  /* L'agent en marche au centre ; l'ouvrier qui attend son verdict à côté, hors de l'anneau, sans place. */
+  const [premier, second] = t.agents;
+  const lien = second ? `<line x1="${x}" y1="${y}" x2="${x + 22}" y2="${y + 24}" stroke="${ROLES[second.role].teinte}" stroke-width="1.2" stroke-dasharray="3 3"/>` : "";
+  return agentDessin(premier, x, y, S, rx) + lien + (second ? agentDessin(second, x + 22, y + 24, S, 15) : "");
+}
+/* L'étiquette complète d'une tâche : le rôle en tête, la tâche, l'état, le modèle et la durée. */
+function etiquetteTache(t, style, classe = "") {
+  const e = ETATS[t.etat];
+  if (!t.agents.length) {
+    const d = t.etat === "fusionnee" ? `${t.entree} · ${t.commit}` : `${t.modele} ${t.effort} · <b>${duree(t.attend)}</b>`;
+    return `<div class="etq ${t.etat} ${classe}" style="${style}">${titreDe(t)}<div class="m ${t.etat}">${signe(e.signe, 13)}<span>${e.mot}</span></div><div class="d">${d}</div></div>`;
+  }
+  const [premier, second] = t.agents;
+  return `<div class="etq ${t.etat} de-${premier.role} ${classe}" style="${style}">${blocAgent(premier, titreDe(t))}${second ? `<div class="second">${blocAgent(second)}</div>` : ""}</div>`;
 }
 function etiquette(a) {
-  const style = `left:${a.x + 34}px;top:${a.y - 9}px;transform:translateY(-100%)`;
-  if (a.cle === "@orchestrateur") return `<div class="etq ecrit" style="${style}"><div class="t">Orchestrateur</div><div class="m">${signe("orchestre", 13)}suit ${ouvriers.length + verificateurs.length} agents</div><div class="d">${E.orchestrateur}</div></div>`;
-  if (a.cle === "@porte") return `<div class="etq fusionnee" style="${style}"><div class="t">Entrée dans ${E.branche}</div><div class="m">${signe("porte", 13)}${fusionnees.length} tâches sur ${E.taches.length}</div><div class="d">contrôles rejoués</div></div>`;
-  const t = T[a.cle], e = ETATS[t.etat], v = t.verificateur;
-  const mot = e.mot;
-  const d = t.etat === "fusionnee" ? `${t.entree} · ${t.commit}`
-    : t.etat === "file" ? `${t.modele} ${t.effort} · <b>${duree(t.attend)}</b>`
-    : t.etat === "verif" ? `${v.modele} ${v.effort} · <b>${duree(v.depuis)}</b>`
-    : `${t.modele} ${t.effort} · <b>${duree(t.ouvrier.depuis)}</b>`;
-  const relu = t.etat === "ouvert" ? `<div class="m">${signe("verif", 13)}relu par ${v.modele}</div>` : "";
-  return `<div class="etq ${t.etat}" style="${style}" title="${t.phase || ""}"><div class="t"><b class="id">${t.id}</b>${t.titre}</div>
-    <div class="m">${signe(e.signe, 13)}${mot}</div><div class="d">${d}</div>${relu}${t.etat === "ouvert" ? '<i class="bientot coin">bientôt</i>' : ""}</div>`;
+  if (CHARGE) { // l'essentiel seulement, sous l'arrêt
+    if (a.cle === "@orchestrateur") return `<div class="mini" style="left:${a.x + 18}px;top:${a.y + 13}px">${marque("orchestrateur", 10)}<b>Orchestrateur</b></div>`;
+    if (a.cle === "@porte") return `<div class="mini" style="left:${a.x}px;top:${a.y + 13}px">${signe("porte", 11)}<b>${E.branche}</b><span>${fusionnees.length} / ${E.taches.length}</span></div>`;
+    return etqMini(T[a.cle], a.x, a.y + 13);
+  }
+  const style = `left:${a.x + 34}px;top:${a.y - 9}px`;
+  if (a.cle === "@orchestrateur") return `<div class="etq de-orchestrateur" style="${style}"><div class="qui">${libelle("orchestrateur")}</div>
+    <div class="m">${signe("suit", 13)}<span>suit ${enMarche} agents</span></div><div class="d">${E.orchestrateur.modele} ${E.orchestrateur.effort}</div></div>`;
+  if (a.cle === "@porte") return `<div class="etq fusionnee" style="${style}"><div class="t">Entrée dans ${E.branche}</div><div class="m">${signe("porte", 13)}<span>${fusionnees.length} tâches sur ${E.taches.length}</span></div><div class="d">contrôles rejoués</div></div>`;
+  return etiquetteTache(T[a.cle], style);
 }
-const etapes = `<span class="zone-titre" style="left:300px;top:${YS[0] + 26}px">Étape 1 · 2 tâches</span>
-  <span class="zone-titre" style="left:528px;top:${YS[0] + 26}px">Étape 2 · 10 tâches ensemble</span>`;
-/* Écran étroit : la route descend, un arrêt par ligne. */
+/* À forte charge : l'étiquette complète de l'arrêt survolé, pour montrer ce que le survol rend. */
+function survol() {
+  if (!CHARGE) return "";
+  const a = arrets.find((x) => x.cle === "B7");
+  return etiquetteTache(T.B7, `left:${a.x + 26}px;top:${a.y - 8}px`, "survol");
+}
+const etapes = CHARGE ? "" : `<span class="zone-titre" style="left:304px;top:${YS[0] + 9}px">Étape 1 · 2 tâches</span>
+  <span class="zone-titre" style="left:532px;top:${YS[0] + 9}px">Étape 2 · 10 tâches</span>`;
+/* Écran étroit : la route descend, un arrêt par ligne. À forte charge, une ligne courte par tâche. */
+const uneLigne = CHARGE ? ligneCourte : ligne;
+const taches = CHARGE ? E.taches.map(uneLigne).join("")
+  : `<li class="ligne fusionnee etape-titre"><span></span><div class="etiquette">Étape 1 · 2 tâches</div></li>${E.taches.slice(0, 2).map(ligne).join("")}
+     <li class="ligne etape-titre"><span></span><div class="etiquette">Étape 2 · 10 tâches</div></li>${E.taches.slice(2).map(ligne).join("")}`;
 const descente = `<section class="panneau groupe"><h2><b>${E.taches.length}</b>tâches le long de la route<small>de l'orchestrateur à ${E.branche}</small></h2><ul class="route">
-  <li class="ligne autre depart"><span class="noeud">${signe("orchestre")}</span><div><p>Orchestrateur</p><small>${E.orchestrateur} · suit ${ouvriers.length + verificateurs.length} agents</small></div></li>
-  <li class="ligne fusionnee etape-titre"><span></span><div class="etiquette">Étape 1 · 2 tâches</div></li>
-  ${E.taches.slice(0, 2).map(ligne).join("")}
-  <li class="ligne etape-titre"><span></span><div class="etiquette">Étape 2 · 10 tâches ensemble</div></li>
-  ${E.taches.slice(2).map(ligne).join("")}
+  <li class="ligne autre depart"><span class="noeud">${signe("suit")}</span><div><div class="agent"><span class="qui">${libelle("orchestrateur")}</span><span class="mot">suit ${enMarche} agents</span><small>${E.orchestrateur.modele} · ${E.orchestrateur.effort}</small></div></div></li>
+  ${taches}
   <li class="ligne autre fin"><span class="noeud">${signe("porte")}</span><div><p>Entrée dans ${E.branche}</p><small>${fusionnees.length} tâches sur ${E.taches.length} · contrôles rejoués à l'entrée</small></div></li>
 </ul></section>`;
-document.getElementById("app").innerHTML = `${entete("Salle", "Maquette · piste A")}${bandeau()}
-  <main class="salle2"><div class="sol-cadre"><div class="sol"><svg class="plan" viewBox="0 0 ${L} ${H}" role="img" aria-label="La route de la Salle : ${ouvriers.length} ouvriers, ${verificateurs.length} vérificateurs">${DEFS}${grille(L, H)}<g>${route()}</g><g>${[...arrets].sort((a, b) => a.y - b.y || a.x - b.x).map(poste).join("")}</g></svg>
-    ${etapes}${arrets.map(etiquette).join("")}</div></div>
-  <div class="liste">${descente}</div>${cote(LECTURE)}</main>`;
+document.getElementById("app").innerHTML = `${entete("Salle", CHARGE ? "Piste A · 32 places" : "Maquette · piste A")}${bandeau()}
+  <main class="salle2"><div class="sol-cadre"><div class="sol"><svg class="plan" viewBox="0 0 ${L} ${H}" role="img" aria-label="La route de la Salle : ${enPlace.length} ouvriers, ${relecteurs.length} vérificateurs, un orchestrateur">${DEFS}${grille(L, H)}<g>${route()}</g><g>${[...arrets].sort((a, b) => a.y - b.y || a.x - b.x).map(poste).join("")}</g></svg>
+    ${etapes}${arrets.map(etiquette).join("")}${survol()}</div></div>
+  <div class="liste">${descente}</div>${cote()}</main>`;
 </script>
 </body></html>
