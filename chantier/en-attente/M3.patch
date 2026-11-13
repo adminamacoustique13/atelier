@@ -1,0 +1,1629 @@
+diff --git a/atelier/agents.py b/atelier/agents.py
+index 70b0272..0e8bc72 100644
+--- a/atelier/agents.py
++++ b/atelier/agents.py
+@@ -591,6 +591,186 @@ class _ModeDesOuvriers:
+         return self._postes.appliques()
+ 
+ 
++# Les ouvriers gardés ouverts en même temps, par défaut (`ouverts_max` du profil). La référence
++# n'a pas de plafond : six, comme les places du régulateur.
++OUVERTS_MAX = 6
++# `liberer` rend la main au plus tard après ce délai ; la déconnexion finit alors derrière.
++DELAI_LIBERER_S = 5.0
++# Borne de `liberer_tous`, qui attend la fin de toutes les fermetures : celle du pont attend au
++# plus ~95 s (tour en cours 30 s, déconnexions 35 s, fil de la boucle 30 s).
++DELAI_FERMETURES_S = 100.0
++
++
++def lire_garde(profil) -> tuple[bool, int]:
++    """Lit au profil `ouvrier_ouvert` (vrai par défaut) et `ouverts_max` (OUVERTS_MAX).
++
++    Aide pour le moteur, qui décide de passer `garder_ouvert=True` à `executer` : l'agent ne lit
++    jamais `ouvrier_ouvert`, seulement `ouverts_max`. Seul un booléen compte pour le premier,
++    seul un entier positif ou nul pour le second ; toute autre valeur vaut la valeur par défaut.
++    `ouverts_max: 0` ne garde aucun ouvrier ouvert.
++    """
++    profil = profil if isinstance(profil, dict) else {}
++    garder = profil.get("ouvrier_ouvert", True)
++    maxi = profil.get("ouverts_max", OUVERTS_MAX)
++    lisible = isinstance(maxi, int) and not isinstance(maxi, bool) and maxi >= 0
++    return garder if isinstance(garder, bool) else True, maxi if lisible else OUVERTS_MAX
++
++
++class _Ouvert:
++    """Un ouvrier qui peut rester ouvert après son tour : sa session, fermée une seule fois.
++
++    `fermeture` ferme la session (celle du pont, ou la note de l'agent simulé). `gardable` : le
++    tour peut finir ouvert. `liberee`, posé par `liberer` pendant un tour, le fait fermer à la
++    fin de ce tour au lieu de le garder. `mode` : pour l'agent simulé, le mode des ouvriers.
++    """
++
++    def __init__(self, session, fermeture, gardable: bool = False, mode: str = ""):
++        self.session, self._fermeture = session, fermeture
++        self.gardable, self.mode, self.liberee = gardable, mode, False
++        self._une_fois, self.fermee = threading.Lock(), threading.Event()
++
++    @property
++    def fermant(self) -> bool:
++        """Vrai dès que la fermeture a commencé, par un appel ou par le fil d'arrêt."""
++        return self._une_fois.locked()
++
++    def fermer(self) -> None:  # une seule fois, par l'appel, `liberer` ou le fil d'arrêt
++        if self._une_fois.acquire(blocking=False):
++            try:
++                self._fermeture()
++            finally:
++                self.fermee.set()
++
++    def fermer_et_attendre(self) -> None:
++        """Ferme, ou attend la fermeture lancée ailleurs (un arrêt) : rien n'en sort vivant."""
++        self.fermer()
++        self.fermee.wait()
++
++
++def _fermer_sans_lever(ouvert: _Ouvert) -> None:
++    with suppress(Exception):
++        ouvert.fermer_et_attendre()
++
++
++class _OuvriersOuverts:
++    """Ce que les deux agents offrent pour l'ouvrier gardé ouvert après avoir rendu la main.
++
++    Un ouvrier n'est gardé que si l'appel le demande (`executer(..., garder_ouvert=True)`) :
++    celui qui le demande le libère. Il faut aux agents `_gardes` (tâche -> ouvrier ouvert qui
++    attend la suite), `_en_tour` (tâche -> ouvrier gardable en plein tour), `_fermetures` (les
++    ouvriers en train de fermer), `_verrou_ouverts` et `_plafond()`. Seul un ouvrier attaché à
++    une tâche est gardé ; un ouvrier qui attend ne tient aucun poste : `arreter` le ferme aussi.
++    """
++
++    delai_liberer_s = DELAI_LIBERER_S
++
++    def liberer(self, tache) -> None:
++        """Ferme l'ouvrier gardé ouvert pour cette tâche, s'il y en a un. Ne lève jamais.
++
++        Rend la main dès la déconnexion faite, et au plus tard après `delai_liberer_s` (5 s) :
++        une déconnexion plus lente finit dans un fil à part, que `liberer_tous` attend. Un
++        ouvrier de la tâche en plein tour n'est pas interrompu (c'est le rôle d'`arreter`) : il
++        sera fermé à la fin de son tour, qui rend `ouverte` faux. Sans effet pour une tâche
++        inconnue, ou appelé une seconde fois.
++        """
++        with suppress(Exception):
++            ouvert = self._retirer_ouvert(tache)
++            if ouvert is not None:
++                self._fermer_a_part(ouvert).wait(self.delai_liberer_s)
++
++    def liberer_tous(self) -> None:
++        """Ferme tous les ouvriers gardés ouverts, ensemble, et attend la fin de toutes les
++        fermetures, celles lancées avant par `liberer` ou `arreter` comprises (DELAI_FERMETURES_S
++        au plus). Ne lève jamais. Ceux en plein tour sont fermés à la fin de leur tour.
++        """
++        with suppress(Exception):
++            with self._verrou_ouverts:
++                ouverts = list(self._gardes.values())
++                self._gardes.clear()
++                for en_tour in self._en_tour.values():
++                    en_tour.liberee = True
++            for ouvert in ouverts:
++                self._fermer_a_part(ouvert)
++            with self._verrou_ouverts:
++                en_cours = list(self._fermetures)
++            limite = time.monotonic() + DELAI_FERMETURES_S
++            for ouvert in en_cours:
++                ouvert.fermee.wait(max(0.0, limite - time.monotonic()))
++
++    def _fermer_a_part(self, ouvert: _Ouvert) -> threading.Event:
++        """Lance la fermeture dans un fil à part, notée dans `_fermetures` jusqu'à sa fin ; rend
++        l'événement posé quand elle est finie."""
++        with self._verrou_ouverts:
++            self._fermetures.add(ouvert)
++
++        def fermer():
++            try:
++                _fermer_sans_lever(ouvert)
++            finally:
++                with self._verrou_ouverts:
++                    self._fermetures.discard(ouvert)
++
++        threading.Thread(target=fermer, daemon=True, name="atelier-liberer").start()
++        return ouvert.fermee
++
++    def _retirer_ouvert(self, tache) -> _Ouvert | None:
++        """Retire l'ouvrier ouvert de la tâche (à fermer par l'appelant), et marque celui qui
++        est en plein tour pour qu'il soit fermé à la fin de ce tour."""
++        cle = str(tache) if tache else None
++        with self._verrou_ouverts:
++            en_tour = self._en_tour.get(cle)
++            if en_tour is not None:
++                en_tour.liberee = True
++            return self._gardes.pop(cle, None)
++
++    def _fermer_l_ancien(self, tache) -> None:
++        """Avant un nouvel ouvrier de la tâche : ferme l'ancien resté ouvert et attend sa
++        déconnexion (bornée par celle du pont), pour que deux ne travaillent jamais ensemble."""
++        ouvert = self._retirer_ouvert(tache)
++        if ouvert is not None:
++            _fermer_sans_lever(ouvert)
++
++    def _fermer_en_attente(self, tache) -> None:
++        """Pour `arreter` : ferme dans un fil à part l'ouvrier ouvert qui attend, sans bloquer."""
++        with suppress(Exception):
++            ouvert = self._retirer_ouvert(tache)
++            if ouvert is not None:
++                self._fermer_a_part(ouvert)
++
++    def _inscrire_en_tour(self, tache: str, ouvert: _Ouvert) -> None:
++        with self._verrou_ouverts:
++            self._en_tour[tache] = ouvert
++
++    def _prendre_ouvert(self, tache: str, convient) -> _Ouvert | None:
++        """L'ouvrier ouvert de la tâche, s'il convient à la suite (`convient(ouvert)`, appelé
++        sous le verrou) : il passe alors en plein tour. Sinon None, et il reste où il est."""
++        with self._verrou_ouverts:
++            ouvert = self._gardes.get(tache)
++            if ouvert is None or not convient(ouvert):
++                return None
++            del self._gardes[tache]
++            self._en_tour[tache] = ouvert
++            return ouvert
++
++    def _ranger(self, tache, ouvert: _Ouvert, reussi: bool) -> bool:
++        """À la fin d'un tour : garde l'ouvrier ouvert, ou le ferme et attend la déconnexion.
++
++        Gardé seulement s'il est gardable (l'appel l'a demandé), après un tour réussi, sans
++        arrêt ni `liberer`, et sous le plafond. Rend vrai s'il est gardé.
++        """
++        maxi = self._plafond()
++        with self._verrou_ouverts:
++            if self._en_tour.get(tache) is ouvert:
++                del self._en_tour[tache]
++            garde = ouvert.gardable and reussi and not ouvert.liberee and not ouvert.fermant
++            garde = garde and tache not in self._gardes and len(self._gardes) < maxi
++            if garde:
++                self._gardes[tache] = ouvert
++        if not garde:
++            ouvert.fermer_et_attendre()
++        return garde
++
++
+ def _sans_reprise(rappel, nom: str) -> Resultat:
+     """Une reprise demandée d'une session vide : l'erreur à part, sans lancer d'agent."""
+     resultat = Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE)
+@@ -627,10 +807,13 @@ def _arrete(marche: _Marche, resultat: Resultat) -> Resultat:
+     return Resultat(ok=False, erreur=ARRETE, cout_usd=resultat.cout_usd, tokens=resultat.tokens)
+ 
+ 
+-class AgentClaude(_ModeDesOuvriers):
++class AgentClaude(_ModeDesOuvriers, _OuvriersOuverts):
+     """Fait travailler Claude Code par l'Agent SDK, avec le modèle et l'effort demandés.
+ 
+-    Chaque appel ouvre sa propre session du pont (`atelier.sdk`) et la ferme en partant.
++    Chaque appel ouvre sa propre session du pont (`atelier.sdk`) et la ferme en partant, sauf
++    l'ouvrier d'une tâche lancé avec `garder_ouvert=True` qui rend la main sans erreur ni arrêt :
++    il reste connecté (`resultat.ouverte`) jusqu'à `liberer`, et `executer(reprendre=session)`
++    lui donne la suite dans la même conversation.
+     Un outil qui n'est ni permis ni interdit passe par le guichet, s'il y en a un.
+     """
+ 
+@@ -644,6 +827,14 @@ class AgentClaude(_ModeDesOuvriers):
+         # Rend les règles retenues pour le chantier en cours ; le serveur la branche sur son état.
+         self.regles_chantier = list
+         self._postes = _Postes(lire_mode(self.profil.get("mode_ouvriers")))
++        # Les ouvriers gardés ouverts (`_OuvriersOuverts`) : qui attend la suite, qui travaille.
++        self._gardes: dict[str, _Ouvert] = {}
++        self._en_tour: dict[str, _Ouvert] = {}
++        self._fermetures: set[_Ouvert] = set()
++        self._verrou_ouverts = threading.Lock()
++
++    def _plafond(self) -> int:
++        return lire_garde(self.profil)[1]
+ 
+     def _outils(self, lecture_seule: bool) -> list[str]:
+         """Rend la liste des outils permis : lecture, commandes du projet, écriture si permise."""
+@@ -676,6 +867,7 @@ class AgentClaude(_ModeDesOuvriers):
+         contexte: dict | None = None,
+         copie_jetable: bool = False,
+         reprendre: str | None = None,
++        garder_ouvert: bool = False,
+     ) -> Resultat:
+         """Exécute une consigne et rend le résultat de l'agent.
+ 
+@@ -690,6 +882,19 @@ class AgentClaude(_ModeDesOuvriers):
+         le résultat a pour erreur `REPRISE_IMPOSSIBLE`, et rien d'autre n'est tenté ; une
+         session vide ("") la rend aussi, sans lancer d'agent. Sans `reprendre` (None), la
+         session est neuve, comme toujours.
++
++        `garder_ouvert` : un ouvrier de tâche rendu sans erreur ni arrêt reste connecté après
++        l'appel (`resultat.ouverte`), sous le plafond `ouverts_max` du profil, jusqu'à `liberer`.
++        L'appelant qui le demande le libère. Sans lui (par défaut), la connexion est fermée quand
++        l'agent rend la main, comme toujours. Le vérificateur et l'orchestrateur ne restent
++        jamais ouverts.
++
++        L'ouvrier gardé ouvert : si celui de la tâche est encore connecté sur la session
++        `reprendre`, avec les mêmes réglages (modèle, effort, dossier, outils, mode des ouvriers,
++        refus d'office), la consigne lui part dans la même conversation, sans rien rouvrir ; il
++        reste ouvert ensuite ou se ferme selon `garder_ouvert` de cet appel. Sinon, tout nouvel
++        ouvrier de la tâche le ferme d'abord (en attendant sa déconnexion), et la reprise se
++        fait par la session, comme ci-dessus.
+         """
+         tache, nom = _poste(contexte)
+         bac_a_sable = lecture_seule and copie_jetable
+@@ -703,13 +908,36 @@ class AgentClaude(_ModeDesOuvriers):
+             if not isinstance(reprendre, str) or not reprendre.strip():  # session vide : rien
+                 return _sans_reprise(self.sur_evenement, nom)  # n'est lancé à la place
+             reprise = {"session": reprendre, "reprise": True, "reprise_exigee": True}
++        reglages = {
++            "modele": self._alias(modele), "effort": effort, "dossier": dossier,
++            "outils_permis": self._outils(not ecrit) + self._autorisations(not ecrit),
++            "outils_interdits": [] if ecrit else list(ECRITURE), "mode_permission": mode,
++        }  # fmt: skip
++        de_tache = not lecture_seule and tache is not None
++        if de_tache:
++            ouvert = self._ouvert_pour(tache, reprendre, reglages)
++            if ouvert is not None:  # la suite, dans la même conversation
++                ouvert.gardable = bool(garder_ouvert)
++                return self._tour(tache, nom, ouvert, consigne, ouvrier=True)
++            self._fermer_l_ancien(tache)  # jamais deux ouvriers pour une même tâche
++        garder = de_tache and bool(garder_ouvert)
+         return self._travailler(
+-            tache, nom, consigne, ouvrier=not lecture_seule,
+-            modele=self._alias(modele), effort=effort, dossier=dossier,
+-            outils_permis=self._outils(not ecrit) + self._autorisations(not ecrit),
+-            outils_interdits=[] if ecrit else list(ECRITURE),
+-            mode_permission=mode, **reprise,
+-        )  # fmt: skip
++            tache, nom, consigne, ouvrier=not lecture_seule, garder=garder, **reglages, **reprise
++        )
++
++    def _ouvert_pour(self, tache: str, reprendre, reglages: dict) -> _Ouvert | None:
++        """L'ouvrier ouvert de la tâche, s'il est sur la session `reprendre` et que rien de ses
++        réglages n'a changé depuis sa connexion (ni ses droits, ni le mode) ; sinon None."""
++        if reprendre is None:
++            return None
++        refus = interdits(self.profil)
++
++        def convient(ouvert: _Ouvert) -> bool:
++            session = ouvert.session
++            memes = all(getattr(session, cle, None) == valeur for cle, valeur in reglages.items())
++            return session.session == reprendre and memes and session.refus_d_office == refus
++
++        return self._prendre_ouvert(tache, convient)
+ 
+     def converser(
+         self,
+@@ -745,18 +973,25 @@ class AgentClaude(_ModeDesOuvriers):
+         Rend True si un agent était en marche ; son appel rend alors l'arrêt. Ne bloque pas :
+         la session est fermée dans un fil à part (`fermer` n'oublie pas un arrêt arrivé avant le
+         tour), et c'est l'appel arrêté qui attend la fin de cette fermeture avant de rendre.
++        Un ouvrier de la tâche gardé ouvert, qui attend la suite, est fermé lui aussi, dans un
++        fil à part ; il ne compte pas comme agent en marche.
+         """
+-        return self._postes.arreter(tache or None)
++        en_marche = self._postes.arreter(tache or None)
++        if tache:
++            self._fermer_en_attente(tache)
++        return en_marche
+ 
+     def _travailler(
+-        self, tache, nom, consigne, sur_texte=None, sur_outil=None, ouvrier=False, **reglages
+-    ):
++        self, tache, nom, consigne, sur_texte=None, sur_outil=None, ouvrier=False, garder=False,
++        **reglages,
++    ):  # fmt: skip
+         """Ouvre une session du pont, lui confie la consigne et rend le résultat.
+ 
+         Tout lancement passe par ici, et chacun reçoit les interdits du profil (`interdits`),
+         quel que soit le rôle de l'agent. Quand l'appel rend la main, la session est fermée et
+         son client déconnecté, même après un arrêt : l'appel suivant ne croise jamais un Claude
+-        Code encore en train de sortir.
++        Code encore en train de sortir. Seule exception, `garder` (un ouvrier de tâche) : rendu
++        sans erreur ni arrêt, sous le plafond, il reste ouvert jusqu'à `liberer`.
+         """
+         from atelier.sdk import SessionSDK
+ 
+@@ -765,26 +1000,32 @@ class AgentClaude(_ModeDesOuvriers):
+             fabrique_client=self.fabrique_client, refus_d_office=interdits(self.profil),
+             **reglages,
+         )  # fmt: skip
+-        une_fois, fermee = threading.Lock(), threading.Event()
++        ouvert = _Ouvert(session, session.fermer, gardable=garder)
++        if garder:
++            self._inscrire_en_tour(tache, ouvert)
++        return self._tour(tache, nom, ouvert, consigne, ouvrier, sur_texte, sur_outil)
+ 
+-        def fermer():  # une seule fois, par l'appel ou par le fil d'arrêt
+-            if une_fois.acquire(blocking=False):
+-                try:
+-                    session.fermer()
+-                finally:
+-                    fermee.set()
++    def _tour(self, tache, nom, ouvert: _Ouvert, consigne, ouvrier, sur_texte=None,
++              sur_outil=None) -> Resultat:  # fmt: skip
++        """Un tour de la session d'`ouvert` : neuve, ou gardée ouverte depuis le tour d'avant.
++
++        Un tour qui ne peut pas rester ouvert ferme la session avant le retrait du poste ; un
++        tour gardable la garde ou la ferme ensuite (`_ranger`), et le résultat le dit.
++        """
++        session, resultat = ouvert.session, None
+ 
+         def couper():
+-            threading.Thread(target=fermer, daemon=True, name=f"atelier-arret-{nom}").start()
++            threading.Thread(target=ouvert.fermer, daemon=True, name=f"atelier-arret-{nom}").start()
+ 
+         with self._postes.occuper(tache, nom, couper, session, ouvrier) as marche:
+             session.sur_evenement = self._relais(marche, session, sur_texte, sur_outil)
+             try:
+                 resultat = session.envoyer(consigne)
+             finally:
+-                fermer()
+-                fermee.wait()  # la fermeture lancée par un arrêt est attendue elle aussi
++                if not (ouvert.gardable and resultat is not None and resultat.ok):
++                    ouvert.fermer_et_attendre()  # celle lancée par un arrêt est attendue aussi
+         resultat = _arrete(marche, resultat)  # après le retrait du poste : aucune fenêtre
++        resultat.ouverte = self._ranger(tache, ouvert, resultat.ok)
+         perdue = resultat.erreur == REPRISE_IMPOSSIBLE  # la session demandée n'est pas la sienne
+         resultat.session = "" if perdue else session.session or ""
+         self.source_connexion = session.source_connexion or self.source_connexion
+@@ -885,7 +1126,7 @@ RYTHME_GESTES = (0.4, 0.3, 1.6, 0.5, 0.2, 0.3, 2.2, 0.6, 0.4, 1.1, 0.3, 0.8)
+ 
+ 
+ @dataclass
+-class AgentSimule(_ModeDesOuvriers):
++class AgentSimule(_ModeDesOuvriers, _OuvriersOuverts):
+     """Joue un scénario écrit d'avance : pour la démonstration et les tests.
+ 
+     Le scénario donne, pour chaque tâche, l'issue de chaque tentative :
+@@ -918,6 +1159,18 @@ class AgentSimule(_ModeDesOuvriers):
+     reprendre=session)` repart dans une session déjà rendue, la note dans `reprises` et rend la
+     même session ; une session inconnue, ou oubliée par `oublier_sessions`, rend
+     `REPRISE_IMPOSSIBLE`. Par défaut, rien de tout cela ne change ce qu'il joue.
++
++    L'ouvrier gardé ouvert, sur demande de l'appel (`executer(..., garder_ouvert=True)`) : le
++    même contrat que l'agent réel. L'ouvrier d'une tâche rendu sans erreur ni arrêt reste
++    ouvert (`ouverte`), sous `ouverts_max` ; `executer(..., reprendre=session)` sur lui, le
++    mode des ouvriers inchangé, lui donne la suite dans la même session (notée dans `suivis`,
++    pas dans `reprises`), en `delai_s` secondes, arrêtable, avec son événement « fin », puis le
++    garde ou le ferme selon `garder_ouvert` de cet appel. Ce que joue chaque suite d'une tâche
++    est donné par `suites` : "rien" (réussie, sans rien écrire), "erreur" (en échec, et
++    l'ouvrier est fermé), ou "" (réussie : les fichiers du périmètre sont réécrits). Sinon, tout
++    nouvel ouvrier de la tâche le ferme d'abord, et la reprise suit la règle ci-dessus.
++    `liberer` et `liberer_tous` le ferment ; chaque session qui a pu rester ouverte est notée
++    une fois dans `fermes` à sa fermeture. Sans `garder_ouvert`, rien ne change.
+     """
+ 
+     scenario: dict[str, list[str]] = field(default_factory=dict)
+@@ -936,6 +1189,16 @@ class AgentSimule(_ModeDesOuvriers):
+     delai_limite_s: float | None = 3600.0
+     reprises: list[dict] = field(default_factory=list)
+     empeches: dict[str, list] = field(default_factory=dict)
++    suites: dict[str, list[str]] = field(default_factory=dict)
++    ouverts_max: int = OUVERTS_MAX
++    suivis: list[dict] = field(default_factory=list)
++    fermes: list[str] = field(default_factory=list)
++    _gardes: dict = field(default_factory=dict, init=False, repr=False, compare=False)
++    _en_tour: dict = field(default_factory=dict, init=False, repr=False, compare=False)
++    _fermetures: set = field(default_factory=set, init=False, repr=False, compare=False)
++    _verrou_ouverts: object = field(
++        default_factory=threading.Lock, init=False, repr=False, compare=False
++    )
+     _postes: _Postes = field(default_factory=_Postes, init=False, repr=False, compare=False)
+     _demandes: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
+     _refus: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
+@@ -957,8 +1220,17 @@ class AgentSimule(_ModeDesOuvriers):
+             chemin.write_text(f"# {marque}\n", "utf-8")
+ 
+     def arreter(self, tache: str | None = None) -> bool:
+-        """Arrête l'agent simulé en marche pour cette tâche, ou l'orchestrateur sans tâche."""
+-        return self._postes.arreter(tache or None)
++        """Arrête l'agent simulé en marche pour cette tâche, ou l'orchestrateur sans tâche.
++
++        Ferme aussi, à part, l'ouvrier de la tâche gardé ouvert qui attend la suite.
++        """
++        en_marche = self._postes.arreter(tache or None)
++        if tache:
++            self._fermer_en_attente(tache)
++        return en_marche
++
++    def _plafond(self) -> int:
++        return lire_garde({"ouverts_max": self.ouverts_max})[1]
+ 
+     def _annuler(self, nom: str) -> None:
+         if self.guichet is not None:
+@@ -975,18 +1247,31 @@ class AgentSimule(_ModeDesOuvriers):
+         contexte: dict | None = None,
+         copie_jetable: bool = False,
+         reprendre: str | None = None,
++        garder_ouvert: bool = False,
+     ) -> Resultat:
+-        """Rend le résultat prévu par le scénario pour cette tâche et cette tentative."""
++        """Rend le résultat prévu par le scénario pour cette tâche et cette tentative.
++
++        `garder_ouvert` : comme pour l'agent réel. La suite donnée à l'ouvrier ouvert de la
++        tâche (`reprendre` sur sa session) est jouée par `_donner_suite`.
++        """
+         contexte = contexte or {}
+         appel = {**contexte, "modele": modele, "effort": effort}
+         self.appels.append(appel if reprendre is None else {**appel, "reprise": reprendre})
+         tache, nom = _poste(contexte)
+         jeu = self._jeu_de_limite(tache)
++        ouvrier = contexte.get("role") == "ouvrier"
++        de_tache = ouvrier and tache is not None
++        if de_tache:
++            ouvert = self._ouvert_simule(tache, reprendre)
++            if ouvert is not None:
++                ouvert.gardable = bool(garder_ouvert)
++                return self._donner_suite(ouvert, consigne, contexte, dossier, modele, jeu)
++            self._fermer_l_ancien(tache)  # jamais deux ouvriers pour une même tâche
+         session = self._ouvrir_session(reprendre, consigne, contexte)
+         if session is None or jeu in REFUS_DE_LIMITE:
+             return self._refuser(nom, session, jeu)
+-        ouvrier = contexte.get("role") == "ouvrier"
+         empeche = self._empechement(tache) if ouvrier else ()
++        ouvert = self._ouvrir_gardable(tache, session) if de_tache and garder_ouvert else None
+         with self._postes.occuper(tache, nom, lambda: self._annuler(nom), None, ouvrier) as marche:
+             _emettre(self.sur_evenement, nom, "outil", "Lit la consigne")
+             if jeu == "alerte":
+@@ -999,9 +1284,65 @@ class AgentSimule(_ModeDesOuvriers):
+             prevu = Resultat(ok=False) if arrete else self._prevu(contexte, dossier, modele)
+         resultat = _empecher(_arrete(marche, prevu), empeche)  # après le retrait du poste
+         resultat.session = session
++        if ouvert is not None:
++            ouvert.mode = marche.mode  # le mode choisi, changements en marche compris
++            resultat.ouverte = self._ranger(tache, ouvert, resultat.ok)
++        _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
++        return resultat
++
++    def _ouvrir_gardable(self, tache: str, session: str) -> _Ouvert:
++        """Inscrit en plein tour un ouvrier simulé qui pourra rester ouvert sur `session`."""
++        ouvert = _Ouvert(session, lambda: self.fermes.append(session), gardable=True)
++        self._inscrire_en_tour(tache, ouvert)
++        return ouvert
++
++    def _ouvert_simule(self, tache: str, reprendre) -> _Ouvert | None:
++        """L'ouvrier ouvert de la tâche, s'il est sur la session `reprendre` et que le mode des
++        ouvriers n'a pas changé depuis son dernier tour ; sinon None."""
++        if reprendre is None:
++            return None
++        mode = self._postes.mode
++        return self._prendre_ouvert(tache, lambda o: o.session == reprendre and o.mode == mode)
++
++    def _donner_suite(self, ouvert: _Ouvert, consigne: str, contexte: dict, dossier,
++                      modele: str, jeu: str) -> Resultat:  # fmt: skip
++        """Joue la suite donnée à l'ouvrier ouvert, dans sa session : ce que dit `suites`."""
++        tache, nom = _poste(contexte)
++        rang = len(self.suivis) + 1
++        champs = {c: contexte.get(c) for c in ("tache", "role", "tentative")}
++        self.suivis.append({**champs, "session": ouvert.session, "message": consigne})
++        if jeu in REFUS_DE_LIMITE:  # refusé aussitôt : l'ouvrier est fermé
++            self._ranger(tache, ouvert, False)
++            return self._refuser(nom, ouvert.session, jeu)
++        suite = self._suivant(self.suites, "suites", tache)
++        with self._postes.occuper(tache, nom, lambda: self._annuler(nom), None, True) as marche:
++            _emettre(self.sur_evenement, nom, "outil", "Lit la suite")
++            if jeu == "alerte":
++                self._annoncer_limite(nom, "alerte")
++            self._jouer_mode(marche)
++            arrete = self._patienter(marche)
++            prevu = Resultat(ok=False) if arrete else self._suite_prevue(suite, tache, dossier,
++                                                                           modele, rang)
++        resultat = _arrete(marche, prevu)  # après le retrait du poste
++        resultat.session = ouvert.session
++        ouvert.mode = marche.mode
++        resultat.ouverte = self._ranger(tache, ouvert, resultat.ok)
+         _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
+         return resultat
+ 
++    def _suite_prevue(self, suite: str, tache: str, dossier, modele: str, rang: int) -> Resultat:
++        """Le résultat d'une suite : "erreur" échoue, "rien" n'écrit rien, sinon réécrit."""
++        cout = {"haiku": 0.02, "sonnet": 0.09, "opus": 0.35, "fable": 0.80}.get(modele, 0.1)
++        if suite == "erreur":
++            return Resultat(ok=False, erreur="Arrêt simulé de l'agent.", tokens=500)
++        if suite == "rien":
++            return Resultat(ok=True, texte="Suite simulée : rien à changer.", cout_usd=cout,
++                            tokens=3000, fichiers=[])  # fmt: skip
++        fichiers = [f for f in self.perimetres.get(tache, []) if "*" not in f]
++        self._ecrire(dossier, fichiers, f"tâche {tache}, suite {rang}")
++        return Resultat(ok=True, texte="Suite simulée.", cout_usd=cout, tokens=3000,
++                        fichiers=fichiers)  # fmt: skip
++
+     def oublier_sessions(self) -> None:
+         """Oublie les sessions rendues : les reprendre rendra désormais `REPRISE_IMPOSSIBLE`."""
+         with self._verrou:
+diff --git a/chantier/relais/M3.md b/chantier/relais/M3.md
+new file mode 100644
+index 0000000..4960252
+--- /dev/null
++++ b/chantier/relais/M3.md
+@@ -0,0 +1,253 @@
++# M3 — Agents : l'ouvrier reste ouvert après avoir rendu
++
++Base : `8a6ba8a`. Copie : `/home/user/atelier/.claude/worktrees/agent-a6de0c77ab7eb00fc`.
++
++Révisée après la décision de l'orchestrateur : l'ouvrier n'est gardé ouvert que si l'appel le
++demande (`garder_ouvert=True`). Celui qui le demande le libère.
++
++## Fait
++
++Suite complète : **2 210 tests verts (2 156 existants + 54 nouveaux), démontage compris, en
++50,2 s.** La base, mesurée au même moment sur la même machine : 2 156 verts en 46,5 s. Aucun test
++existant n'est modifié ; les deux tests de `tests/test_securite.py` qui veulent le fichier de
++refus effacé passent sans changement. ruff : propre.
++
++Preuve : `tests/test_agents_ouvert.py` (54 tests, nouveau), sur un faux client aux durées non
++nulles (`tests.doubles.FabriqueMesuree` : connexion 5 ms, tour 20 ms, interruption 5 ms,
++déconnexion 10 ms, ou une déconnexion qui ne répond jamais), qui compte connexions, demandes et
++déconnexions, et n'annonce sa session (`init`) qu'à la première demande d'une connexion. Chaque
++test compte les trois. 54 sur 54, trois fois de suite (7,2 à 8,4 s).
++
++Sur la base (`8a6ba8a` extraite à part, mes fichiers de test copiés, l'import de
++`lire_garde`/`OUVERTS_MAX` remplacé par un repli pour ne pas tomber à la collecte) : les 54
++tombent dans leur corps. Raisons : `garder_ouvert` inconnu de `executer`, `liberer` absent,
++comptes faux (connexions en trop), `lire_garde` absent.
++
++Relecture de la preuve : j'ai cassé le contrat de douze façons sur une copie à part. Chaque fois,
++des tests tombent :
++
++| Cassure | Tests en échec |
++|---|---|
++| `garder_ouvert` ignoré (toujours gardé) | 5 |
++| `garder_ouvert` de la suite ignoré | 1 |
++| `liberer` pendant un tour ignoré | 3 |
++| plafond ignoré | 4 |
++| mode et droits non comparés | 3 |
++| arrêt en attente qui ne ferme pas | 2 |
++| `liberer` sans borne | 1 |
++| `liberer_tous` qui n'attend pas les fermetures en cours | 3 |
++| nouvel ouvrier qui ne ferme pas l'ancien | 7 |
++| vérificateur gardé | 1 |
++| tour en échec gardé (les deux gardes cassées ensemble) | 6 |
++| suite simulée sans durée | 2 |
++
++La première cassure ferait aussi tomber la suite existante : c'est le défaut vrai de la
++première version de cette fiche.
++
++Point par point (décision de l'orchestrateur, puis critères de la fiche) :
++
++1. Sans `garder_ouvert` (l'appel exact d'avant, ou `False`) : `ouverte` faux, une connexion, une
++   demande, une déconnexion, fichier de refus effacé, aucun fil de session restant, reprise par
++   session comme avant, `liberer` et `liberer_tous` sans effet. Idem pour le double. Constaté :
++   vert, et les 2 156 tests existants passent.
++2. Avec `garder_ouvert=True` : gardé seulement pour un ouvrier attaché à une tâche, rendu sans
++   erreur ni arrêt, sous `ouverts_max`. Le vérificateur (copie jetable ou non) et un ouvrier
++   sans tâche ne le sont pas, même s'ils le demandent ; `converser` n'a pas ce paramètre.
++   Fermé sur : le client qui lève, une fin `is_error`, un délai dépassé, un arrêt, le plafond.
++   Constaté : vert.
++3. `ouvrier_ouvert` n'est plus lu par l'agent. Testé : vrai au profil sans `garder_ouvert`, rien
++   n'est gardé ; faux au profil avec `garder_ouvert=True`, l'ouvrier est gardé. `lire_garde`
++   reste comme aide publique pour le moteur. `ouverts_max` est lu par l'agent, 6 par défaut ;
++   les valeurs mal formées valent 6 (`"3"`, `-3`, `True`, `2.5`, `None`) ; 0 ne garde personne.
++4. `executer(reprendre=s)` sur l'ouvrier ouvert de la tâche, sur `s`, avec les mêmes réglages :
++   une connexion, deux demandes, `resume` toujours None, `session` lue dans le message de fin.
++   - Avec `garder_ouvert=True`, il reste ouvert.
++   - Avec `garder_ouvert=False`, il sert la demande puis ferme : une seule déconnexion, fichier
++     effacé.
++   - Sinon (fermé, autre session, réglages changés), la reprise se fait par la session, comme
++     avant (`REPRISE_IMPOSSIBLE` compris). Elle reste ouverte ou se ferme selon son propre
++     `garder_ouvert`.
++   Constaté : vert, pour les deux agents.
++5. `AgentSimule` : le paramètre de constructeur `garde_ouvert` est **retiré**. Le choix se fait
++   par appel, `executer(..., garder_ouvert=...)`, exactement comme pour l'agent réel, puisque le
++   moteur appelle l'un ou l'autre sans le savoir. Restent au constructeur : `ouverts_max`,
++   `suites` ; restent comme traces : `suivis`, `fermes`.
++6. `arreter(tache)` ferme aussi, à part et sans bloquer, l'ouvrier ouvert qui attend (il rend
++   False : aucun agent en marche). Testé, pour les deux agents, avec le fichier de refus effacé.
++7. `liberer(tache)` rend la main dès la déconnexion faite, et au plus tard après
++   `delai_liberer_s` = 5 s (`DELAI_LIBERER_S`). Une déconnexion plus lente finit dans un fil à
++   part, noté jusqu'à sa fin, et `liberer_tous()` l'attend. Prouvé de deux façons :
++   - déconnexion de 0,6 s, borne 0,2 s : `liberer` rend en moins de 0,45 s ; client pas encore
++     déconnecté, fichier encore là. Puis `liberer_tous` attend : déconnecté une fois, fichier
++     effacé, aucun fil restant ;
++   - déconnexion qui ne répond jamais (borne du pont raccourcie à 0,4 s) : `liberer` rend en
++     moins de 0,6 s, `liberer_tous` en moins de 5 s, et le fil de la session est fini.
++   Un nouvel ouvrier de la même tâche, lui, attend la déconnexion complète de l'ancien avant de
++   se connecter (pour que deux ne travaillent jamais ensemble sur la même copie).
++- Critères de la fiche toujours tenus et testés :
++  - `liberer` deux fois, ensemble depuis quatre fils, pour une tâche inconnue, `None`, `""`, une
++    liste, `42` : une seule déconnexion, aucune exception ;
++  - `liberer` et `liberer_tous` pendant un tour, depuis un autre fil : le tour n'est pas
++    interrompu et se ferme à sa fin (`ouverte` faux) ;
++  - le mode, les règles du chantier ou les secrets changés entre deux tours : l'ancien est fermé
++    avant, puis reprise par session avec les nouveaux droits ;
++  - un mode appliqué à chaud pendant le tour garde l'ouvrier ;
++  - le fichier de refus vit avec l'ouvrier ouvert, et part sur chaque chemin de fermeture ;
++  - après `liberer_tous`, aucun programme Claude ne reste ;
++  - le double : durée `delai_s` par suite, un « fin » par tour, `suites` « rien » et « erreur ».
++
++## Fichiers touchés
++
++- `atelier/agents.py`
++  - Nouveau, juste après `_ModeDesOuvriers` :
++    - les constantes `OUVERTS_MAX`, `DELAI_LIBERER_S`, `DELAI_FERMETURES_S` ;
++    - `lire_garde(profil)`, `_Ouvert`, `_fermer_sans_lever` ;
++    - la classe commune `_OuvriersOuverts` : `liberer`, `liberer_tous`, `_fermer_a_part`,
++      `_retirer_ouvert`, `_fermer_l_ancien`, `_fermer_en_attente`, `_inscrire_en_tour`,
++      `_prendre_ouvert`, `_ranger`.
++  - `AgentClaude` :
++    - base `_OuvriersOuverts` ajoutée, docstring mise à jour ;
++    - quatre attributs en fin de `__init__` ;
++    - `_plafond` (nouveau) ;
++    - `executer` (paramètre `garder_ouvert`), `_ouvert_pour` (nouveau) ;
++    - `arreter`, `_travailler`, `_tour` (nouveau : l'ancien corps de `_travailler`).
++  - `AgentSimule` :
++    - base `_OuvriersOuverts` ajoutée, docstring mise à jour ;
++    - champs `suites`, `ouverts_max`, `suivis`, `fermes`, plus quatre champs privés ;
++    - `arreter`, `_plafond` (nouveau) ;
++    - `executer` (paramètre `garder_ouvert`) ;
++    - nouveaux : `_ouvrir_gardable`, `_ouvert_simule`, `_donner_suite`, `_suite_prevue`.
++    - `_ouvrir_session` est inchangé.
++  - Hors de la liste de la fiche : les deux `arreter` (accepté par l'orchestrateur) et
++    `AgentClaude.__init__`. `_arrete` n'est pas touché (seulement appelé).
++- `atelier/sdk.py` : rien.
++  - `SessionSDK` garde déjà son client connecté d'un `envoyer` à l'autre (`_travailler`
++    réutilise `self._client`).
++  - `fermer` déconnecte, et efface le fichier de refus quand tout est sorti.
++  - Aucune fonction de M4 n'est touchée.
++- `tests/doubles.py` : ajouts seulement : `import asyncio`, `SESSION_MESUREE`, `ClientMesure`,
++  `FabriqueMesuree`.
++- `tests/test_agents_ouvert.py` : nouveau.
++- `chantier/relais/M3.md` : cette fiche.
++
++## Contrats modifiés
++
++Pour la tâche M9.
++
++### Signatures
++
++```python
++AgentClaude.executer(consigne, modele, effort, dossier, lecture_seule=False, contexte=None,
++                     copie_jetable=False, reprendre=None, garder_ouvert=False) -> Resultat
++AgentSimule.executer(...)  # mêmes paramètres, même sens
++liberer(tache) -> None     # sur les deux agents
++liberer_tous() -> None     # sur les deux agents
++lire_garde(profil) -> tuple[bool, int]   # (ouvrier_ouvert, ouverts_max), aide pour le moteur
++```
++
++### `garder_ouvert`
++
++- Faux par défaut : rien ne change par rapport à avant M3.
++- Vrai : un ouvrier de tâche (`lecture_seule=False`, `contexte["tache"]` présent), rendu sans
++  erreur ni arrêt, reste connecté sous le plafond `ouverts_max` du profil, jusqu'à `liberer`.
++- Ignoré pour le vérificateur et sans tâche. `converser` ne l'a pas.
++
++### `reprendre=s`
++
++- L'ouvrier ouvert de la tâche est sur `s`, et rien n'a changé depuis sa connexion (modèle
++  après alias, effort, dossier, outils permis et interdits, mode des ouvriers tel que la session
++  l'applique, refus d'office du profil) : la consigne part dans la même conversation. Ensuite :
++  - `garder_ouvert=True` : il reste ouvert ;
++  - `garder_ouvert=False` : il sert la demande puis ferme, une seule déconnexion.
++- Sinon : l'ouvert est fermé (avec attente de sa déconnexion), puis la reprise se fait par la
++  session comme avant. Elle reste ouverte ou non selon son propre `garder_ouvert`.
++- Tout ouvrier de tâche qui ne sert pas l'ouvert ferme d'abord celui de la tâche.
++- Le vérificateur n'y touche jamais.
++
++### `Resultat.ouverte`
++
++Vrai seulement si la connexion est réellement gardée à la sortie de l'appel. La suite se donne
++alors par `executer(reprendre=resultat.session, garder_ouvert=...)` ; `resultat.session` est la
++session annoncée par Claude Code.
++
++### `liberer(tache)`
++
++- Ferme l'ouvrier ouvert de la tâche.
++- Rend la main dès la déconnexion faite, au plus tard après 5 s (`delai_liberer_s`). Une
++  déconnexion plus lente continue derrière.
++- Ne lève jamais. Sans effet la seconde fois, ou pour une tâche inconnue.
++- Un ouvrier de la tâche en plein tour n'est pas interrompu (c'est le rôle d'`arreter`) : il se
++  ferme à la fin de son tour, qui rend `ouverte` faux.
++
++### `liberer_tous()`
++
++- Ferme tous les ouvriers ouverts, ensemble.
++- Attend la fin de toutes les fermetures, celles lancées avant par `liberer` ou `arreter`
++  comprises, jusqu'à 100 s au plus (`DELAI_FERMETURES_S` ; une fermeture du pont dure au plus
++  ~95 s).
++- Ne lève jamais. Les tours en cours se ferment à leur fin.
++
++### `arreter(tache)`
++
++Ferme aussi, à part et sans bloquer, l'ouvrier ouvert qui attend. Sa valeur rendue est
++inchangée : vrai seulement si un agent était en marche.
++
++### Profil
++
++- `ouverts_max` : entier >= 0, 6 par défaut, lu par l'agent à chaque fin de tour. Il compte les
++  ouvriers qui attendent, pas ceux en plein tour.
++- `ouvrier_ouvert` : booléen, vrai par défaut, lu **par le moteur seulement**, avec
++  `lire_garde`.
++
++### Double (`AgentSimule`)
++
++- Constructeur : `ouverts_max: int = 6` et `suites: dict[str, list[str]]`. C'est, par tâche, ce
++  que joue chaque suite servie par l'ouvert :
++  - `"rien"` : réussie, rien d'écrit, `fichiers == []` ;
++  - `"erreur"` : échec « Arrêt simulé de l'agent. », ouvrier fermé ;
++  - `""` ou autre : réussie, périmètre réécrit avec une marque différente.
++- Une suite dure `delai_s` : donner `delai_s > 0`. Elle consomme `limites` comme tout appel, et
++  un refus de limite ferme l'ouvrier.
++- Traces :
++  - `suivis` : `{tache, role, tentative, session, message}`, une entrée par suite servie par
++    l'ouvert ;
++  - `reprises` : inchangé, les reprises par session ;
++  - `fermes` : chaque session qui a pu rester ouverte, notée une fois à sa fermeture.
++- Le paramètre de constructeur `garde_ouvert` de la première version n'existe plus.
++
++### Ce que le moteur doit faire (M9)
++
++- Passer `garder_ouvert=True` aux ouvriers quand `lire_garde(profil)[0]` est vrai. Se souvenir
++  de `resultat.ouverte` et de `resultat.session`.
++- Donner un retour par `executer(reprendre=session, garder_ouvert=...)` : vrai s'il pourra y
++  avoir un retour de plus.
++- Appeler `agent.liberer(tache.id)` à toute fin de tâche (acceptée, rendue, arrêtée, suspendue,
++  bloquée), **hors de son verrou** (jusqu'à 5 s).
++- Appeler `agent.liberer_tous()` à l'arrêt de l'Atelier. C'est hors du périmètre de M9
++  (moteur seul) : le serveur ou `__main__` doit l'appeler.
++
++## Reste à faire
++
++- M9 : le branchement du moteur ci-dessus. Tant qu'il n'est pas fait, aucun appel ne demande
++  `garder_ouvert` : le produit se comporte exactement comme avant M3.
++- L'appel de `liberer_tous()` à l'arrêt de l'Atelier (serveur ou `__main__`) : à confier.
++
++## Doutes et demandes
++
++- Une suite qui échoue sur l'ouvrier ouvert (Claude Code mort pendant l'attente, connexion
++  coupée) rend son erreur et ferme. L'agent ne retente pas de lui-même par la session : M9
++  décide (sa règle 5).
++- Après un `liberer` rendu à sa borne, la déconnexion de l'ancien Claude Code peut encore
++  courir. Une reprise par la même session lancée juste après croiserait un instant l'ancien
++  programme qui sort. Le moteur ne le fait pas (il libère à la fin de la tâche) ; un nouvel
++  ouvrier de la même tâche, lui, attend la fermeture complète.
++- Un `AgentClaude` ramassé par le ramasse-miettes avec un ouvrier ouvert ne peut plus le
++  libérer (le fil du pont reste vivant). Sans conséquence dans l'Atelier, où l'agent vit autant
++  que le serveur.
++- Non prouvable sans un vrai Claude Code :
++  - qu'un Claude Code gardé connecté de longues minutes accepte une seconde demande (ni délai
++    d'inactivité, ni sortie) ;
++  - qu'il émette ou non `init` à chaque tour (le code ne dépend ni de l'un ni de l'autre) ;
++  - qu'aucun message ne traîne après le message de fin et ne soit lu au tour suivant ;
++  - le comportement sous Windows (jamais essayé, selon la référence) ;
++  - qu'un Claude Code resté ouvert meure avec l'Atelier si `liberer_tous` n'est pas appelé.
+diff --git a/tests/doubles.py b/tests/doubles.py
+index e7a78fe..e2892c7 100644
+--- a/tests/doubles.py
++++ b/tests/doubles.py
+@@ -1,5 +1,7 @@
+ """Doubles de test du guichet : ils servent aux tests, jamais au produit."""
+ 
++import asyncio
++
+ from atelier.guichet import CHOIX, Guichet, Reponse, _Demande
+ 
+ SCENARIO_EPUISE = "Le scénario de démonstration ne prévoit pas cette demande."
+@@ -38,3 +40,106 @@ class GuichetSimule(Guichet):
+         if not demande.regle:
+             return Reponse("une_fois", prevue.message, "")
+         return Reponse("toujours", prevue.message, demande.regle)
++
++
++# --- Faux client du SDK aux durées non nulles, qui compte tout (tâche M3) ----------------------
++
++SESSION_MESUREE = "5e55104e-0000-4000-8000-00000000c1a0"
++
++
++class ClientMesure:
++    """Faux `ClaudeSDKClient` qui prend son temps et compte connexions, demandes, déconnexions.
++
++    `tours` dit ce que joue chaque demande de la connexion, dans l'ordre : "ok" (une réponse,
++    puis le message de fin), "echec" (un message de fin en erreur), "erreur" (le client lève),
++    "bloque" (ne rend plus la main). Au-delà de la liste, "ok". Une durée de déconnexion None :
++    `disconnect` ne rend jamais la main. Il n'annonce sa session
++    (`init`) qu'à la première demande de la connexion : rien ne doit dépendre d'un `init` à
++    chaque tour ; chaque message de fin la porte, comme le vrai.
++    Chaque geste prend du temps (`durees`), pour qu'un défaut d'arrêt ou d'ordre se voie.
++    """
++
++    def __init__(self, options, tours, durees, journal, rang):
++        self.options, self.tours, self.durees = options, list(tours), durees
++        self.journal, self.rang = journal, rang
++        self.demandes: list[str] = []
++        self.connexions = self.deconnexions = self.interruptions = 0
++
++    def _noter(self, geste):
++        self.journal.append((geste, self.rang))
++
++    async def connect(self):
++        await asyncio.sleep(self.durees["connexion"])
++        self.connexions += 1
++        self._noter("connexion")
++
++    async def query(self, consigne):
++        self.demandes.append(consigne)
++        self._noter("demande")
++
++    async def receive_response(self):
++        from claude_agent_sdk import ResultMessage, StreamEvent, SystemMessage
++
++        rang = len(self.demandes)
++        jeu = self.tours[rang - 1] if rang <= len(self.tours) else "ok"
++        if rang == 1:
++            donnees = {"apiKeySource": "none", "session_id": SESSION_MESUREE}
++            yield SystemMessage(subtype="init", data=donnees)
++        await asyncio.sleep(self.durees["tour"])
++        if jeu == "bloque":
++            await asyncio.Event().wait()
++        if jeu == "erreur":
++            raise RuntimeError("connexion perdue")
++        delta = {"type": "text_delta", "text": f"Réponse {rang}."}
++        yield StreamEvent(uuid="u", session_id=SESSION_MESUREE, event={"delta": delta})
++        yield ResultMessage(
++            subtype="success", duration_ms=1, duration_api_ms=1, is_error=jeu == "echec",
++            num_turns=1, session_id=SESSION_MESUREE, total_cost_usd=0.1,
++            result="En erreur." if jeu == "echec" else f"Fait {rang}.",
++            usage={"input_tokens": 10, "output_tokens": 5},
++        )  # fmt: skip
++
++    async def set_permission_mode(self, mode):
++        self._noter("mode")
++
++    async def interrupt(self):
++        await asyncio.sleep(self.durees["interruption"])
++        self.interruptions += 1
++
++    async def disconnect(self):
++        if self.durees["deconnexion"] is None:  # un programme qui ne répond plus
++            self._noter("deconnexion sans reponse")
++            await asyncio.Event().wait()
++        await asyncio.sleep(self.durees["deconnexion"])
++        self.deconnexions += 1
++        self._noter("deconnexion")
++
++
++class FabriqueMesuree:
++    """Rend un `ClientMesure` à chaque connexion ; `tours[i]` est le jeu de la i-ème connexion
++    (au-delà, une connexion qui ne joue que "ok"). Additionne les comptes de tous ses clients."""
++
++    DUREES = {"connexion": 0.005, "tour": 0.02, "interruption": 0.005, "deconnexion": 0.01}
++
++    def __init__(self, *tours, **durees):
++        self.tours, self.durees = list(tours), {**self.DUREES, **durees}
++        self.clients: list[ClientMesure] = []
++        self.journal: list[tuple[str, int]] = []
++
++    def __call__(self, options):
++        rang = len(self.clients)
++        tours = self.tours[rang] if rang < len(self.tours) else []
++        self.clients.append(ClientMesure(options, tours, self.durees, self.journal, rang))
++        return self.clients[-1]
++
++    @property
++    def connexions(self) -> int:
++        return sum(c.connexions for c in self.clients)
++
++    @property
++    def demandes(self) -> int:
++        return sum(len(c.demandes) for c in self.clients)
++
++    @property
++    def deconnexions(self) -> int:
++        return sum(c.deconnexions for c in self.clients)
+diff --git a/tests/test_agents_ouvert.py b/tests/test_agents_ouvert.py
+new file mode 100644
+index 0000000..9b47bcc
+--- /dev/null
++++ b/tests/test_agents_ouvert.py
+@@ -0,0 +1,714 @@
++"""Tâche M3 : l'ouvrier reste ouvert après avoir rendu la main.
++
++Un faux client aux durées non nulles (`tests.doubles.FabriqueMesuree`) compte, pour chaque
++chemin, les connexions, les demandes et les déconnexions. Aucun appel réel à Claude, aucun réseau.
++"""
++
++import os
++import threading
++import time
++from pathlib import Path
++
++import pytest
++
++pytest.importorskip("claude_agent_sdk")
++
++from atelier.agents import (  # noqa: E402
++    OUVERTS_MAX,
++    REPRISE_IMPOSSIBLE,
++    AgentClaude,
++    AgentSimule,
++    lire_garde,
++)
++from atelier.guichet import ARRETE  # noqa: E402
++from tests.doubles import SESSION_MESUREE, FabriqueMesuree  # noqa: E402
++
++GARDE_S = 5  # aucun test ne doit pouvoir attendre plus longtemps que ça
++OUVRIER = {"role": "ouvrier", "tache": "B", "tentative": 1}
++VERIFICATEUR = {"role": "verificateur", "tache": "B", "tentative": 1}
++SUITE = "Les contrôles sont rouges : corrige."
++DELAI = "L'agent n'a pas fini dans le délai de"
++
++
++def fils_de_session():
++    return [f for f in threading.enumerate() if f.name.startswith("atelier-sdk-")]
++
++
++def attendre(condition, delai=GARDE_S):
++    limite = time.monotonic() + delai
++    while not condition():
++        if time.monotonic() > limite:
++            return False
++        time.sleep(0.005)
++    return True
++
++
++@pytest.fixture
++def claude():
++    """Fabrique des agents réels sur un faux client mesuré ; tous libérés à la fin du test.
++
++    Seuls comptent les fils de session nés pendant le test : ceux d'autres fichiers ne jouent pas.
++    """
++    deja = set(fils_de_session())
++    crees = []
++
++    def creer(*tours, profil=None, delai_max_s=GARDE_S, **durees):
++        fabrique = FabriqueMesuree(*tours, **durees)
++        agent = AgentClaude(profil or {}, delai_max_s=delai_max_s, fabrique_client=fabrique)
++        evenements = []
++        agent.sur_evenement = evenements.append
++        crees.append(agent)
++        return agent, fabrique, evenements
++
++    creer.deja = deja
++    yield creer
++    for agent in crees:
++        agent.liberer_tous()
++    nes = lambda: set(fils_de_session()) - deja  # noqa: E731
++    assert attendre(lambda: not nes(), 2), nes()
++
++
++def lancer(agent, contexte=OUVRIER, reprendre=None, consigne="Consigne.", lecture_seule=False,
++           dossier=None, garder=True):  # fmt: skip
++    """Un appel qui demande à garder l'ouvrier ouvert (`garder=False` : l'appel d'avant M3)."""
++    return agent.executer(consigne, "opus", "high", dossier, lecture_seule, contexte,
++                          reprendre=reprendre, garder_ouvert=garder)  # fmt: skip
++
++
++def suivre(agent, session, contexte=OUVRIER, consigne=SUITE, garder=True):
++    return lancer(agent, contexte, reprendre=session, consigne=consigne, garder=garder)
++
++
++def ancien_appel(agent, contexte=OUVRIER, reprendre=None, consigne="Consigne."):
++    """L'appel exact d'avant la tâche M3, sans le paramètre `garder_ouvert`."""
++    return agent.executer(consigne, "opus", "high", None, False, contexte, reprendre=reprendre)
++
++
++def en_fond(fonction, *arguments, **nommes):
++    rendus = []
++    fil = threading.Thread(target=lambda: rendus.append(fonction(*arguments, **nommes)),
++                           daemon=True)  # fmt: skip
++    fil.start()
++    return fil, rendus
++
++
++def comptes(fabrique):
++    return fabrique.connexions, fabrique.demandes, fabrique.deconnexions
++
++
++def fins(evenements):
++    return [e for e in evenements if e["type"] == "fin"]
++
++
++# --- 1 et 2 : la suite donnée à l'ouvrier ouvert ------------------------------------------------
++
++
++def test_la_suite_part_a_l_ouvrier_ouvert_dans_la_meme_conversation(claude):
++    agent, fabrique, evenements = claude()
++
++    premier = lancer(agent)
++    assert premier.ok and premier.ouverte and premier.session == SESSION_MESUREE
++    assert comptes(fabrique) == (1, 1, 0)  # rendu, et toujours connecté
++
++    suite = suivre(agent, premier.session)
++    assert suite.ok and suite.ouverte and suite.texte == "Fait 2."
++    assert suite.session == SESSION_MESUREE  # sans `init` au second tour : lue dans la fin
++    assert comptes(fabrique) == (1, 2, 0)  # une seule connexion, deux demandes
++    assert fabrique.clients[0].demandes == ["Consigne.", SUITE]
++    assert fabrique.clients[0].options.resume is None  # rien n'a été repris : la même conversation
++    assert len(fins(evenements)) == 2  # un événement « fin » à chaque tour
++
++    agent.liberer("B")
++    assert comptes(fabrique) == (1, 2, 1)
++    agent.liberer("B")  # une seconde fois : rien de plus
++    assert comptes(fabrique) == (1, 2, 1)
++
++
++def test_ouvrier_ferme_la_suite_reprend_par_la_session_comme_aujourd_hui(claude):
++    agent, fabrique, _ = claude([], ["echec"])
++    premier = lancer(agent)
++    agent.liberer("B")
++    assert comptes(fabrique) == (1, 1, 1)
++
++    repris = suivre(agent, premier.session)  # reprise par session, qui finit en erreur
++    assert (repris.ok, repris.erreur, repris.ouverte) == (False, "En erreur.", False)
++    assert fabrique.clients[1].options.resume == SESSION_MESUREE
++    assert fabrique.clients[1].demandes == [SUITE]
++    assert comptes(fabrique) == (2, 2, 2)
++
++
++def test_un_ouvrier_repris_par_la_session_reste_ouvert_a_son_tour(claude):
++    agent, fabrique, _ = claude()
++    premier = lancer(agent)
++    agent.liberer("B")
++    repris = suivre(agent, premier.session)
++    assert repris.ok and repris.ouverte and fabrique.clients[1].options.resume == SESSION_MESUREE
++    assert suivre(agent, repris.session).ok
++    assert comptes(fabrique) == (2, 3, 1)
++
++
++# --- 4 : arrêt, erreur, délai --------------------------------------------------------------------
++
++
++def test_un_arret_pendant_un_tour_ferme_l_ouvrier(claude):
++    agent, fabrique, _ = claude(["bloque"], ["ok", "bloque"])
++
++    fil, rendus = en_fond(lancer, agent)  # arrêt pendant le premier tour
++    assert attendre(lambda: fabrique.demandes == 1)
++    assert agent.arreter("B") is True
++    fil.join(GARDE_S)
++    assert rendus[0].erreur == ARRETE and not rendus[0].ouverte
++    assert comptes(fabrique) == (1, 1, 1)
++
++    premier = lancer(agent)  # arrêt pendant la suite donnée à l'ouvrier ouvert
++    assert premier.ouverte
++    fil, rendus = en_fond(suivre, agent, premier.session)
++    assert attendre(lambda: fabrique.demandes == 3)
++    assert agent.arreter("B") is True
++    fil.join(GARDE_S)
++    assert rendus[0].erreur == ARRETE and not rendus[0].ouverte
++    assert comptes(fabrique) == (2, 3, 2)  # la suite est partie sur la même connexion
++    assert fabrique.clients[1].interruptions == 1
++
++
++def test_un_arret_pendant_que_l_ouvrier_ouvert_attend_le_ferme(claude):
++    agent, fabrique, evenements = claude()
++    premier = lancer(agent)
++    assert premier.ouverte
++
++    assert agent.arreter("B") is False  # aucun agent en marche : rien à rendre arrêté
++    assert attendre(lambda: fabrique.deconnexions == 1)
++    assert comptes(fabrique) == (1, 1, 1)
++    assert len(fins(evenements)) == 1  # aucun tour de plus, aucune « fin » de plus
++
++    repris = suivre(agent, premier.session)  # plus ouvert : la reprise par session
++    assert repris.ok and fabrique.clients[1].options.resume == SESSION_MESUREE
++    assert comptes(fabrique) == (2, 2, 1)
++
++
++def test_une_erreur_du_client_pendant_la_suite_ferme_l_ouvrier(claude):
++    agent, fabrique, evenements = claude(["ok", "erreur"])
++    premier = lancer(agent)
++
++    suite = suivre(agent, premier.session)
++    assert not suite.ok and not suite.ouverte and "connexion perdue" in suite.erreur
++    assert comptes(fabrique) == (1, 2, 1)
++    assert fins(evenements)[-1]["contenu"] == suite.erreur
++
++    encore = suivre(agent, premier.session)  # fermé : reprise par session, nouvelle connexion
++    assert encore.ok and fabrique.clients[1].options.resume == SESSION_MESUREE
++    assert comptes(fabrique) == (2, 3, 1)
++
++
++def test_une_fin_en_erreur_pendant_la_suite_ferme_l_ouvrier(claude):
++    agent, fabrique, _ = claude(["ok", "echec"])
++    premier = lancer(agent)
++    suite = suivre(agent, premier.session)
++    assert (suite.ok, suite.erreur, suite.ouverte) == (False, "En erreur.", False)
++    assert comptes(fabrique) == (1, 2, 1)
++
++
++def test_un_delai_depasse_pendant_la_suite_ferme_l_ouvrier(claude):
++    agent, fabrique, _ = claude(["ok", "bloque"], delai_max_s=0.25)
++    premier = lancer(agent)
++    assert premier.ouverte
++
++    debut = time.monotonic()
++    suite = suivre(agent, premier.session)
++    assert time.monotonic() - debut < GARDE_S
++    assert suite.erreur.startswith(DELAI) and not suite.ouverte
++    assert comptes(fabrique) == (1, 2, 1)
++    assert fabrique.clients[0].interruptions == 1
++
++
++# --- 1 : le plafond et le réglage du profil ------------------------------------------------------
++
++
++def taches(*noms):
++    return [{"role": "ouvrier", "tache": nom, "tentative": 1} for nom in noms]
++
++
++def test_au_plafond_le_nouvel_ouvrier_rend_la_main_ferme(claude):
++    agent, fabrique, _ = claude(profil={"ouverts_max": 2})
++    a, b, c = (lancer(agent, contexte) for contexte in taches("A", "B", "C"))
++    assert (a.ok, b.ok, c.ok) == (True, True, True)  # sans erreur
++    assert (a.ouverte, b.ouverte, c.ouverte) == (True, True, False)
++    assert comptes(fabrique) == (3, 3, 1) and fabrique.clients[2].deconnexions == 1
++    assert not os.path.exists(fabrique.clients[2].options.settings)  # ses refus partent aussitôt
++    assert os.path.exists(fabrique.clients[0].options.settings)
++
++    agent.liberer("A")  # une place se libère
++    d = lancer(agent, taches("D")[0])
++    assert d.ouverte
++    assert comptes(fabrique) == (4, 4, 2)
++
++
++def test_un_plafond_mal_forme_vaut_la_valeur_par_defaut(claude):
++    agent, fabrique, _ = claude(profil={"ouverts_max": "3"})  # les autres : `test_lire_garde`
++    noms = [chr(ord("A") + i) for i in range(OUVERTS_MAX + 1)]
++    rendus = [lancer(agent, contexte) for contexte in taches(*noms)]
++    assert [r.ouverte for r in rendus] == [True] * OUVERTS_MAX + [False]
++    assert comptes(fabrique) == (OUVERTS_MAX + 1, OUVERTS_MAX + 1, 1)
++
++
++def test_un_plafond_nul_ne_garde_personne(claude):
++    agent, fabrique, _ = claude(profil={"ouverts_max": 0})
++    premier = lancer(agent)
++    assert premier.ok and not premier.ouverte
++    assert comptes(fabrique) == (1, 1, 1)
++    assert not os.path.exists(fabrique.clients[0].options.settings)  # ses refus partent aussitôt
++    agent.liberer_tous()  # rien d'ouvert : sans effet
++    repris = suivre(agent, premier.session)  # la reprise par session
++    assert fabrique.clients[1].options.resume == SESSION_MESUREE and not repris.ouverte
++    assert comptes(fabrique) == (2, 2, 2)
++
++
++@pytest.mark.parametrize(
++    "profil, attendu",
++    [
++        ({}, (True, OUVERTS_MAX)),
++        ({"ouvrier_ouvert": False, "ouverts_max": 2}, (False, 2)),
++        ({"ouvrier_ouvert": "non", "ouverts_max": "2"}, (True, OUVERTS_MAX)),
++        ({"ouvrier_ouvert": 0, "ouverts_max": -3}, (True, OUVERTS_MAX)),
++        ({"ouvrier_ouvert": None, "ouverts_max": True}, (True, OUVERTS_MAX)),
++        ({"ouvrier_ouvert": "false", "ouverts_max": 2.5}, (True, OUVERTS_MAX)),
++        ({"ouverts_max": None}, (True, OUVERTS_MAX)),
++        ({"ouverts_max": 0}, (True, 0)),
++        (None, (True, OUVERTS_MAX)),
++    ],
++)
++def test_lire_garde(profil, attendu):
++    assert lire_garde(profil) == attendu
++
++
++# --- Point 1 de la décision : sans `garder_ouvert`, l'appel d'avant ------------------------------
++
++
++@pytest.mark.parametrize("appeler", ["ancien", "faux"])
++def test_sans_garder_ouvert_rien_ne_change(claude, appeler):
++    agent, fabrique, evenements = claude()
++    if appeler == "ancien":
++        premier = ancien_appel(agent)
++    else:
++        premier = lancer(agent, garder=False)
++    fichier = fabrique.clients[0].options.settings
++    assert premier.ok and not premier.ouverte
++    assert comptes(fabrique) == (1, 1, 1)  # fermé dès qu'il rend la main
++    assert not os.path.exists(fichier)  # ses refus d'office sont effacés
++    assert not set(fils_de_session()) - claude.deja  # aucun fil de session ne reste
++
++    repris = ancien_appel(agent, reprendre=premier.session)  # reprise par session, comme avant
++    assert repris.ok and not repris.ouverte
++    assert fabrique.clients[1].options.resume == SESSION_MESUREE
++    assert comptes(fabrique) == (2, 2, 2)
++    assert len(fins(evenements)) == 2
++    agent.liberer("B")  # rien d'ouvert : sans effet
++    agent.liberer_tous()
++    assert comptes(fabrique) == (2, 2, 2)
++
++
++@pytest.mark.parametrize("reglage", [True, False, "non"])
++def test_le_reglage_ouvrier_ouvert_du_profil_n_est_pas_lu_par_l_agent(claude, reglage):
++    agent, fabrique, _ = claude(profil={"ouvrier_ouvert": reglage})
++    assert not ancien_appel(agent).ouverte  # vrai au profil : l'appel ne l'a pas demandé
++    assert lancer(agent, {**OUVRIER, "tentative": 2}).ouverte  # faux au profil : demandé
++    assert comptes(fabrique) == (2, 2, 1)
++
++
++# --- 1 : jamais le vérificateur ni l'orchestrateur -----------------------------------------------
++
++
++def test_ni_le_verificateur_ni_l_orchestrateur_ne_restent_ouverts(claude):
++    agent, fabrique, _ = claude()
++    assert lancer(agent).ouverte  # l'ouvrier de B attend son verdict
++
++    relu = lancer(agent, VERIFICATEUR, lecture_seule=True)
++    jetable = agent.executer("Vérifie.", "opus", "high", None, True, VERIFICATEUR,
++                             copie_jetable=True, garder_ouvert=True)  # fmt: skip
++    parle = agent.converser("Bonjour.", SESSION_MESUREE, False, None)
++    sans_tache = lancer(agent, {})
++    assert all(r.ok and not r.ouverte for r in (relu, jetable, parle, sans_tache))
++    assert [c.deconnexions for c in fabrique.clients] == [0, 1, 1, 1, 1]
++    assert comptes(fabrique) == (5, 5, 4)  # l'ouvrier de B est resté ouvert pendant ce temps
++
++
++# --- 3 : liberer, deux fois, depuis un autre fil, pendant un tour --------------------------------
++
++
++def test_liberer_deux_fois_ensemble_ou_pour_une_tache_inconnue_ne_leve_jamais(claude):
++    agent, fabrique, _ = claude()
++    assert lancer(agent).ouverte
++
++    fils = [threading.Thread(target=agent.liberer, args=("B",)) for _ in range(4)]
++    for fil in fils:
++        fil.start()
++    for fil in fils:
++        fil.join(GARDE_S)
++    for tache in ("B", "inconnue", None, "", ["pas", "hachable"], 42):
++        agent.liberer(tache)
++    agent.liberer_tous()
++    assert comptes(fabrique) == (1, 1, 1)  # déconnecté une seule fois
++
++
++def test_liberer_pendant_un_tour_ne_l_interrompt_pas_et_le_ferme_a_la_fin(claude):
++    agent, fabrique, _ = claude(tour=0.4)
++    premier = lancer(agent)
++    assert premier.ouverte
++
++    fil, rendus = en_fond(suivre, agent, premier.session)
++    assert attendre(lambda: fabrique.demandes == 2)
++    debut = time.monotonic()
++    autre, _ = en_fond(agent.liberer, "B")  # depuis un autre fil, en plein tour
++    autre.join(GARDE_S)
++    assert time.monotonic() - debut < 0.3  # n'attend pas la fin du tour
++    assert fabrique.deconnexions == 0  # le tour continue, rien n'est coupé
++    fil.join(GARDE_S)
++    assert rendus[0].ok and not rendus[0].ouverte  # rendu fermé, sans erreur
++    assert comptes(fabrique) == (1, 2, 1) and fabrique.clients[0].interruptions == 1
++    agent.liberer("B")
++    assert comptes(fabrique) == (1, 2, 1)
++
++
++def test_liberer_tous_pendant_un_premier_tour_le_ferme_a_la_fin(claude):
++    agent, fabrique, _ = claude(tour=0.2)
++    fil, rendus = en_fond(lancer, agent)
++    assert attendre(lambda: fabrique.demandes == 1)
++    agent.liberer_tous()
++    fil.join(GARDE_S)
++    assert rendus[0].ok and not rendus[0].ouverte
++    assert comptes(fabrique) == (1, 1, 1)
++
++
++def test_aucun_programme_claude_ne_reste_apres_liberer_tous(claude):
++    agent, fabrique, _ = claude()
++    nes = lambda: set(fils_de_session()) - claude.deja  # noqa: E731
++    rendus = [lancer(agent, contexte) for contexte in taches("A", "B", "C")]
++    assert all(r.ouverte for r in rendus) and len(nes()) == 3
++
++    agent.liberer_tous()
++    assert [c.deconnexions for c in fabrique.clients] == [1, 1, 1]  # chacun une fois
++    assert attendre(lambda: not nes(), 0.5)
++    agent.liberer_tous()
++    assert comptes(fabrique) == (3, 3, 3)
++
++
++# --- Point 7 de la décision : `liberer` rend la main en un temps borné ---------------------------
++
++
++def test_liberer_rend_la_main_en_temps_borne_et_liberer_tous_attend_la_fin(claude):
++    assert AgentClaude.delai_liberer_s == 5.0  # la borne du produit
++    agent, fabrique, _ = claude(deconnexion=0.6)  # un programme lent à sortir
++    agent.delai_liberer_s = 0.2
++    nes = lambda: set(fils_de_session()) - claude.deja  # noqa: E731
++    premier = lancer(agent)
++    fichier = fabrique.clients[0].options.settings
++
++    debut = time.monotonic()
++    agent.liberer("B")
++    assert time.monotonic() - debut < 0.45  # rendu à la borne, avant la fin de la déconnexion
++    assert fabrique.deconnexions == 0 and os.path.exists(fichier)  # elle finit derrière
++
++    assert premier.ouverte
++    agent.liberer_tous()  # à l'arrêt de l'Atelier : attend jusqu'au bout
++    assert fabrique.clients[0].deconnexions == 1
++    assert not os.path.exists(fichier) and attendre(lambda: not nes(), 0.5)
++
++
++def test_un_programme_qui_ne_repond_plus_ne_bloque_ni_liberer_ni_liberer_tous(
++    claude, monkeypatch
++):  # fmt: skip
++    from atelier.sdk import SessionSDK
++
++    monkeypatch.setattr(SessionSDK, "delai_deconnexion_s", 0.4)  # la borne du pont, raccourcie
++    agent, fabrique, _ = claude(deconnexion=None)  # `disconnect` ne rend jamais la main
++    agent.delai_liberer_s = 0.2
++    nes = lambda: set(fils_de_session()) - claude.deja  # noqa: E731
++    assert lancer(agent).ouverte
++
++    debut = time.monotonic()
++    agent.liberer("B")
++    assert time.monotonic() - debut < 0.6
++    debut = time.monotonic()
++    agent.liberer_tous()  # attend la fermeture lancée par `liberer`, bornée par le pont
++    assert time.monotonic() - debut < GARDE_S
++    assert ("deconnexion sans reponse", 0) in fabrique.journal
++    assert attendre(lambda: not nes(), 1)  # le fil de la session est fini
++
++
++# --- Point 4 de la décision : la suite servie, puis fermée sans `garder_ouvert` ------------------
++
++
++def test_une_suite_sans_garder_ouvert_est_servie_puis_fermee(claude):
++    agent, fabrique, evenements = claude()
++    premier = lancer(agent)
++    suite = suivre(agent, premier.session, garder=False)
++    assert suite.ok and not suite.ouverte and suite.texte == "Fait 2."
++    assert comptes(fabrique) == (1, 2, 1)  # même conversation, une seule déconnexion
++    assert fabrique.clients[0].options.resume is None
++    assert not os.path.exists(fabrique.clients[0].options.settings)
++    agent.liberer("B")
++    assert comptes(fabrique) == (1, 2, 1) and len(fins(evenements)) == 2
++
++
++# --- 5 : nouvel ouvrier, autre session, mode ou droits changés -----------------------------------
++
++
++def avant(journal, premier, second):
++    return journal.index(premier) < journal.index(second)
++
++
++def test_un_nouvel_ouvrier_pour_la_meme_tache_ferme_d_abord_l_ancien(claude):
++    agent, fabrique, _ = claude()
++    assert lancer(agent).ouverte
++    second = lancer(agent, {**OUVRIER, "tentative": 2})
++    assert second.ouverte
++    assert avant(fabrique.journal, ("deconnexion", 0), ("connexion", 1))
++    assert comptes(fabrique) == (2, 2, 1)
++
++
++def test_une_reprise_d_une_autre_session_ferme_l_ouvert_et_reprend_par_la_session(claude):
++    agent, fabrique, _ = claude()
++    assert lancer(agent).ouverte
++    autre = "11111111-2222-4333-8444-555555555555"
++    repris = suivre(agent, autre)  # le faux client répond sur sa session : reprise refusée
++    assert repris.erreur == REPRISE_IMPOSSIBLE
++    assert fabrique.clients[1].options.resume == autre
++    assert avant(fabrique.journal, ("deconnexion", 0), ("connexion", 1))
++    assert comptes(fabrique) == (2, 2, 2)
++
++
++def changer_le_mode(agent):
++    assert agent.changer_mode("default") == 0  # aucun ouvrier en marche
++
++
++def changer_les_regles(agent):
++    agent.regles_chantier = lambda: ["Bash(uv sync)"]
++
++
++def changer_les_secrets(agent):
++    agent.profil["secrets"] = ["*.sqlite"]
++
++
++@pytest.mark.parametrize("changer", [changer_le_mode, changer_les_regles, changer_les_secrets])
++def test_un_mode_ou_des_droits_changes_entre_deux_tours_ferment_l_ouvrier(claude, changer):
++    agent, fabrique, _ = claude()
++    premier = lancer(agent)
++    assert premier.ouverte
++
++    changer(agent)
++    repris = suivre(agent, premier.session)
++    assert repris.ok and repris.ouverte  # repris par la session, avec les nouveaux droits
++    nouveau = fabrique.clients[1].options
++    assert nouveau.resume == SESSION_MESUREE
++    assert avant(fabrique.journal, ("deconnexion", 0), ("connexion", 1))
++    assert comptes(fabrique) == (2, 2, 1)
++    assert fabrique.clients[0].demandes == ["Consigne."]  # l'ancien n'a rien reçu de plus
++    if changer is changer_le_mode:
++        assert nouveau.permission_mode == "default"
++    if changer is changer_les_regles:
++        assert "Bash(uv sync)" in nouveau.allowed_tools
++
++
++def test_un_mode_change_pendant_le_tour_et_applique_garde_l_ouvrier(claude):
++    agent, fabrique, _ = claude(tour=0.2)
++    fil, rendus = en_fond(lancer, agent)
++    assert attendre(lambda: fabrique.demandes == 1)
++    assert agent.changer_mode("default") == 1  # appliqué à chaud au client en marche
++    fil.join(GARDE_S)
++    assert rendus[0].ouverte
++    assert suivre(agent, rendus[0].session).ok  # même conversation : déjà dans le bon mode
++    assert comptes(fabrique) == (1, 2, 0)
++
++
++# --- 6 : le fichier des refus d'office vit avec l'ouvrier ouvert ----------------------------------
++
++
++def reglages_de(client):
++    return Path(client.options.settings)
++
++
++def fermer_par_liberer(agent, fabrique, session):
++    agent.liberer("B")
++
++
++def fermer_par_liberer_tous(agent, fabrique, session):
++    agent.liberer_tous()
++
++
++def fermer_par_arret_en_attente(agent, fabrique, session):
++    agent.arreter("B")  # ferme dans un fil à part : le fichier part après la déconnexion
++    assert attendre(lambda: not os.path.exists(fabrique.clients[0].options.settings))
++
++
++def fermer_par_erreur(agent, fabrique, session):
++    assert not suivre(agent, session).ok
++
++
++def fermer_par_nouvel_ouvrier(agent, fabrique, session):
++    lancer(agent, {**OUVRIER, "tentative": 2})
++
++
++def fermer_par_mode_change(agent, fabrique, session):
++    agent.changer_mode("plan")
++    suivre(agent, session)
++
++
++@pytest.mark.parametrize(
++    "fermer",
++    [fermer_par_liberer, fermer_par_liberer_tous, fermer_par_arret_en_attente, fermer_par_erreur,
++     fermer_par_nouvel_ouvrier, fermer_par_mode_change],
++)  # fmt: skip
++def test_le_fichier_des_refus_vit_avec_l_ouvrier_ouvert_et_part_a_sa_fermeture(claude, fermer):
++    agent, fabrique, _ = claude(["ok", "ok", "erreur"])
++    premier = lancer(agent)
++    fichier = reglages_de(fabrique.clients[0])
++    assert premier.ouverte and fichier.is_file()
++    assert suivre(agent, premier.session).ok  # un tour de plus : toujours là, le même
++    assert fichier.is_file() and fabrique.connexions == 1
++
++    fermer(agent, fabrique, premier.session)
++    assert fabrique.clients[0].deconnexions == 1
++    assert not fichier.exists()
++
++
++# --- AgentSimule, appelé avec garder_ouvert=True : le même contrat --------------------------------
++
++DELAI_SIMULE = 0.02
++
++
++def simule(**reglages):
++    evenements = []
++    reglages = {"delai_s": DELAI_SIMULE, **reglages}
++    agent = AgentSimule(perimetres={"B": ["b.py"]}, sur_evenement=evenements.append, **reglages)
++    return agent, evenements
++
++
++def test_l_agent_simule_garde_l_ouvrier_et_lui_donne_la_suite(tmp_path):
++    agent, evenements = simule(suites={"B": ["", "rien", "erreur"]})
++    premier = lancer(agent, dossier=tmp_path)
++    assert premier.ok and premier.ouverte
++    contenu = (tmp_path / "b.py").read_text("utf-8")
++
++    debut = time.monotonic()
++    suite = suivre(agent, premier.session)
++    assert time.monotonic() - debut >= DELAI_SIMULE  # une suite prend du temps, comme un tour
++    assert suite.ok and suite.ouverte and suite.session == premier.session
++    assert agent.suivis == [{"tache": "B", "role": "ouvrier", "tentative": 1,
++                             "session": premier.session, "message": SUITE}]  # fmt: skip
++    assert agent.reprises == [] and agent.fermes == []
++
++    rien = lancer(agent, reprendre=premier.session, consigne="Encore.", dossier=tmp_path)
++    assert rien.ok and rien.ouverte and rien.fichiers == []
++    assert (tmp_path / "b.py").read_text("utf-8") == contenu  # rien n'a changé : « rien »
++
++    echec = suivre(agent, premier.session)
++    assert not echec.ok and not echec.ouverte and agent.fermes == [premier.session]
++    assert len(fins(evenements)) == 4  # un événement « fin » à chaque tour
++
++    repli = suivre(agent, premier.session)  # fermé : la reprise par session, comme aujourd'hui
++    assert repli.ok and len(agent.reprises) == 1 and len(agent.suivis) == 3
++
++
++def test_une_suite_par_defaut_reecrit_le_perimetre(tmp_path):
++    agent, _ = simule()
++    premier = lancer(agent, dossier=tmp_path)
++    avant_suite = (tmp_path / "b.py").read_text("utf-8")
++    suite = lancer(agent, reprendre=premier.session, consigne=SUITE, dossier=tmp_path)
++    assert suite.fichiers == ["b.py"] and len(agent.suivis) == 1
++    assert (tmp_path / "b.py").read_text("utf-8") != avant_suite
++
++
++def test_l_agent_simule_arrete_pendant_la_suite_ou_pendant_l_attente():
++    agent, _ = simule()
++    premier = lancer(agent)
++    agent.delai_s = 1.0
++    fil, rendus = en_fond(suivre, agent, premier.session)
++    assert attendre(lambda: len(agent.suivis) == 1)
++    time.sleep(0.05)
++    assert agent.arreter("B") is True
++    fil.join(GARDE_S)
++    assert rendus[0].erreur == ARRETE and not rendus[0].ouverte
++    assert agent.fermes == [premier.session]
++
++    agent.delai_s = DELAI_SIMULE
++    second = lancer(agent)
++    assert second.ouverte
++    assert agent.arreter("B") is False
++    assert attendre(lambda: agent.fermes == [premier.session, second.session])
++
++
++def test_l_agent_simule_au_plafond_et_mode_change():
++    agent, _ = simule(ouverts_max=1)
++    a = lancer(agent, {**OUVRIER, "tache": "A"})
++    b = lancer(agent)
++    assert (a.ouverte, b.ouverte) == (True, False) and agent.fermes == [b.session]
++
++    agent.changer_mode("default")
++    repris = suivre(agent, a.session, {**OUVRIER, "tache": "A"})
++    assert repris.ok and agent.suivis == [] and len(agent.reprises) == 1  # par la session
++    assert agent.fermes == [b.session, a.session]
++
++
++def test_l_agent_simule_ne_garde_ni_verificateur_ni_orchestrateur_et_ferme_l_ancien():
++    agent, _ = simule()
++    premier = lancer(agent)
++    assert not lancer(agent, VERIFICATEUR, lecture_seule=True).ouverte
++    assert not lancer(agent, {"role": "orchestrateur"}).ouverte
++    assert agent.fermes == []  # l'ouvrier de B attend toujours
++    second = lancer(agent, {**OUVRIER, "tentative": 2})
++    assert second.ouverte and agent.fermes == [premier.session]
++
++
++def test_l_agent_simule_liberer_deux_fois_depuis_un_autre_fil_et_pendant_un_tour():
++    agent, _ = simule()
++    premier = lancer(agent)
++    fils = [threading.Thread(target=agent.liberer, args=("B",)) for _ in range(3)]
++    for fil in fils:
++        fil.start()
++    for fil in fils:
++        fil.join(GARDE_S)
++    agent.liberer("inconnue")
++    agent.liberer(None)
++    assert agent.fermes == [premier.session]
++
++    agent.delai_s = 0.2
++    fil, rendus = en_fond(lancer, agent)
++    assert attendre(lambda: agent._en_tour)
++    agent.liberer_tous()  # pendant un tour : fermé à la fin, sans l'interrompre
++    fil.join(GARDE_S)
++    assert rendus[0].ok and not rendus[0].ouverte
++    assert agent.fermes == [premier.session, rendus[0].session]
++
++    agent.delai_s = DELAI_SIMULE
++    ouverts = [lancer(agent, {**OUVRIER, "tache": t}) for t in "CDE"]
++    agent.liberer_tous()
++    agent.liberer_tous()
++    assert sorted(agent.fermes[2:]) == sorted(r.session for r in ouverts)  # chacun une fois
++
++
++@pytest.mark.parametrize("appeler", ["ancien", "faux"])
++def test_sans_garder_ouvert_l_agent_simule_ne_change_pas(appeler):
++    agent, evenements = simule(suites={"B": ["erreur"]})
++    if appeler == "ancien":
++        premier = ancien_appel(agent)
++        repris = ancien_appel(agent, reprendre=premier.session)
++    else:
++        premier = lancer(agent, garder=False)
++        repris = suivre(agent, premier.session, garder=False)
++    assert premier.ok and not premier.ouverte
++    assert repris.ok and not repris.ouverte and len(agent.reprises) == 1
++    assert agent.suivis == [] and agent.fermes == []
++    agent.liberer("B")
++    agent.liberer_tous()
++    assert agent.fermes == [] and len(fins(evenements)) == 2
++
++
++def test_l_agent_simule_sert_une_suite_sans_garder_ouvert_puis_la_ferme():
++    agent, evenements = simule()
++    premier = lancer(agent)
++    suite = suivre(agent, premier.session, garder=False)
++    assert suite.ok and not suite.ouverte and suite.session == premier.session
++    assert len(agent.suivis) == 1 and agent.reprises == []  # la même conversation
++    assert agent.fermes == [premier.session]  # fermée une fois
++    agent.liberer("B")
++    assert agent.fermes == [premier.session] and len(fins(evenements)) == 2
