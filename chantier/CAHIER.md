@@ -51,3 +51,8 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 
 ## Incident de lancement
 Les quatre copies de travail des ouvriers ont été créées sur `main` (9d4cf2c) au lieu de la branche de travail. Vu avant toute modification : l'orchestrateur les a replacées sur a862a2f et a prévenu chaque ouvrier de relire ses fichiers. À refaire à chaque lancement en copie isolée : vérifier le commit de départ.
+
+## Noté par la personne responsable pour la suite (hors de ce chantier)
+- Chantier suivant, décidé le 2026-11-13 : porter dans le moteur les sept règles de la ligne « PC et autonomie » (ouvrier resté ouvert, travail refusé gardé et sous-tâche, montée seulement si le fond est faux, vérificateur qui ne rejoue plus la suite, reprise seule après une panne ou un arrêt, niveaux de vérification branchés avec leur plancher, budget en dollars). Le découpage est en préparation.
+- Visualisation, relevé le 2026-11-13 : la Salle (la vue en trois dimensions) ne montre pas le nombre réel d'agents au travail, et sa route en S est à revoir avec plusieurs agents en même temps ; l'état du dépôt git n'est visible nulle part (branches créées, fusions, demandes de fusion). À traiter après le moteur, maquette validée d'abord.
+- À discuter ensuite : les points 3 (tourner seul sur un vrai projet) et 4 (ce qui n'est pas à reprendre tel quel) de la comparaison.
