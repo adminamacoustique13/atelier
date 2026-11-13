@@ -16,6 +16,7 @@ from collections import deque
 from contextlib import suppress
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from types import SimpleNamespace
 
 from atelier import archives, dosage
 from atelier.agents import (
@@ -766,6 +767,76 @@ def _attendre_le_delai(delai_s: float, annulee: threading.Event) -> bool:
     return annulee.wait(delai_s)
 
 
+DEPOT_FRAIS_S = 5.0  # l'âge, en secondes, au-delà duquel l'état du dépôt est relu
+DEPOT_PLANCHER_S = 1.0  # entre deux lectures de git, même quand le chantier change sans cesse
+
+
+class SuiviDepot:
+    """L'état du dépôt pour l'onglet « Dépôt », relu au plus toutes les `frais_s` secondes.
+
+    `lire` rend l'état (un dictionnaire, ou None quand il n'y a rien à lire). Avec `en_fond`,
+    la lecture se fait dans un fil à part : `etat()` rend tout de suite la dernière lecture
+    connue (None avant la première) et n'attend jamais git ; une seule lecture court à la fois.
+    Sans `en_fond` (un état d'exemple, lu sans git), `etat()` lit sur place. Une lecture qui
+    lève garde la précédente, et la suivante est retentée après `frais_s`.
+
+    `perimer()` dit que le chantier vient de changer : la lecture suivante n'attend pas
+    `frais_s`. En fond, deux lectures restent séparées d'au moins `DEPOT_PLANCHER_S`.
+    """
+
+    def __init__(self, lire, en_fond: bool, horloge=time.monotonic, frais_s: float = DEPOT_FRAIS_S):
+        self.lire, self.en_fond, self.horloge, self.frais_s = lire, en_fond, horloge, frais_s
+        self._verrou = threading.Lock()
+        self._lu: dict | None = None
+        self._a: float | None = None  # l'instant de la dernière lecture, réussie ou non
+        self._fil: threading.Thread | None = None
+        self._perime = False
+
+    def perimer(self) -> None:
+        """Le chantier vient de changer : la lecture gardée ne vaut plus."""
+        with self._verrou:
+            self._perime = True
+
+    def etat(self) -> dict | None:
+        """La dernière lecture du dépôt ; en lance une nouvelle si elle a vieilli ou ne vaut
+        plus."""
+        with self._verrou:
+            age = None if self._a is None else self.horloge() - self._a
+            delai = (DEPOT_PLANCHER_S if self.en_fond else 0.0) if self._perime else self.frais_s
+            frais = age is not None and age < delai
+            en_cours = self._fil is not None and self._fil.is_alive()
+            if frais or en_cours:
+                return self._lu
+            if self.en_fond:
+                self._fil = threading.Thread(target=self._relire, name="atelier-depot", daemon=True)
+                self._fil.start()
+                return self._lu
+        self._relire()
+        with self._verrou:
+            return self._lu
+
+    def _relire(self) -> None:
+        lu, reussi = None, True
+        with self._verrou:
+            self._perime = False  # un changement pendant la lecture la périmera de nouveau
+        try:
+            lu = self.lire()
+        except Exception:  # la page garde la lecture précédente
+            reussi = False
+        with self._verrou:
+            if reussi:
+                self._lu = lu
+            self._a = self.horloge()
+
+    def attendre(self, delai_s: float | None = None) -> bool:
+        """Attend la fin de la lecture en cours, s'il y en a une ; rend True si rien ne lit plus."""
+        with self._verrou:
+            fil = self._fil
+        if fil is not None:
+            fil.join(delai_s)
+        return fil is None or not fil.is_alive()
+
+
 class Atelier:
     """Relie un dépôt, un chantier, le moteur et le tableau de bord."""
 
@@ -820,6 +891,8 @@ class Atelier:
         # Les agents lisent à chaque lancement les règles du chantier en cours, quel qu'il soit.
         agent.regles_chantier = self._regles_du_chantier
         self.archives = archives.lister(self.depot)  # relue à chaque archivage, pas à chaque vue
+        # L'état du dépôt, pour l'onglet « Dépôt » : un vrai dépôt git est lu dans un fil à part.
+        self.suivi_depot = SuiviDepot(self._lire_le_depot, en_fond=hasattr(controles, "distant"))
         # La carte du code : en démonstration, celle de l'Atelier lui-même, expliquée par ses
         # propres commentaires ; un vrai projet fait écrire ses explications par Claude.
         simule = isinstance(agent, AgentSimule)
@@ -932,6 +1005,8 @@ class Atelier:
                 del self._sessions_dites[next(iter(self._sessions_dites))]
 
     def _sauver(self) -> None:
+        if hasattr(self, "suivi_depot"):
+            self.suivi_depot.perimer()  # une branche vient peut-être de naître ou d'entrer
         with self.moteur.verrou:
             chantier = self.moteur.chantier
             chantier.sauver(self.depot / ".atelier" / "etat.json")
@@ -969,6 +1044,7 @@ class Atelier:
                 if tache["etat"] in ("en_cours", "en_verification"):
                     tache["phase"] = self.moteur.phase(tache["id"])
             donnees["reprise_en_attente"] = self._reprise == "attente"
+        donnees["depot"] = self.suivi_depot.etat()  # hors du verrou : jamais d'attente sur git
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
         donnees["rythmes"] = self.activite.rythme()
@@ -980,6 +1056,20 @@ class Atelier:
         if hasattr(controles, "distant"):
             donnees["distant"] = {"adresse": controles.distant(), "probleme": controles.envoi}
         return donnees
+
+    def _lire_le_depot(self) -> dict | None:
+        """Lit l'état du dépôt par les contrôles (`etat_du_depot`), pour les tâches du chantier
+        telles qu'elles sont à cet instant ; None si les contrôles ne savent pas le lire."""
+        lire = getattr(self.moteur.controles, "etat_du_depot", None)
+        if lire is None:
+            return None
+        with self.moteur.verrou:
+            taches = [
+                SimpleNamespace(id=t.id, titre=t.titre, etat=t.etat, perimetre=list(t.perimetre))
+                for t in self.moteur.chantier.taches
+            ]
+            profil = dict(self.moteur.profil)
+        return lire(taches, profil)
 
     def _vue_mode(self) -> dict:
         """Le mode choisi, les cinq choix, et les ouvriers en marche dont le mode réel diffère."""

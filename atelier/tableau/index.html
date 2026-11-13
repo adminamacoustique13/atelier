@@ -110,6 +110,66 @@ input[type="text"]:focus-visible { border-color: var(--gris); }
 .carte h2 .note { margin-left: auto; color: var(--faible); font-style: normal; text-transform: none; letter-spacing: 0.02em; }
 .calme { color: var(--discret); }
 .budget-atteint { color: var(--attend); }
+/* L'onglet Dépôt : un bandeau de comptes, le graphe des branches, et une colonne (en ligne, enregistrements, partagés). */
+#vue-depot { --dp-ouvrier: #8297c4; --dp-verificateur: #7fc8b8; }
+.dp-principal { flex: 1 1 0; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
+.dp-bandeau, .dp-cadre, .dp-panneau { border: 1px solid var(--bord); border-radius: var(--rayon); background: rgba(16, 21, 37, 0.72); }
+.dp-bandeau { display: flex; flex-wrap: wrap; gap: 12px 16px; padding: 14px 18px; align-items: stretch; }
+.dp-bandeau .dp-phrase { flex: 1 1 180px; min-width: 0; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
+.dp-bandeau .dp-phrase p { font-size: 15px; line-height: 1.35; }
+.dp-compte { display: flex; flex-direction: column; gap: 4px; padding-left: 14px; border-left: 1px solid var(--bord); min-width: 78px; }
+.dp-compte span, .dp-titre { font: 500 10.5px var(--mono); color: var(--faible); letter-spacing: 0.08em; text-transform: uppercase; }
+.dp-compte b { font: 900 26px/1 var(--points); }
+.dp-compte b small { font: 400 12px var(--mono); color: var(--faible); }
+.dp-compte em { font: 400 10.5px var(--mono); font-style: normal; color: var(--faible); }
+.dp-compte.souci span, .dp-compte.souci b { color: var(--attend); }
+.dp-cadre { flex: 1 1 0; min-height: 0; overflow: auto; }
+.dp-graphe { position: relative; min-width: 760px; }
+.dp-graphe > svg { position: absolute; left: 0; top: 0; }
+.dp-rang { position: absolute; left: 14px; width: 152px; transform: translateY(-50%); line-height: 1.25; }
+.dp-rang b { display: block; font: 500 11.5px var(--mono); color: var(--texte); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dp-rang small { display: block; font-size: 11px; color: var(--faible); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dp-rang.entree b { color: var(--discret); } .dp-rang.absente b { color: var(--faible); }
+.dp-dit { position: absolute; left: 544px; right: 14px; transform: translateY(-50%); font-size: 11px; line-height: 1.35; color: var(--discret); }
+.dp-dit .dp-qui { display: flex; align-items: center; gap: 6px; height: 15px; white-space: nowrap; font: 500 10.5px var(--mono); color: var(--texte); }
+.dp-dit .dp-qui > span { flex: none; display: inline-flex; align-items: center; } .dp-dit .dp-qui > span:last-child { flex: 0 1 auto; min-width: 0; display: block; overflow: hidden; text-overflow: ellipsis; }
+.dp-dit .dp-qui .role { letter-spacing: 0.06em; text-transform: uppercase; }
+.dp-dit .dp-qui .ouvrier { color: var(--dp-ouvrier); } .dp-dit .dp-qui .verificateur { color: var(--dp-verificateur); }
+.dp-dit .dp-qui .toi { color: var(--attend); } .dp-dit .dp-qui em { font-style: normal; color: var(--faible); }
+.dp-dit p { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dp-dit.absente, .dp-dit.absente .dp-qui { color: var(--faible); }
+.dp-dit .souci { color: var(--attend); }
+.dp-heure { position: absolute; top: 6px; transform: translateX(-50%); font: 400 10px var(--mono); color: var(--faible); white-space: nowrap; }
+.dp-heure.la { color: var(--texte); }
+.dp-regle { position: absolute; left: 14px; right: 14px; border-top: 1px solid var(--bord); }
+.dp-titre { position: absolute; left: 14px; white-space: nowrap; }
+.dp-titre b { font: 900 16px/1 var(--points); color: var(--texte); margin-right: 8px; letter-spacing: 0; }
+.dp-cote { flex: 0 0 340px; display: flex; flex-direction: column; gap: 12px; overflow-y: auto; }
+.dp-panneau { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.dp-panneau.souci { border-color: color-mix(in srgb, var(--attend) 45%, transparent); }
+.dp-panneau.souci .dp-titre-bloc { color: var(--attend); }
+.dp-panneau.avenir { border-style: dashed; border-color: var(--bord-fort); background: repeating-linear-gradient(135deg, rgba(220, 220, 220, 0.03) 0 6px, transparent 6px 12px); }
+.dp-titre-bloc { font: 500 10.5px var(--mono); color: var(--faible); letter-spacing: 0.08em; text-transform: uppercase; }
+.dp-panneau p { font-size: 12.5px; line-height: 1.45; color: var(--discret); } .dp-panneau p.fort { color: var(--texte); font-size: 14px; }
+.dp-panneau code { align-self: flex-start; font-size: 11.5px; }
+.dp-enr { display: flex; flex-direction: column; font-size: 11.5px; list-style: none; margin: 0; padding: 0; }
+.dp-enr li { display: grid; grid-template-columns: 58px minmax(0, 1fr) auto; gap: 2px 8px; padding: 5px 0; border-top: 1px solid var(--bord); align-items: baseline; }
+.dp-enr li:first-child { border-top: 0; }
+.dp-enr li > code { background: none; padding: 0; font-size: 11px; color: var(--discret); }
+.dp-enr li.pas-en-ligne > code { color: var(--attend); }
+.dp-enr li .m { color: var(--texte); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dp-enr li .h { font: 400 10px var(--mono); color: var(--faible); }
+.dp-enr li.seuil { display: block; border-top: 1px dashed color-mix(in srgb, var(--attend) 60%, transparent); font: 400 10px var(--mono); color: var(--attend); }
+.dp-partages { display: flex; flex-direction: column; list-style: none; margin: 0; padding: 0; }
+.dp-partages li { display: flex; flex-direction: column; gap: 1px; padding: 5px 0; border-top: 1px solid var(--bord); font-size: 11.5px; color: var(--discret); }
+.dp-partages li:first-child { border-top: 0; }
+.dp-partages code { background: none; padding: 0; color: var(--texte); }
+@media (max-width: 1100px) {
+  #vue-depot.active { flex-direction: column; overflow-y: auto; }
+  .dp-principal { flex: 0 0 auto; } .dp-cadre { flex: 0 0 auto; } .dp-cote { flex: 0 0 auto; overflow: visible; }
+  .dp-bandeau { flex-wrap: wrap; } .dp-bandeau .dp-phrase { flex: 1 1 100%; }
+  .dp-compte { padding-left: 0; border-left: 0; }
+}
 .demande-budget { color: var(--attend); font-weight: 500; }
 .travail-garde { color: var(--discret); font-size: 12px; }
 .petit { color: var(--faible); font-size: 11.5px; }
@@ -729,6 +789,7 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
       <a href="#salle" data-onglet="salle">Salle</a>
       <a href="#plan" data-onglet="plan">Plan<span class="cpt" id="cpt-plan"></span></a>
       <a href="#code" data-onglet="code">Code<i class="pt code" id="pt-code" title="Un agent modifie le code en ce moment"></i></a>
+      <a href="#depot" data-onglet="depot">Dépôt<i class="pt" id="pt-depot" title="Un conflit de fusion ou un envoi en échec"></i></a>
     </nav>
     <div class="pousse"></div>
     <button type="button" class="discret" id="maj" data-action="maj" hidden>Mettre à jour</button>
@@ -838,6 +899,14 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
         <div class="code-page" id="code-page" hidden></div>
       </div>
     </div>
+  </section>
+
+  <section class="vue" id="vue-depot" aria-label="Dépôt">
+    <div class="dp-principal">
+      <div class="dp-bandeau" id="dp-bandeau"></div>
+      <div class="dp-cadre"><div class="dp-graphe" id="dp-graphe"></div></div>
+    </div>
+    <aside class="dp-cote" id="dp-cote" aria-label="Dépôt en ligne, enregistrements et fichiers partagés"></aside>
   </section>
 
   <section class="vue" id="vue-plan" aria-label="Plan">
@@ -1841,11 +1910,159 @@ function afficher(vue) {
   afficherChantier(vue);
   afficherPlan(vue);
   afficherSalle(vue);
+  afficherDepot(vue);
+}
+
+/* ---------- L'onglet Dépôt : les branches des tâches et leurs fusions, lues dans git (vue.depot) ---------- */
+const DP = { x0: 178, x1: 512, dit: 544, pas: 36, largeur: 532 };
+const dpCompte = (n, un, plusieurs) => `${n} ${n > 1 ? plusieurs : un}`;
+const dpPoint = (x, y, r, plein, c = "#ffffff") => `<circle cx="${x.toFixed(1)}" cy="${y}" r="${r}" fill="${plein ? c : "#0b0f1b"}" stroke="${plein ? "#0b0f1b" : c}" stroke-width="1.5"/>`;
+const DP_SIGNES = {
+  ouvrier: `<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><rect x="1.5" y="1.5" width="9" height="9" rx="1.5" fill="currentColor"/></svg>`,
+  verificateur: `<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="none" stroke="currentColor" stroke-width="2"/></svg>`,
+  toi: `<svg width="11" height="11" viewBox="0 0 12 12" aria-hidden="true"><circle cx="6" cy="6" r="4" fill="currentColor"/></svg>`,
+};
+/* Qui travaille sur la branche d'une tâche, d'après son état au chantier : son rôle (ouvrier, vérificateur, toi) et ce qu'il fait. */
+function dpQui(t) {
+  if (!t) return { role: "", html: `<em>tâche absente du plan</em>` };
+  const fait = t.phase ? propre(t.phase.texte) : "";
+  if (t.etat === "en_cours") return { role: "ouvrier", html: `<span class="ouvrier">${DP_SIGNES.ouvrier}</span><span class="role ouvrier">Ouvrier</span><span>${fait || "écrit"}</span>` };
+  if (t.etat === "en_verification") return t.verification === "mecanique"
+    ? { role: "verificateur", html: `<span class="verificateur">${DP_SIGNES.verificateur}</span><span class="role verificateur">Contrôles</span><span>${fait || "contrôles automatiques"}</span>` }
+    : { role: "verificateur", html: `<span class="verificateur">${DP_SIGNES.verificateur}</span><span class="role verificateur">Vérificateur</span><span>${fait || "en relecture"}</span>` };
+  if (t.etat === "verifie") return { role: "", html: `<span>✓</span><span>vérifiée</span>` };
+  if (t.etat === "revenu") return { role: "toi", html: `<span class="toi">${DP_SIGNES.toi}</span><span class="toi">t'attend</span>${t.travail_garde ? `<em>·</em><span>travail gardé</span>` : ""}` };
+  return { role: "", html: `<span>${propre(libelleEtat(t).toLowerCase())}</span>` };
+}
+/* Ce que git sait d'une branche en cours : fichiers modifiés, retard sur la branche du chantier, conflit de fusion. */
+function dpFaits(g, branche, t) {
+  if (g.probleme) return `<span class="souci">${propre(g.probleme)}</span>`;
+  if (t && t.etat === "verifie") return `Son travail entre dans ${propre(branche)} : la lecture suivante le montrera.`;
+  const morceaux = [];
+  if (g.conflits.length) morceaux.push(`<span class="souci">Conflit à l'entrée dans ${propre(g.conflits.join(", "))} : rien n'est entré.</span>`);
+  const n = g.modifies.nombre;
+  morceaux.push(n ? `${dpCompte(n, "fichier modifié", "fichiers modifiés")}, pas encore ${n > 1 ? "enregistrés" : "enregistré"}.` : g.copie.existe ? "Aucun fichier modifié pour l'instant." : "La branche existe, sans copie de travail.");
+  if (g.retard) morceaux.push(`En retard de ${g.retard} sur ${propre(branche)}.`);
+  return morceaux.join(" ");
+}
+function dpGraphe(vue, d, groupes) {
+  const branche = d.chantier.branche || "la branche du chantier", parId = Object.fromEntries(vue.taches.map((t) => [t.id, t]));
+  /* L'axe : les moments qui comptent, rangés dans l'ordre et espacés également ; le dernier est « maintenant ». */
+  const minute = (e) => (e && e.instant ? Math.floor(Date.parse(e.instant) / 60000) : null);
+  const moments = new Map();
+  const noter = (e) => { const m = minute(e); if (m !== null && !moments.has(m)) moments.set(m, e.heure || ""); };
+  groupes.entrees.forEach((t) => noter(d.taches[t.id].entree));
+  groupes.enCours.forEach((t) => noter(d.taches[t.id].depart));
+  (d.chantier.derniers || []).forEach(noter);
+  noter(d.en_ligne.connu);
+  const rangs = [...moments.keys()].sort((a, b) => a - b), n = rangs.length, MAINTENANT = DP.x1;
+  const PAS = (MAINTENANT - DP.x0 - 24) / (n + 1); // un cran par moment, le premier un cran après l'origine
+  const X = (e) => { const i = rangs.indexOf(minute(e)); return i < 0 ? DP.x0 : DP.x0 + (i + 1) * PAS; };
+  let y = 30, html = "", traits = "", noeuds = "";
+  const rang = (classe, nom, sous, dit, yy) => `<div class="dp-rang ${classe}" style="top:${yy}px"><b>${nom}</b><small title="${sous}">${sous}</small></div><div class="dp-dit ${classe}" style="top:${yy}px">${dit}</div>`;
+  const titre = (nombre, texte) => { html += `<span class="dp-regle" style="top:${y - 6}px"></span><span class="dp-titre" style="top:${y}px">${nombre === null ? "" : `<b>${nombre}</b>`}${texte}</span>`; y += 34; };
+  /* Les heures, une sur quelques-unes pour qu'elles ne se chevauchent pas, puis « maintenant ». */
+  const saut = Math.max(1, Math.ceil(n / 4));
+  rangs.forEach((m, i) => { if (i % saut === 0) html += `<span class="dp-heure" style="left:${X({ instant: new Date(m * 60000).toISOString() })}px">${propre(moments.get(m))}</span>`; });
+  html += `<span class="dp-heure la" style="left:${MAINTENANT}px">maintenant</span>`;
+  /* origin/<branche> (s'il y en a une), puis la branche du chantier : le trait épais. */
+  y += 14;
+  let yOrigine = null;
+  if (d.en_ligne.suivie) {
+    yOrigine = y;
+    const avance = d.en_ligne.avance || 0, connu = d.en_ligne.connu;
+    html += rang("", propre(d.en_ligne.suivie), "le dépôt en ligne", `<p${avance ? ` class="souci"` : ""}>${connu ? `À ${propre(connu.id)} (${propre(connu.heure)}). ` : ""}${avance ? `${propre(branche)} a ${dpCompte(avance, "enregistrement", "enregistrements")} d'avance.` : "À jour."}</p>`, y);
+    y += 40;
+  }
+  const yMain = y, nEntrees = groupes.entrees.length;
+  html += rang("", propre(branche), "la branche du chantier", `<p style="color:var(--texte)">${d.chantier.dernier ? `À ${propre(d.chantier.dernier.id)} depuis ${propre(d.chantier.dernier.heure)}. ` : ""}${dpCompte(nEntrees, "tâche", "tâches")} sur ${vue.taches.length} y ${nEntrees > 1 ? "sont entrées" : "est entrée"} ; rien n'y entre sans vérification.</p>`, y);
+  y += 34;
+  /* Les branches entrées : elles reviennent sur la branche du chantier, en blanc. */
+  if (groupes.entrees.length) titre(groupes.entrees.length, `dans ${propre(branche)}`);
+  for (const t of groupes.entrees) {
+    const g = d.taches[t.id], x1 = X(g.entree), xa = x1 - Math.min(46, PAS * 0.7);
+    traits += `<path d="M${xa},${yMain} L${xa},${y - 9} Q${xa},${y} ${xa + 9},${y} L${x1 - 9},${y} Q${x1},${y} ${x1},${y - 9} L${x1},${yMain}" fill="none" stroke="#ffffff" stroke-width="2"/>`;
+    noeuds += dpPoint(x1, yMain, 3.4, true) + dpPoint(x1 - 16, y, 3, true);
+    const facon = g.entree.facon === "apres_fusion" ? `${propre(branche)} a d'abord été fusionnée dans la branche, contrôles rejoués.` : `Entrée directe : ${propre(branche)} n'avait pas bougé.`;
+    html += rang("entree", `tache/${propre(t.id)}`, propre(t.titre), `<div class="dp-qui"><span>✓</span><span>dans ${propre(branche)} depuis ${propre(g.entree.heure)}</span><em>·</em><span>${propre(g.entree.id)}</span></div><p>${facon}${g.branche.existe ? "" : " Branche supprimée."}</p>`, y);
+    y += DP.pas;
+  }
+  /* Les branches en cours : elles s'arrêtent à « maintenant », sur le signe de qui y travaille. */
+  if (groupes.enCours.length) { y += 6; titre(groupes.enCours.length, `pas encore dans ${propre(branche)}`); }
+  for (const t of groupes.enCours) {
+    const g = d.taches[t.id], x0 = g.depart ? X(g.depart) : DP.x0, qui = dpQui(parId[t.id]);
+    const couleur = qui.role === "verificateur" ? "#7fc8b8" : qui.role === "toi" ? "#e8953a" : "#8297c4";
+    traits += `<path d="M${x0},${yMain} L${x0},${y - 9} Q${x0},${y} ${x0 + 9},${y} L${MAINTENANT},${y}" fill="none" stroke="#868c9c" stroke-width="1.7"/>`;
+    noeuds += dpPoint(x0, yMain, 2.6, true) + (qui.role === "ouvrier" ? `<rect x="${MAINTENANT - 5}" y="${y - 5}" width="10" height="10" rx="2" fill="${couleur}" stroke="#0b0f1b" stroke-width="1.5"/>` : dpPoint(MAINTENANT, y, 5, qui.role === "toi", couleur));
+    if (g.conflits.length) noeuds += `<circle cx="${MAINTENANT - 26}" cy="${y}" r="7" fill="#0b0f1b" stroke="#e8953a" stroke-width="1.4"/><path d="M${MAINTENANT - 29},${y - 3} l6,6 M${MAINTENANT - 23},${y - 3} l-6,6" stroke="#e8953a" stroke-width="1.5" stroke-linecap="round"/>`;
+    html += rang("", `tache/${propre(t.id)}`, propre(t.titre), `<div class="dp-qui">${qui.html}</div><p>${dpFaits(g, branche, parId[t.id])}</p>`, y);
+    y += DP.pas;
+  }
+  /* Les tâches sans branche : pas encore parties. */
+  if (groupes.absentes.length) { y += 6; titre(groupes.absentes.length, "sans branche"); }
+  for (const t of groupes.absentes) {
+    const g = d.taches[t.id] || { branche: { nom: `tache/${t.id}` } }, revenue = t.etat === "revenu";
+    noeuds += `<circle cx="${MAINTENANT}" cy="${y}" r="4.6" fill="#0b0f1b" stroke="rgba(220,220,220,.5)" stroke-dasharray="2 2.4"/>`;
+    html += rang("absente", `tache/${propre(t.id)}`, propre(t.titre), `<div class="dp-qui"><span>${revenue ? "revenue, sans travail gardé" : "pas partie, aucun agent"}</span></div><p>Pas encore de branche : ${propre(g.branche.nom)} sera créée à son départ.</p>`, y);
+    y += DP.pas;
+  }
+  const haut = y + 4;
+  const fond = `<line x1="${MAINTENANT}" y1="22" x2="${MAINTENANT}" y2="${haut - 8}" stroke="rgba(220,220,220,.4)" stroke-dasharray="2 4"/>`;
+  let troncs = `<line x1="${DP.x0 - 14}" y1="${yMain}" x2="${MAINTENANT}" y2="${yMain}" stroke="#ffffff" stroke-width="3" stroke-linecap="round"/>` + dpPoint(MAINTENANT, yMain, 5, true);
+  if (yOrigine !== null) {
+    const xe = d.en_ligne.connu ? X(d.en_ligne.connu) : DP.x0, avance = d.en_ligne.avance || 0;
+    troncs += `<line x1="${DP.x0 - 14}" y1="${yOrigine}" x2="${xe}" y2="${yOrigine}" stroke="#ffffff" stroke-width="1.5"/>` + dpPoint(xe, yOrigine, 4, true)
+      + (avance ? `<line x1="${xe}" y1="${yOrigine}" x2="${MAINTENANT}" y2="${yOrigine}" stroke="rgba(220,220,220,.3)" stroke-dasharray="3 5"/><line x1="${xe + 4}" y1="${yMain + 8}" x2="${MAINTENANT}" y2="${yMain + 8}" stroke="#e8953a" stroke-width="2" stroke-linecap="round"/>` : `<line x1="${xe}" y1="${yOrigine}" x2="${MAINTENANT}" y2="${yOrigine}" stroke="#ffffff" stroke-width="1.5"/>`);
+  }
+  return `<svg width="${DP.largeur}" height="${haut}" viewBox="0 0 ${DP.largeur} ${haut}" aria-hidden="true">${fond}${traits}${troncs}${noeuds}</svg>${html}<div style="height:${haut}px"></div>`;
+}
+function afficherDepot(vue) {
+  const d = vue && vue.depot, souci = Boolean(d && (Object.values(d.taches).some((g) => g.conflits.length) || (vue.distant && vue.distant.probleme)));
+  const pastille = document.getElementById("pt-depot");
+  if (pastille) pastille.classList.toggle("allume", souci);
+  if (location.hash !== "#depot" || !vue || vue.aucun_projet) return;
+  if (!d) {
+    poser("dp-bandeau", `<div class="dp-phrase"><span class="dp-titre-bloc">Le dépôt</span><p class="calme">Lecture du dépôt en cours : les branches s'affichent dans un instant.</p></div>`);
+    poser("dp-graphe", ""); poser("dp-cote", "");
+    return;
+  }
+  const branche = d.chantier.branche || "la branche du chantier";
+  const groupes = { entrees: [], enCours: [], absentes: [] };
+  for (const t of vue.taches) {
+    const g = d.taches[t.id];
+    (g && g.entree ? groupes.entrees : g && (g.branche.existe || g.copie.existe) ? groupes.enCours : groupes.absentes).push(t);
+  }
+  const nE = groupes.entrees.length, nC = groupes.enCours.length, nA = groupes.absentes.length;
+  const conflits = groupes.enCours.filter((t) => d.taches[t.id].conflits.length);
+  const phrase = !vue.taches.length ? "Aucune tâche au plan : le dépôt n'a encore aucune branche de tâche."
+    : `${nE ? dpCompte(nE, "tâche est", "tâches sont") : "Aucune tâche n'est encore"} dans ${propre(branche)}, ${nC ? dpCompte(nC, "branche est", "branches sont") : "aucune branche n'est"} en cours${conflits.length ? `, dont ${conflits.length} ${conflits.length > 1 ? "reprennent" : "reprend"} un conflit` : ""}.`;
+  const avance = d.en_ligne.suivie ? d.en_ligne.avance || 0 : null;
+  const compte = (nom, valeur, sous, classe) => `<div class="dp-compte ${classe || ""}"><span>${nom}</span><b>${valeur}</b><em>${sous}</em></div>`;
+  poser("dp-bandeau", `<div class="dp-phrase"><span class="dp-titre-bloc">Le dépôt${d.chantier.detachee ? " · hors de toute branche" : ""}</span><p>${phrase}</p>${d.chantier.probleme ? `<p class="petit" style="color:var(--attend)">${propre(d.chantier.probleme)}</p>` : ""}</div>`
+    + compte(`Dans ${propre(branche)}`, `${nE}<small> / ${vue.taches.length}</small>`, "entrées, vérifiées")
+    + compte("En cours", nC, nC ? dpCompte(nC, "branche", "branches").replace(/^\d+ /, "") : "aucune branche")
+    + compte("Conflit", conflits.length, conflits.length ? propre(conflits.map((t) => t.id).join(", ")) : "aucun", conflits.length ? "souci" : "")
+    + compte("Sans branche", nA, nA ? "pas parties" : "aucune")
+    + (avance === null ? compte("En ligne", "–", "pas de dépôt en ligne") : compte(avance ? "Pas encore en ligne" : "En ligne", avance, avance ? dpCompte(avance, "enregistrement", "enregistrements").replace(/^\d+ /, "") : "à jour", avance ? "souci" : "")));
+  poser("dp-graphe", dpGraphe(vue, d, groupes));
+  /* La colonne : le dépôt en ligne, les derniers enregistrements, les fichiers partagés, et ce qui viendra de GitHub. */
+  const lien = vue.distant || {}, enPanne = Boolean(lien.probleme);
+  const enLigne = enPanne
+    ? `<section class="dp-panneau souci"><span class="dp-titre-bloc">● Dépôt en ligne</span><p class="fort">Le dernier envoi a échoué.</p><p>${propre(lien.probleme)}</p><p>Rien n'est perdu : ${propre(branche)} garde ${avance ? `ses ${dpCompte(avance, "enregistrement", "enregistrements")} d'avance` : "son travail"}, et l'Atelier renvoie la branche après la prochaine tâche vérifiée.</p>${lien.adresse ? `<code>${propre(lien.adresse)}</code>` : ""}</section>`
+    : `<section class="dp-panneau"><span class="dp-titre-bloc">Dépôt en ligne</span>${d.en_ligne.probleme ? `<p style="color:var(--attend)">${propre(d.en_ligne.probleme)}</p>` : ""}<p>${avance === null ? "Aucune branche en ligne n'est suivie : le chantier reste sur cet ordinateur." : avance ? `${propre(branche)} a ${dpCompte(avance, "enregistrement", "enregistrements")} d'avance sur ${propre(d.en_ligne.suivie)} : ils partent après la prochaine tâche vérifiée.` : `${propre(d.en_ligne.suivie)} est à jour.`}</p>${lien.adresse ? `<code>${propre(lien.adresse)}</code>` : ""}</section>`;
+  const derniers = d.chantier.derniers || [];
+  const journal = `<section class="dp-panneau"><span class="dp-titre-bloc">Derniers enregistrements de ${propre(branche)}</span>${derniers.length ? `<ul class="dp-enr">${derniers.map((e, i) =>
+    `${avance && i === avance ? `<li class="seuil">au-dessus : pas encore en ligne</li>` : ""}<li class="${avance && i < avance ? "pas-en-ligne" : ""}"><code>${propre(e.id)}</code><span class="m" title="${propre(e.message)}">${propre(e.message)}</span><span class="h">${propre(e.heure)}</span></li>`).join("")}</ul>` : `<p>Aucun enregistrement lu.</p>`}</section>`;
+  const fichiers = d.partages.fichiers || [];
+  const partages = `<section class="dp-panneau"><span class="dp-titre-bloc">Fichiers partagés du profil</span>${d.partages.probleme ? `<p style="color:var(--attend)">${propre(d.partages.probleme)}</p>` : ""}${fichiers.length ? `<ul class="dp-partages">${fichiers.map((f) =>
+    `<li><span><code>${propre(f.motif)}</code> · fusion « ${propre(f.fusion)} »</span><span>${f.fusion === "union" ? "Les lignes des deux côtés sont gardées : pas de conflit sur ce fichier." : "Un conflit revient à l'ouvrier, une fois par départ."}</span></li>`).join("")}</ul>` : `<p>Aucun fichier partagé : deux tâches ne touchent jamais le même fichier en même temps.</p>`}</section>`;
+  const github = `<section class="dp-panneau avenir"><span class="dp-titre-bloc">GitHub · à venir</span><p>Demandes de fusion, contrôles du robot, relectures : il faudrait interroger GitHub, ce que l'Atelier ne fait pas. Il n'envoie que ${propre(branche)} ; les branches des tâches restent sur l'ordinateur.</p></section>`;
+  poser("dp-cote", enLigne + journal + partages + github);
 }
 
 function onglet() {
   const demande = location.hash.slice(1);
-  const nom = ["accueil", "conversation", "chantier", "salle", "plan", "code"].includes(demande) ? demande : rejoue ? "conversation" : "accueil";
+  const nom = ["accueil", "conversation", "chantier", "salle", "plan", "code", "depot"].includes(demande) ? demande : rejoue ? "conversation" : "accueil";
   document.querySelector(".app").classList.toggle("sur-accueil", nom === "accueil");
   document.querySelectorAll(".vue").forEach((v) => v.classList.toggle("active", v.id === `vue-${nom}`));
   document.querySelectorAll(".onglets a").forEach((a) => {
@@ -1854,6 +2071,7 @@ function onglet() {
   if (nom === "conversation") { const cadre = document.getElementById("fil"); cadre.scrollTop = cadre.scrollHeight; }
   if (nom === "code" && derniere) { afficherCode(derniere); chargerCarte(true); }
   if (nom === "salle" && derniere) afficherSalle(derniere);
+  if (nom === "depot" && derniere) afficherDepot(derniere);
   if (nom === "accueil") chargerAccueil();
 }
 window.addEventListener("hashchange", onglet);

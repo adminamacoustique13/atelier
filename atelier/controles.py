@@ -1253,5 +1253,5 @@ def _poser_travail_d_exemple(fiche: dict, tache, maintenant: int, entrees: int) 
     fiche["branche"]["existe"] = fiche["copie"]["existe"] = True
     fiche["depart"] = {"id": "3f9a1c7", "message": "Cahier du chantier", **_quand(maintenant - 600)}
     fiche["retard"] = entrees
-    noms = list(tache.perimetre) or [f"coeur/{str(tache.id).lower()}.py"]
+    noms = list(getattr(tache, "perimetre", None) or []) or [f"coeur/{str(tache.id).lower()}.py"]
     fiche["modifies"] = {"nombre": len(noms), "noms": noms[:FICHIERS_NOMMES]}
