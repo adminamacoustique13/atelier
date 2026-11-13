@@ -926,6 +926,10 @@ class AgentClaude(_ModeDesOuvriers, _OuvriersOuverts):
     Un outil qui n'est ni permis ni interdit passe par le guichet, s'il y en a un.
     """
 
+    # Le moteur ne demande `garder_ouvert` qu'à un agent qui le dit (voir `Moteur._garde`).
+    garde_les_ouvriers = True
+
+
     def __init__(self, profil: dict | None = None, delai_max_s: int = 3600, fabrique_client=None):
         self.profil = profil or {}
         self.delai_max_s = delai_max_s
@@ -1304,6 +1308,9 @@ class AgentSimule(_ModeDesOuvriers, _OuvriersOuverts):
     empeches: dict[str, list] = field(default_factory=dict)
     suites: dict[str, list[str]] = field(default_factory=dict)
     ouverts_max: int = OUVERTS_MAX
+    # Faux sans réglage : le moteur ne lui demande alors jamais de garder un ouvrier ouvert, et
+    # la démonstration se déroule comme avant (voir `Moteur._garde`).
+    garde_les_ouvriers: bool = False
     suivis: list[dict] = field(default_factory=list)
     fermes: list[str] = field(default_factory=list)
     _gardes: dict = field(default_factory=dict, init=False, repr=False, compare=False)

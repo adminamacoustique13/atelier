@@ -21,7 +21,7 @@
 | M6. Pannes d'agent : patienter | vérifié | Opus, effort élevé | complète, Fable : refusé une fois, accepté à la seconde passe par le même vérificateur | 1 + 1 reprise | 97 tests de pannes ; une ou deux pannes glissées avant chaque appel de 14 scénarios : aucun écart avec le déroulement sans panne ; alternance sans fin de pannes et de surcharges : tâche rendue après 13 ouvriers ; 50 mutations, 49 tuées ; suite 2 922, ruff propre |
 | M7. Reprise seule après un arrêt | vérifié | Opus, effort élevé | complète, Fable : accepté du premier coup, aucun défaut bloquant ; vrais lancements à deux processus, dix courses, cinq arrêts brutaux | 1 | 43 tests ; 31 mutations, 22 tuées (les autres sont des trous de tests, le code est juste) ; suite 2 123, ruff propre, huit essais verts ; reste : « Arrêter » n'annule pas encore la relance annoncée (page, M13) |
 | M8. Le travail refusé est gardé | fait, à relire | Opus, effort élevé, puis terminé directement par Claude sans ouvrier ni vérificateur (décision de la personne responsable) | complète, Fable : refusé deux fois ; le dernier point est corrigé hors vérificateur, prouvé par des tests qui échouaient avant | 1 + 1 reprise + correction directe | une liste de marqueurs illisible arrête l'entrée dans la branche (5 cas) ; la marque d'un conflit résolu suit la copie d'un départ à l'autre (`conflit_pose`) ; suite 3 073, ruff propre |
-| M9. Retours à l'ouvrier ouvert | à lancer (vague 2) | Opus, effort élevé | complète | | |
+| M9. Retours à l'ouvrier ouvert | fait, à relire | Claude directement, sans ouvrier ni vérificateur | tests seuls : 14 tests nouveaux, les 3 130 existants inchangés | 1 | le moteur demande à garder l'ouvrier quand le profil le permet et que l'agent sait le faire ; un contrôle rouge lui revient jusqu'à trois fois (`retours_controles`), un manque une fois (`complements`) ; arrêt au même échec ; copie restée telle quelle : le refus vaut sans rien rejouer ; ouvrier libéré à la fin de la tâche et à l'arrêt du serveur |
 | M10. Sous-tâche | à lancer (vague 2) | Opus, effort élevé | bornée | | |
 | M11. Après un refus | à lancer (vague 2) | Opus, effort élevé | complète | | |
 | M12. Budget | à lancer (vague 2) | Fable, effort élevé | complète | | |
@@ -86,6 +86,12 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 
 ## Incident entre vérificateurs
 Les vérificateurs partageaient le même dossier de travail. Celui de M5 a lancé par erreur le script de mutations de celui de M3 et a modifié sa copie d'essai pendant une centaine de secondes, puis l'a remise à l'identique ; il a aussi écrit des fichiers à la racine du dossier sans vérifier les noms. Les mutations de M3 jouées à ce moment sont à tenir pour douteuses ; son verdict repose sur la lecture du SDK et sur son propre essai, pas sur elles. À retenir : un dossier de travail par agent, jamais partagé.
+
+## Écarts de M9 par rapport à sa fiche (à relire)
+- Le retour reste tracé `reprise: true` dans l'historique, et non `retour: true` : la clé existe déjà, la page et les règles de blocage la lisent.
+- Un retour compte toujours parmi les agents lancés (jamais parmi les tentatives) : c'est un tour d'agent payé, et le changer aurait demandé de réécrire les tests qui comptent les agents.
+- Les règles nouvelles (plusieurs retours, arrêt au même échec, copie restée telle quelle) ne valent qu'avec un ouvrier gardé ouvert ; sans lui, le moteur garde une reprise par départ, jugée comme avant. L'agent simulé de la démonstration ne garde pas d'ouvrier sans réglage : la démonstration est inchangée.
+- Le relevé du vérificateur est encore effacé à chaque départ neuf, même quand la copie est gardée : la vérification suivante est alors entière au lieu d'une retouche (plus sûr, plus cher).
 
 ## Relevés des ouvriers, hors périmètre
 - P3 : pendant sa reprise, l'ouvrier a effacé 171 fichiers `atelier-refus-*.json` du dossier temporaire commun, sans savoir s'ils étaient tous à lui (une seconde suppression a été refusée par l'arbitre). Fichiers jetables de tests ; à retenir : les tests du pont doivent écrire leurs réglages dans un dossier à eux.

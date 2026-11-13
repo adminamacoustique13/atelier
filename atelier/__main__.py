@@ -205,6 +205,20 @@ def commande_servir(arguments) -> None:
         serveur.serve_forever()
     finally:
         LANCEMENT.serveur = None
+        liberer_les_ouvriers(projets)
+
+
+def liberer_les_ouvriers(projets) -> None:
+    """À l'arrêt de l'Atelier : ferme les ouvriers restés ouverts de chaque projet, pour qu'aucun
+    programme Claude ne reste (`agent.liberer_tous`). Un agent sans cette méthode, ou une
+    fermeture qui échoue, ne retient pas l'arrêt."""
+    for atelier in list(getattr(projets, "ateliers", {}).values()):
+        liberer = getattr(getattr(atelier.moteur, "agent", None), "liberer_tous", None)
+        if callable(liberer):
+            try:
+                liberer()
+            except Exception:  # noqa: BLE001 - l'arrêt ne doit jamais être retenu
+                pass
 
 
 def _attendre_une_autorisation(atelier: Atelier, delai_s: float = 10.0) -> str:

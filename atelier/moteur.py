@@ -35,6 +35,7 @@ from atelier.agents import (
     Resultat,
     commande_permise,
     forme_courte,
+    lire_garde,
 )
 from atelier.consignes import (
     PREUVE_MAX_CARACTERES,
@@ -96,6 +97,11 @@ PREFIXE_REPARATION = "REPARATION-"
 # l'ouvrier reprend la main dans sa session et sa copie, avec le refus en entier. Elle ne compte
 # pas parmi les tentatives (qui bornent les départs neufs) : elle a sa borne, par départ neuf.
 REPRISES_PAR_DEPART = 1
+# Avec un ouvrier gardé ouvert (`_garde`) : combien de fois un contrôle rouge, ou un manque
+# relevé, lui revient dans un même départ (réglages `retours_controles` et `complements`).
+RETOURS_CONTROLES = 3
+COMPLEMENTS = 1
+REPONSE_AU_FIL = 300  # signes gardés de la réponse d'un ouvrier qui n'a rien changé
 MOTIFS_REPRIS = ("bacle", "ne_sait_pas")  # un verdict « consigne » revient à la personne
 VERDICT_GARDE = 8000  # les derniers caractères du texte du vérificateur, gardés et transmis
 SORTIE_REPRISE = 4000  # les derniers caractères de la sortie des contrôles, pour la reprise
@@ -1248,6 +1254,8 @@ class Moteur:
                 self._en_vol.discard(tache.id)
                 self.places.finir(tache.id, self.heure())
                 self._reveiller()  # sa place et son jeton vont aussitôt à qui les attend
+            if self._garde():  # hors du verrou : l'ouvrier gardé ouvert pour la tâche est fermé
+                self._liberer(tache)
 
     def _boucle(self, tache: Tache) -> None:
         """Mène la tâche de départ neuf en départ neuf, jusqu'à ce qu'elle soit vérifiée ou rendue.
@@ -1636,20 +1644,57 @@ class Moteur:
     # --- la reprise à chaud ---------------------------------------------------------
 
     def _reprises(self, tache: Tache, dossier, session: str, jugement: Jugement) -> Jugement:
-        """Redonne la main à l'ouvrier refusé, au plus `REPRISES_PAR_DEPART` fois pour ce départ,
-        sans compter la reprise d'un conflit de fusion, bornée à part (`_conflit_a_reprendre`).
+        """Redonne la main à l'ouvrier refusé, dans ce départ, sans compter la reprise d'un
+        conflit de fusion, bornée à part (`_conflit_a_reprendre`).
+
+        Sans ouvrier gardé ouvert : `REPRISES_PAR_DEPART` fois au plus. Avec (`_garde`) : un
+        contrôle rouge lui revient jusqu'à `retours_controles` fois, tout autre refus qui se
+        reprend `complements` fois, et le retour s'arrête dès que le même échec revient.
 
         Rend le jugement de la dernière passe : celui de la reprise, ou le refus d'origine si
-        aucune reprise n'a pu partir (refus qui ne se reprend pas, session perdue).
+        aucune reprise n'a pu partir (refus qui ne se reprend pas, session perdue, copie restée
+        telle quelle).
         """
-        reprises = 0
+        faits = {"controles": 0, "autres": 0, "tous": 0}
         while jugement.reprenable:
             if jugement.origine != "integration":
-                if reprises == REPRISES_PAR_DEPART:
+                if not self._retour_permis(jugement, faits):
                     break
-                reprises += 1
-            jugement = self._reprise(tache, dossier, session, jugement)
+            suivant = self._reprise(tache, dossier, session, jugement)
+            if self._meme_echec(jugement, suivant):
+                return replace(suivant, reprenable=False)
+            jugement = suivant
         return jugement
+
+    def _garde(self) -> bool:
+        """Dit si le moteur garde les ouvriers ouverts : le profil le permet (`ouvrier_ouvert`,
+        vrai sans réglage) et l'agent sait le faire (`garde_les_ouvriers`)."""
+        sait = bool(getattr(self.agent, "garde_les_ouvriers", False))
+        return sait and lire_garde(self.profil)[0]
+
+    def _retour_permis(self, jugement: Jugement, faits: dict) -> bool:
+        """Compte ce retour et dit s'il peut partir (voir `_reprises`)."""
+        if not self._garde():
+            faits["tous"] += 1
+            return faits["tous"] <= REPRISES_PAR_DEPART
+        cle = "controles" if jugement.origine == "controles" else "autres"
+        defaut = RETOURS_CONTROLES if cle == "controles" else COMPLEMENTS
+        reglage = self.profil.get("retours_controles" if cle == "controles" else "complements")
+        permis = reglage if isinstance(reglage, int) and not isinstance(reglage, bool) else defaut
+        faits[cle] += 1
+        return faits[cle] <= max(0, permis)
+
+    def _meme_echec(self, avant: Jugement, apres: Jugement) -> bool:
+        """Dit si le retour a redonné le même échec : inutile de le redonner une fois de plus.
+        Ne vaut qu'avec un ouvrier gardé ouvert, où plusieurs retours se suivent."""
+        if not self._garde() or apres.motif is None or not apres.reprenable:
+            return False
+        if avant.origine != apres.origine or apres.origine == "integration":
+            return False
+        return refus.meme_forme(
+            {"issue": avant.motif, "detail": avant.detail, "origine": avant.origine},
+            {"issue": apres.motif, "detail": apres.detail, "origine": apres.origine},
+        )
 
     def _reprise(self, tache: Tache, dossier, session: str, refus: Jugement) -> Jugement:
         """Une reprise à chaud : l'ouvrier refusé corrige dans sa session et sa copie, puis sa
@@ -1659,9 +1704,19 @@ class Moteur:
             "session, pour qu'il corrige.",
             tache,
         )
+        # Avec un ouvrier gardé ouvert seulement : sans lui, toute reprise est jugée, comme avant.
+        avant = self._empreinte(dossier) if self._garde() else ""
         resultat = self._malgre_les_limites(
             tache, self._prendre_place, lambda: self._lancer_reprise(tache, dossier, session, refus)
         )
+        if resultat is not None and resultat.ok and self._inchangee(dossier, avant):
+            self._noter(
+                "L'ouvrier a rendu la main sans rien changer dans sa copie : le refus vaut tel "
+                "quel, et je ne rejoue ni les contrôles ni le vérificateur. Sa réponse : « "
+                f"{str(resultat.texte or '').strip()[:REPONSE_AU_FIL]} »",
+                tache,
+            )
+            return replace(refus, reprenable=False)
         if resultat is None:  # arrêt demandé entre le refus et la reprise : elle ne part pas
             with self.verrou:
                 self._tracer(tache, ARRETEE, DETAIL_ARRET, reprise=True)
@@ -1674,6 +1729,14 @@ class Moteur:
             )
             return replace(refus, reprenable=False)
         return self._passe(tache, dossier, resultat, precedent=refus)
+
+    def _inchangee(self, dossier, avant: str) -> bool:
+        """Dit si la copie est restée telle quelle depuis l'empreinte `avant`. Une empreinte
+        inconnue (texte vide), avant ou après, ne prouve rien : la passe est alors jugée."""
+        if not avant:
+            return False
+        apres = self._empreinte(dossier)
+        return bool(apres) and apres == avant
 
     def _lancer_reprise(self, tache: Tache, dossier, session: str, jugement: Jugement):
         """Relance l'ouvrier dans sa session, sur sa copie, avec le refus ; rend son résultat.
@@ -1697,6 +1760,7 @@ class Moteur:
             dossier,
             contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
             reprendre=session,
+            **self._garder_ouvert(),
         )
         self._compter(tache, resultat)
         if resultat.erreur == REPRISE_IMPOSSIBLE:
@@ -1749,9 +1813,16 @@ class Moteur:
             tache.effort,
             dossier,
             contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
+            **self._garder_ouvert(),
         )
         self._compter(tache, resultat)
         return dossier, resultat
+
+    def _garder_ouvert(self) -> dict:
+        """Ce qu'un appel d'ouvrier ajoute pour que l'agent le garde ouvert ; rien quand le
+        moteur ne garde pas (`_garde`) : un agent qui ne connaît pas ce paramètre ne le reçoit
+        jamais."""
+        return {"garder_ouvert": True} if self._garde() else {}
 
     def _arret_avant_depart(self, tache: Tache) -> None:
         """Rend la tâche arrêtée avant qu'un ouvrier n'ait travaillé, en gardant la trace.
