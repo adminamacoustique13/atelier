@@ -40,6 +40,8 @@ Sûre à ces conditions : `tache.copie` est écrit dans l'état avant chaque dé
 - Historique : issues `interrompue` et `attente_panne`, clés `retour`, `sous_tache`, `pendant`.
 - Profil : `budget_usd`, `pauses_panne_s`, `ouvrier_ouvert`, `ouverts_max`, `retours_controles` (3), `complements` (1), `sous_taches` (2), `reprise_auto`, `reprise_apres_arret_s`.
 - Un état écrit par le code actuel reste lisible : `depuis_dict` donne leur valeur par défaut aux clés absentes, et les clés inconnues sont ignorées.
+- Consignes (signatures fixées par M2) : `consigne_ouvrier(tache, contrat, profil, remarques="", sur_place=False)` ; `consigne_verificateur(tache, contrat, profil, copie_jetable=False, conflits="", sortie_controles=None)` ; `consigne_verificateur_bornee(..., sortie_controles, verdict_complet=False)` ; `consigne_reverification(tache, contrat, profil, verdict_precedent, copie_jetable=False, sortie_controles=None, fichiers=None)` ; `consigne_sous_tache(tache, contrat, profil, reste: list[str], nom, genre="", fichiers=None)`. Passer `None`, pas `""`, à `sortie_controles` quand rien n'a été joué. Seul `genre="verdict"` fait dire que le reste est conforme. Une retouche suppose le reste déjà jugé par un vérificateur.
+- `lire_verdict` : toujours `valide`, `motif` (`bacle`, `local`, `ne_sait_pas`, `consigne`), `resume` ; seulement s'ils sont remplis `reste`, `fichiers` (listes de textes) et `meme_defaut` (vrai).
 
 ### e. La page
 Le coût « X $ sur Y $ », « travail gardé » sur une tâche revenue, le vérificateur selon le niveau, la demande de budget. Pauses et sous-tâches s'affichent déjà par la phase.
