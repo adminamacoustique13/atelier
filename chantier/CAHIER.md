@@ -8,6 +8,23 @@
 | P2. Seul un vrai `true` du vérificateur vaut accord | vérifié | Sonnet, effort moyen | mécanique : 8 tests échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests ajoutés ; suite 1 793, ruff propre ; enregistré 99a111e |
 | P3. Secrets illisibles et git en écriture refusés d'office à tout agent | en cours | Opus, effort élevé | complète, Fable | 1 | |
 | P4. Un fichier au nom accentué est reconnu dans son périmètre | vérifié | Sonnet, effort moyen | mécanique : 9 tests sur 15 échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests nouveaux ; suite 1 778 puis 1 793 avec P2, ruff propre ; enregistré 7b75090 |
+| V1. Maquettes de la Salle à plusieurs agents et de l'état du dépôt (hors produit) | en cours | Fable, effort élevé | par la personne responsable, sur les images | 1 | |
+| M1. Formats (état, résultat d'un agent, dosage) | en cours | Sonnet, effort moyen | bornée | 1 | |
+| M2. Consignes (preuve par critère, contrôles non rejoués, sous-tâche, verdict local) | en cours | Sonnet, effort élevé | bornée | 1 | |
+| M3. Agents : l'ouvrier reste ouvert | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M4. Pont : coût juste et nature des échecs | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M5. Vérification : niveaux, retouche, contrôles non rejoués | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M6. Pannes d'agent : patienter | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M7. Reprise seule après un arrêt | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M8. Le travail refusé est gardé | à lancer (vague 1) | Opus, effort élevé | complète | | |
+| M9. Retours à l'ouvrier ouvert | à lancer (vague 2) | Opus, effort élevé | complète | | |
+| M10. Sous-tâche | à lancer (vague 2) | Opus, effort élevé | bornée | | |
+| M11. Après un refus | à lancer (vague 2) | Opus, effort élevé | complète | | |
+| M12. Budget | à lancer (vague 2) | Fable, effort élevé | complète | | |
+| M13. Page | à lancer (vague 3) | Sonnet, effort moyen | bornée | | |
+| M14. Épreuves d'ensemble et démonstration | à lancer (vague 3) | Sonnet, effort élevé | bornée | | |
+
+Les fiches M1 à M14 (critères, périmètres, contrats, vagues, risques) sont dans `chantier/MOTEUR.md`.
 
 ## P1. Le serveur local refuse une demande venue d'un autre site
 Périmètre : `atelier/serveur.py` (la classe `Requetes` et `creer_serveur`), `tests/test_serveur_origine.py` (nouveau).
@@ -53,6 +70,5 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 Les quatre copies de travail des ouvriers ont été créées sur `main` (9d4cf2c) au lieu de la branche de travail. Vu avant toute modification : l'orchestrateur les a replacées sur a862a2f et a prévenu chaque ouvrier de relire ses fichiers. À refaire à chaque lancement en copie isolée : vérifier le commit de départ.
 
 ## Noté par la personne responsable pour la suite (hors de ce chantier)
-- Chantier suivant, décidé le 2026-11-13 : porter dans le moteur les sept règles de la ligne « PC et autonomie » (ouvrier resté ouvert, travail refusé gardé et sous-tâche, montée seulement si le fond est faux, vérificateur qui ne rejoue plus la suite, reprise seule après une panne ou un arrêt, niveaux de vérification branchés avec leur plancher, budget en dollars). Le découpage est en préparation.
-- Visualisation, relevé le 2026-11-13 : la Salle (la vue en trois dimensions) ne montre pas le nombre réel d'agents au travail, et sa route en S est à revoir avec plusieurs agents en même temps ; l'état du dépôt git n'est visible nulle part (branches créées, fusions, demandes de fusion). À traiter après le moteur, maquette validée d'abord.
+- Visualisation, relevé le 2026-11-13 : la Salle (la vue en trois dimensions) ne montre pas le nombre réel d'agents au travail, et sa route en S est à revoir avec plusieurs agents en même temps ; l'état du dépôt git n'est visible nulle part (branches créées, fusions, demandes de fusion). Les maquettes (tâche V1) sont lancées le même jour, à la demande de la personne ; le code attend son choix.
 - À discuter ensuite : les points 3 (tourner seul sur un vrai projet) et 4 (ce qui n'est pas à reprendre tel quel) de la comparaison.
