@@ -839,7 +839,8 @@ def lire_verdict(texte: str) -> dict:
         if motif not in ("bacle", "ne_sait_pas", "consigne"):
             motif = "bacle"
         verdict = {
-            "valide": bool(objet["valide"]),
+            # Seul le vrai booléen JSON `true` vaut accord : la chaîne "false" est non vide.
+            "valide": objet["valide"] is True,
             "motif": motif,
             "resume": str(objet.get("resume", "")).strip(),
         }

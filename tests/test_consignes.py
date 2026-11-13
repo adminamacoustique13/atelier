@@ -410,3 +410,36 @@ def test_le_role_de_l_orchestrateur_dit_ce_qu_attend_le_message_de_blocage():
     assert f"« {MARQUE_BLOCAGE} »" in blocage
     assert "Cherche la cause" in blocage and "bloc atelier-outils" in blocage
     assert "Permettre une" in blocage and "reste sa décision" in blocage
+
+
+# --- seul un vrai `true` vaut accord ---------------------------------------------------------
+
+
+def test_un_vrai_true_vaut_accord():
+    verdict = lire_verdict('Vu.\n{"valide": true, "motif": "bacle", "resume": " Tout est fait. "}')
+    assert verdict["valide"] is True
+    assert verdict["resume"] == "Tout est fait."
+
+
+@pytest.mark.parametrize(
+    "valeur",
+    ['"false"', '"true"', '"oui"', '""', "1", "0", "1.0", "null", "[]", "[true]", "{}", '{"a": 1}'],
+)
+def test_toute_autre_valeur_que_true_vaut_refus(valeur):
+    assert lire_verdict('{"valide": %s, "motif": "consigne"}' % valeur)["valide"] is False
+
+
+def test_un_refus_en_chaine_garde_le_motif_et_le_resume_comme_un_refus_ordinaire():
+    texte = '{"valide": "false", "motif": "consigne", "resume": "  Il manque un test.  "}'
+    assert lire_verdict(texte) == {
+        "valide": False,
+        "motif": "consigne",
+        "resume": "Il manque un test.",
+    }
+    inconnu = '{"valide": "oui", "motif": "n_importe_quoi", "resume": " Non. "}'
+    assert lire_verdict(inconnu) == {"valide": False, "motif": "bacle", "resume": "Non."}
+
+
+def test_un_verdict_sans_cle_valide_reste_illisible():
+    verdict = lire_verdict('{"motif": "bacle", "resume": "x"}')
+    assert verdict["valide"] is False and verdict["motif"] == "ne_sait_pas"
