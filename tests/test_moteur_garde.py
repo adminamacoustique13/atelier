@@ -122,11 +122,18 @@ class Controles(ControlesGit):
         return super().mecaniques(t, dossier)
 
 
-def mener(depot, scenario=None, commandes=None, taches=None, en_trop=None, **contrat):
+# Le profil qui coupe les sous-tâches : après un refus des contrôles, l'ouvrier suivant reprend
+# toute la mission sur la copie gardée. Les sous-tâches ont leurs tests à part
+# (`test_moteur_sous_tache`).
+SANS_SOUS_TACHE = {"sous_taches": 0}
+
+
+def mener(depot, scenario=None, commandes=None, taches=None, en_trop=None, profil=None,
+          **contrat):  # fmt: skip
     c = chantier(taches or [tache()], **contrat)
     agent = Ouvrier(scenario, chantier=c, en_trop=en_trop)
     controles = Controles(depot, commandes)
-    return c, Moteur(c, agent, controles), agent, controles
+    return c, Moteur(c, agent, controles, profil), agent, controles
 
 
 def fil(c):
@@ -158,7 +165,7 @@ TROIS_PASSES = f'n=$(grep -c passe {PASSES}); echo "lignes : $n"; test "$n" -ge 
 
 
 def test_apres_des_controles_rouges_le_second_depart_reprend_la_meme_copie(depot):
-    c, m, agent, controles = mener(depot, commandes=[TROIS_PASSES])
+    c, m, agent, controles = mener(depot, commandes=[TROIS_PASSES], profil=SANS_SOUS_TACHE)
     m.executer()
     a = c.tache("A")
     assert a.etat == "verifie" and a.tentatives == 2
@@ -411,7 +418,7 @@ def test_rejugee_et_refusee_la_copie_reste_pour_l_ouvrier_suivant(depot):
     t, copie = interrompue_en_verification(depot, controles)
     c = chantier([t])
     agent = Ouvrier(chantier=c)
-    Moteur(c, agent, controles).executer()
+    Moteur(c, agent, controles, SANS_SOUS_TACHE).executer()
     assert t.etat == "verifie"
     assert [x["role"] for x in agent.appels][0] == "ouvrier"  # le refus des contrôles, d'abord
     premier = agent.passages[0]
@@ -543,7 +550,7 @@ def test_relue_apres_une_coupure_la_copie_sauvee_est_reprise(depot, tmp_path):
     ],
 )
 def test_aucune_copie_ne_reste_apres_une_tache_verifiee(depot, scenario, commandes, sur_place):
-    c, m, agent, controles = mener(depot, scenario, commandes)
+    c, m, agent, controles = mener(depot, scenario, commandes, profil=SANS_SOUS_TACHE)
     m.executer()
     a = c.tache("A")
     assert a.etat == "verifie"

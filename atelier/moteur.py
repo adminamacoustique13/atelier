@@ -45,6 +45,7 @@ from atelier.consignes import (
     consigne_planification,
     consigne_reprise,
     consigne_reverification,
+    consigne_sous_tache,
     consigne_verificateur,
     consigne_verificateur_bornee,
     dernier_json,
@@ -107,6 +108,7 @@ REPONSE_AU_FIL = 300  # signes gardés de la réponse d'un ouvrier qui n'a rien 
 MONTEES = ("fond", "refus")
 # Le budget du chantier en dollars (`budget_usd` au profil, gardé dans `contrat.max_cout_usd`).
 NATURE_BUDGET = "budget"
+SOUS_TACHES = 2  # sous-tâches par tâche, sans réglage (`sous_taches` au profil ; 0 coupe)
 RALLONGE_BUDGET = 1.2  # relancer une tâche arrêtée par le budget l'allonge d'un cinquième
 MOTIF_BUDGET = (
     "le budget du chantier est atteint ({depense:.2f} $ dépensés pour {budget:.2f} $). La "
@@ -724,11 +726,12 @@ class Moteur:
             durees = {ATTENTE: self._attentes.pop(tache.id), **durees}
         if issue == "valide":
             self._verifiee_a[tache.id] = maintenant
+        modele, effort = self._dosage_du_tour(tache)
         tache.historique.append(
             {
                 "tentative": tache.tentatives + decalage,
-                "modele": tache.modele,
-                "effort": tache.effort,
+                "modele": modele,
+                "effort": effort,
                 "issue": issue,
                 "detail": detail,
                 "origine": origine,
@@ -737,6 +740,8 @@ class Moteur:
                 "durees": {cle: round(secondes, 3) for cle, secondes in durees.items()},
             }
         )
+        if tache.reste.get("en_cours"):  # la passe d'une sous-tâche porte son nom
+            tache.historique[-1]["sous_tache"] = tache.reste["en_cours"]
 
     def _sous_plafond(self, suivant: tuple[str, str] | None) -> bool:
         """Dit si le cran proposé par `dosage.monter` existe et reste sous le plafond du contrat."""
@@ -1370,17 +1375,20 @@ class Moteur:
             if self._nature(resultat) == NATURE_BUDGET:  # coupé par son plafond : rien de compté
                 with self.verrou:
                     tache.tentatives -= 1
+                    self._defaire_sous_tache(tache)
                 self._copie_apres(tache, dossier, resultat, None)
                 return self._rendre_pour_budget(tache)
             if self._suspendre(tache, resultat):  # la tentative ne compte pas non plus
                 with self.verrou:
                     tache.tentatives -= 1
+                    self._defaire_sous_tache(tache)
                 self._copie_apres(tache, dossier, resultat, None)
             else:
                 jugement = self._jugement_du_depart(tache, dossier, resultat, rejuge is not None)
                 if jugement.motif is None:
                     return self._verifiee(tache, jugement)
                 self._copie_apres(tache, dossier, resultat, jugement)
+                self._noter_le_reste(tache, jugement)
                 remarques = jugement.pour_la_suite()
                 if not self._suite(tache, jugement):
                     return None
@@ -1521,7 +1529,8 @@ class Moteur:
         """Jette la copie si elle porte des fichiers hors périmètre, et le dit au fil ; rend
         True si elle a été jetée. Le périmètre est lu sur toute la copie (`fichiers_modifies`)."""
         dehors = hors_perimetre(
-            self.controles.fichiers_modifies(tache, dossier, resultat), tache.perimetre
+            self.controles.fichiers_modifies(tache, dossier, resultat),
+            self._perimetre_de_la_copie(tache),
         )
         if not dehors:
             return False
@@ -1841,8 +1850,7 @@ class Moteur:
             consigne_reprise(
                 tache, jugement.origine, jugement.complet, self.profil, jugement.refuses_seuls
             ),
-            tache.modele,
-            tache.effort,
+            *self._dosage_du_tour(tache),
             dossier,
             contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
             reprendre=session,
@@ -1868,36 +1876,28 @@ class Moteur:
         """
         gardee = self._copie_a_reprendre(tache)
         with self.verrou:
+            sous_tache = self._ouvrir_sous_tache(tache, gardee is not None)
             tache.tentatives += 1
             tache.etat = "en_cours"
-        self._noter(
-            f"Ouvrier lancé ({dosage.libelle(tache.modele, tache.effort)}), "
-            f"tentative {tache.tentatives}.",
-            tache,
-        )
+        modele, effort = self._dosage_du_tour(tache)
+        self._annoncer_le_depart(tache, sous_tache, dosage.libelle(modele, effort))
         if gardee is None:
             self._phase(tache, PHASES["preparation"])
             dossier = self.controles.preparer(tache)
         else:
             dossier = gardee
-            self._noter(
-                "Le travail d'un passage précédent est resté dans sa copie : l'ouvrier le reprend "
-                "et ne corrige que ce qui a été relevé, sans tout refaire.",
-                tache,
-            )
         self._retenir_copie(tache, dossier)
         if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
             with self.verrou:
                 tache.tentatives -= 1
+                self._defaire_sous_tache(tache, partie=False)
                 self.chantier.agents_lances -= 1
             return dossier, None
         self._phase(tache, PHASES["ouvrier"].format(tache.tentatives))
         resultat = self.agent.executer(
-            consigne_ouvrier(
-                tache, self.chantier.contrat, self.profil, remarques, sur_place=gardee is not None
-            ),
-            tache.modele,
-            tache.effort,
+            self._consigne_de_depart(tache, remarques, gardee is not None, sous_tache),
+            modele,
+            effort,
             dossier,
             contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
             **self._garder_ouvert(),
@@ -1905,6 +1905,175 @@ class Moteur:
         )
         self._compter(tache, resultat)
         return dossier, resultat
+
+    def _annoncer_le_depart(self, tache: Tache, sous_tache: str, dose: str) -> None:
+        """Écrit au fil qui part : une sous-tâche, ou un ouvrier pour une tentative, qui reprend
+        le travail gardé s'il y en a un."""
+        with self.verrou:
+            rang, gardee = tache.sous_taches, bool(tache.copie)
+        if sous_tache:
+            self._noter(
+                f"Sous-tâche {sous_tache} lancée ({dose}), {rang} sur "
+                f"{self._sous_taches_permises()} : le travail déjà fait est gardé, elle ne règle "
+                "que ce qui reste et ne compte pas de tentative.",
+                tache,
+            )
+            return
+        self._noter(f"Ouvrier lancé ({dose}), tentative {tache.tentatives}.", tache)
+        if gardee:
+            self._noter(
+                "Le travail d'un passage précédent est resté dans sa copie : l'ouvrier le reprend "
+                "et ne corrige que ce qui a été relevé, sans tout refaire.",
+                tache,
+            )
+
+    # --- la sous-tâche : ne régler que ce qui reste d'un travail gardé ------------------------
+
+    def _consigne_de_depart(self, tache: Tache, remarques: str, sur_place: bool, sous_tache: str):
+        """La consigne du départ : celle d'une sous-tâche quand il en ouvre une (`sous_tache`
+        est son nom), sinon celle de l'ouvrier, dite « sur place » sur une copie gardée."""
+        if not sous_tache:
+            return consigne_ouvrier(
+                tache, self.chantier.contrat, self.profil, remarques, sur_place=sur_place
+            )
+        with self.verrou:
+            reste = dict(tache.reste)
+        return consigne_sous_tache(
+            tache, self.chantier.contrat, self.profil, list(reste.get("points", [])), sous_tache,
+            genre=reste.get("genre", ""), fichiers=list(reste.get("fichiers", [])) or None,
+        )  # fmt: skip
+
+    def _sous_taches_permises(self) -> int:
+        reglage = self.profil.get("sous_taches")
+        lisible = isinstance(reglage, int) and not isinstance(reglage, bool) and reglage >= 0
+        return reglage if lisible else SOUS_TACHES
+
+    def _ouvrir_sous_tache(self, tache: Tache, copie_gardee: bool) -> str:
+        """Sous le verrou, au départ d'un ouvrier : ouvre une sous-tâche si le refus précédent
+        a nommé ce qui reste d'un travail gardé (`Tache.sous_tache_possible`) ; rend son nom
+        (« A-a », « A-b »), ou "" pour un départ ordinaire.
+
+        Une sous-tâche ne compte pas de tentative : le départ garde son numéro pour l'historique,
+        et la rallonge de la tâche grandit d'autant. Son dosage vient du reste, pas de la tâche
+        (`dosage.sous_tache`) ; hors du plafond du contrat, elle garde celui de la tâche. Sans
+        copie gardée, il n'y a plus rien à continuer : le reste est oublié.
+        """
+        if not copie_gardee:
+            tache.reste = {}
+            return ""
+        for cle in ("en_cours", "dosage"):
+            tache.reste.pop(cle, None)
+        permises = self._sous_taches_permises()
+        if not tache.reste.get("points") or not tache.sous_tache_possible(permises):
+            return ""
+        tache.sous_taches += 1
+        tache.rallonge += 1
+        nom = f"{tache.id}-{chr(ord('a') + min(tache.sous_taches, 26) - 1)}"
+        tache.reste["en_cours"] = nom
+        tache.reste["dosage"] = list(self._dosage_de_sous_tache(tache))
+        return nom
+
+    def _dosage_de_sous_tache(self, tache: Tache) -> tuple[str, str]:
+        """Sous le verrou : le dosage de la sous-tâche qui s'ouvre. De la rédaction part en
+        Sonnet, une correction de code sur le modèle correcteur, un cran d'effort plus haut pour
+        la seconde ; ce qui dépasse le plafond du contrat garde le dosage de la tâche."""
+        tours = [h.get("modele") for h in tache.historique if not h.get("sous_tache")]
+        prevu = next((modele for modele in tours if modele in dosage.MODELES), tache.modele)
+        documents = dosage.que_des_documents(tache.reste.get("fichiers"))
+        choisi = dosage.sous_tache(tache.modele, prevu, documents, tache.sous_taches)
+        contrat = self.chantier.contrat
+        plafond = (contrat.plafond_modele, contrat.plafond_effort)
+        return choisi if dosage.dans_plafond(*choisi, plafond) else (tache.modele, tache.effort)
+
+    def _dosage_du_tour(self, tache: Tache) -> tuple[str, str]:
+        """Le modèle et l'effort de l'ouvrier du tour : ceux de la sous-tâche en cours, sinon
+        ceux de la tâche."""
+        with self.verrou:
+            choisi = tache.reste.get("dosage") if tache.reste.get("en_cours") else None
+            if isinstance(choisi, list) and len(choisi) == 2 and choisi[0] in dosage.MODELES:
+                return choisi[0], choisi[1]
+            return tache.modele, tache.effort
+
+    def _defaire_sous_tache(self, tache: Tache, partie: bool = True) -> None:
+        """Sous le verrou : le tour n'a pas compté (arrêt, suspension, budget) ; la sous-tâche
+        qu'il ouvrait rend son numéro. Si son ouvrier est parti (`partie`), les fichiers que le
+        vérificateur lui avait nommés restent permis sur la copie : il a pu y toucher."""
+        if not tache.reste.pop("en_cours", None):
+            return
+        tache.reste.pop("dosage", None)
+        tache.sous_taches -= 1
+        tache.rallonge -= 1
+        if partie:
+            self._permettre(tache.reste, tache.reste.get("fichiers", []))
+
+    @staticmethod
+    def _permettre(reste: dict, fichiers) -> None:
+        """Ajoute à `reste["permis"]` les fichiers qu'une sous-tâche de cette copie a pu toucher."""
+        permis = [*reste.get("permis", [])]
+        permis += [f for f in fichiers if isinstance(f, str) and f not in permis]
+        if permis:
+            reste["permis"] = permis
+
+    def _noter_le_reste(self, tache: Tache, jugement: Jugement) -> None:
+        """Après un refus : écrit dans la tâche ce qui reste à régler, quand le refus le nomme
+        (un contrôle rouge, ou un verdict « bâclé » ou « local » avec ses points) ; sinon
+        l'efface. Les fichiers qu'une sous-tâche précédente avait le droit de toucher restent
+        permis tant que la copie est gardée."""
+        genre, points = self._reste_nomme(jugement)
+        nomme = bool(points)
+        with self.verrou:
+            avant = tache.reste
+            if avant.get("en_cours"):
+                self._permettre(avant, avant.get("fichiers", []))
+            permis = avant.get("permis", [])
+            tache.reste = {}
+            if nomme:
+                fichiers = [f for f in jugement.fichiers if isinstance(f, str)]
+                tache.reste = {"genre": genre, "points": points, "fichiers": fichiers}
+            if permis and tache.copie:
+                tache.reste["permis"] = permis
+
+    @staticmethod
+    def _reste_nomme(jugement: Jugement) -> tuple[str, list[str]]:
+        """Ce qu'un refus nomme comme restant à régler : son genre (« controles » ou
+        « verdict ») et ses points ; ("", []) quand il ne nomme rien. Seuls un contrôle rouge et
+        un verdict « bâclé » ou « local » laissent le reste du travail acquis."""
+        points = [p for p in jugement.reste if isinstance(p, str) and p.strip()]
+        acquis = jugement.origine == "controles" or (
+            jugement.origine == "verdict" and jugement.motif in MOTIFS_RELEVES
+        )
+        return (jugement.origine, points) if acquis and points else ("", [])
+
+    def _sous_tache_apres(self, tache: Tache, jugement: Jugement) -> bool:
+        """Sous le verrou : dit si le départ qui suivra ce refus pourra être une sous-tâche :
+        le refus nomme ce qui reste, la copie est gardée, et la tâche a encore une sous-tâche."""
+        permises = self._sous_taches_permises()
+        nomme = bool(self._reste_nomme(jugement)[1])
+        return nomme and bool(tache.copie) and tache.sous_taches < permises
+
+    def _sous_tache_prete(self, tache: Tache) -> bool:
+        """Dit si le départ suivant sera une sous-tâche, une fois le reste du refus écrit dans
+        la tâche (`_noter_le_reste`)."""
+        with self.verrou:
+            permises = self._sous_taches_permises()
+            return bool(tache.reste.get("points")) and tache.sous_tache_possible(permises)
+
+    def _perimetre_de_la_copie(self, tache: Tache) -> list[str]:
+        """Le périmètre de la tâche, plus les fichiers qu'une sous-tâche de la copie gardée
+        avait le droit de toucher : ce qui peut rester dans la copie d'un tour à l'autre."""
+        with self.verrou:
+            permis = [f for f in tache.reste.get("permis", []) if f not in tache.perimetre]
+        return [*tache.perimetre, *permis]
+
+    def _perimetre_du_tour(self, tache: Tache) -> list[str]:
+        """Le périmètre que contrôle le tour : celui de la copie, plus les fichiers que le
+        vérificateur a nommés pour la sous-tâche en cours. Hors sous-tâche, ces fichiers ne
+        sont pas permis."""
+        permis = self._perimetre_de_la_copie(tache)
+        with self.verrou:
+            reste = tache.reste
+            nommes = list(reste.get("fichiers", [])) if reste.get("en_cours") else []
+        return [*permis, *[f for f in nommes if f not in permis]]
 
     def _garder_ouvert(self) -> dict:
         """Ce qu'un appel d'ouvrier ajoute pour que l'agent le garde ouvert ; rien quand le
@@ -1967,7 +2136,7 @@ class Moteur:
         """
         self._phase(tache, PHASES["perimetre"])
         modifies = self.controles.fichiers_modifies(tache, dossier, resultat)
-        dehors = hors_perimetre(modifies, tache.perimetre)
+        dehors = hors_perimetre(modifies, self._perimetre_du_tour(tache))
         if dehors:
             detail = "Fichiers modifiés hors périmètre : " + ", ".join(dehors) + "."
             return Jugement("deborde", detail, "perimetre", list(dehors), reprenable=True), None
@@ -2422,8 +2591,17 @@ class Moteur:
         le vérificateur juge le fond faux ; un manque, un contrôle rouge ou un débord se
         corrigent au même niveau, sur le travail gardé. Seul un fond jugé faux fait monter, et
         seul lui permet la relance seule d'une tâche épuisée ; tout autre refus repart au même
-        niveau tant qu'il reste une tentative, puis la tâche revient à la personne."""
+        niveau tant qu'il reste une tentative, puis la tâche revient à la personne. Une
+        sous-tâche prête (`_sous_tache_prete`) part avant le compte des tentatives : elle n'en
+        consomme pas."""
         contrat = self.chantier.contrat
+        if not fond_faux and self._sous_tache_prete(tache):  # avant le compte des tentatives
+            self._noter(
+                f"Refusée. {detail} Le travail est gardé : une sous-tâche règle ce qui reste, "
+                "sans compter de tentative et sans monter de modèle.",
+                tache,
+            )
+            return True
         if tache.tentatives >= contrat.max_tentatives + tache.rallonge:
             if fond_faux and self._relancer_seul(tache, motif, detail):
                 return True
@@ -2574,14 +2752,15 @@ class Moteur:
     def _cran_disponible(self, tache: Tache, jugement: Jugement) -> bool:
         """Sous le verrou : dit si l'escalade pourrait encore monter d'un cran après ce refus.
 
-        Jamais après une erreur d'agent. Sous la règle « fond », jamais non plus quand le fond
-        n'est pas jugé faux : le même refus deux fois de suite bloque alors la tâche. Tentatives
-        épuisées, seule la relance seule monterait.
+        Jamais après une erreur d'agent. Sous la règle « fond », quand le fond n'est pas jugé
+        faux, rien ne monte : le même refus deux fois de suite bloque alors la tâche, sauf si
+        une sous-tâche peut encore partir (`_sous_tache_apres`). Tentatives épuisées, seule la
+        relance seule monterait.
         """
         if jugement.origine == "agent":
             return False
         if self._montee() == "fond" and not jugement.fond_faux:
-            return False
+            return self._sous_tache_apres(tache, jugement)  # elle passe avant le blocage
         if not self._sous_plafond(dosage.monter(tache.modele, tache.effort, jugement.motif)):
             return False
         contrat = self.chantier.contrat
@@ -2696,6 +2875,7 @@ class Moteur:
                     tache.modele, tache.effort = suivant
                 tache.rallonge = tache.tentatives
                 tache.pannes = 0  # la patience après une panne repart d'une minute
+                tache.sous_taches = 0  # et elle retrouve ses sous-tâches
                 tache.etat = "a_lancer"
                 rallonge = self._rallonger(demande)
                 self._relancee_a[tache.id] = self.horloge()  # la mesure de l'attente seulement

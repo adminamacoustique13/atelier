@@ -86,7 +86,9 @@ class Tache:
     # La copie de travail qui porte le travail en cours ou refusé ("" : aucune).
     copie: str = ""
     # Ce qui reste à régler d'un travail gardé dans sa copie, quand un refus le nomme : un
-    # dictionnaire (`genre`, `points`, `fichiers`, `en_cours`), vide quand rien ne reste.
+    # dictionnaire (`genre`, `points`, `fichiers` ; pendant une sous-tâche, `en_cours`, son nom,
+    # et `dosage` ; `permis`, les fichiers qu'une sous-tâche de cette copie a pu toucher), vide
+    # quand rien ne reste.
     reste: dict = field(default_factory=dict)
     # Le nombre de sous-tâches déjà parties pour cette tâche.
     sous_taches: int = 0
