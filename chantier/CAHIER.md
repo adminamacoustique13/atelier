@@ -13,10 +13,10 @@
 | M2. Consignes (preuve par critère, contrôles non rejoués, sous-tâche, verdict local) | vérifié | Sonnet, effort élevé | bornée, Opus : refusé une fois (deux phrases qui rendaient le vérificateur complaisant, venues des critères 3 et 5 de l'orchestrateur), accepté à la seconde passe par le même vérificateur repris à chaud | 1 + 1 retouche de consigne + 1 reprise | 140 tests ajoutés ; textes par défaut figés par empreinte, recalculée par le vérificateur ; chaque phrase fautive remise fait tomber des tests |
 | M3. Agents : l'ouvrier reste ouvert | en cours | Opus, effort élevé | complète | 1 | |
 | M4. Pont : coût juste et nature des échecs | en cours | Opus, effort élevé | complète | 1 | |
-| M5. Vérification : niveaux, retouche, contrôles non rejoués | à lancer dès la retouche de M2 rendue | Opus, effort élevé | complète | | |
-| M6. Pannes d'agent : patienter | en cours | Opus, effort élevé | complète | 1 | |
-| M7. Reprise seule après un arrêt | en cours | Opus, effort élevé | complète | 1 | |
-| M8. Le travail refusé est gardé | en cours | Opus, effort élevé | complète | 1 | |
+| M5. Vérification : niveaux, retouche, contrôles non rejoués | en cours | Opus, effort élevé | complète | 1 | |
+| M6. Pannes d'agent : patienter | rendue, en vérification | Opus, effort élevé | complète, Fable | 1 | 68 tests ajoutés, 53 échouaient sur la base ; réunie à l'essai avec M7 et M8 : 2 447 tests verts, aucun conflit |
+| M7. Reprise seule après un arrêt | rendue, en vérification | Opus, effort élevé | complète, Fable | 1 | 43 tests, tous en échec sur la base ; second Atelier refusé dans un vrai second processus ; huit essais verts ; cinq tests existants passés à `reprise_auto: false` (liste dans la fiche) ; reste ouvert : aucun bouton de la page n'annule la relance pendant le délai |
+| M8. Le travail refusé est gardé | rendue, en vérification | Opus, effort élevé | complète, Fable | 1 | 40 tests, tous en échec sur la base ; 8 mutations tuées ; aucun test existant réécrit |
 | M9. Retours à l'ouvrier ouvert | à lancer (vague 2) | Opus, effort élevé | complète | | |
 | M10. Sous-tâche | à lancer (vague 2) | Opus, effort élevé | bornée | | |
 | M11. Après un refus | à lancer (vague 2) | Opus, effort élevé | complète | | |
@@ -66,6 +66,11 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 ## Peut attendre (relevé par les vérificateurs)
 - P1 : un lien cliqué depuis un autre site vers le tableau de bord est refusé (403), et le rechargement aussi : il faut retaper l'adresse. À adoucir pour la seule page, qui ne porte aucun secret. Une ligne de demande HTTP/0.9 lève une exception (rien n'est servi). Depuis le tableau seulement, un champ du mauvais type (`{"texte": 3}`) ou un JSON très imbriqué coupe la connexion, comme avant. Deux mutations survivent : une phrase de refus en anglais, un accord croisé sur un seul 404.
 - M2 : pour le moteur (M5, M9, M10). Passer `genre="verdict"` à `consigne_sous_tache` pour un reste venu d'un verdict `bacle` ou `local`, jamais le motif. Une retouche (`consigne_reverification` avec `fichiers`) suppose le reste déjà jugé par un vérificateur : après une sous-tâche de genre `controles` ou vide, lancer une vérification ordinaire. Une ligne « EMPÊCHÉ : » peut désormais nommer un fichier demandé par un point à régler, et pas seulement une commande refusée. « Aucun autre fichier n'est permis » ne rappelle pas que la fiche de relais reste permise.
+
+## Raccords demandés par les ouvriers de la vague 1 (à confier aux vagues 2 et 3)
+- M6 : `attente_panne` doit être sauté par `_fenetre` (M11), par `_passes_du_depart` (M9) et par `serveur.statistiques` (M13) ; `archives.GROUPES` doit apprendre la phase « panne » (M13). Qui réécrit `_boucle` garde l'appel à `_suspendre` sur chaque résultat d'ouvrier et le `tentatives -= 1` qui suit un vrai.
+- M7 : brancher « Arrêter » sur le délai de relance (`Atelier.annuler_reprise()` existe ; il manque `Atelier.arreter`, la vue et la page : M13) ; rendre aussi le numéro d'une sous-tâche coupée (M10) ; `interrompue` hors des preuves d'un blocage (M11) ; `_demander` ne dit pas « travail gardé » pour une tâche arrêtée par l'Atelier puis rendue avec sa copie.
+- M8 : `serveur.nouveau_chantier` doit appeler `moteur.jeter_les_copies_gardees()` avant d'archiver (M13) ; `_reprise` dit encore « je jette sa copie » (M9) ; les marqueurs de conflit suivis en mémoire se perdent au redémarrage (à juger par le vérificateur de M8).
 
 ## Relevés des ouvriers, hors périmètre
 - V1 : la maquette suppose qu'un ouvrier resté ouvert garde sa place d'écriture ; le plan du moteur dit le contraire (ni place ni jeton pendant qu'il attend). À corriger dans l'exemple au moment du code : cinq places prises, pas six. La vue du serveur donne déjà `debit` (places, agents en marche, suspensions), que la page n'affiche nulle part.
