@@ -1742,11 +1742,28 @@ class SuiviMiseAJour:
 
 
 class Requetes(BaseHTTPRequestHandler):
-    """Répond aux demandes du tableau de bord, pour le projet affiché."""
+    """Répond aux demandes du tableau de bord, pour le projet affiché.
+
+    Le serveur n'écoute que la machine, mais une page d'un autre site ouverte dans le même
+    navigateur peut s'adresser à lui : chaque demande passe d'abord par `_refus`.
+    """
 
     projets = None  # les projets de l'atelier (atelier.projets.Projets)
     suivi = None  # la mise à jour d'Atelier (SuiviMiseAJour), ou None
     apres = None  # à faire une fois la réponse envoyée (l'arrêt après une mise à jour)
+
+    # Au-delà, un corps n'est pas lu : aucune demande du tableau de bord n'approche cette taille.
+    LONGUEUR_MAX = 8 * 1024 * 1024
+    # Ce que le navigateur dit de la provenance d'une demande : la page elle-même, ou la barre
+    # d'adresse. Tout le reste (un autre site, un site voisin) est refusé.
+    PROVENANCES = ("same-origin", "none")
+    HOTE_REFUSE = "Cette adresse n'est pas celle du tableau de bord."
+    AUTRE_SITE = "Cette demande vient d'un autre site : elle est refusée."
+    PAS_DU_JSON = "Une demande qui change quelque chose doit être écrite en JSON."
+    LONGUEUR_ILLISIBLE = "La longueur annoncée de la demande est illisible."
+    CORPS_ILLISIBLE = "Demande introuvable ou incomplète."
+    SORTE_REFUSEE = "Le tableau de bord n'accepte pas cette sorte de demande."
+    DEMANDE_ILLISIBLE = "Cette demande est illisible pour le tableau de bord."
 
     def vue(self) -> dict:
         miseajour = self.suivi.vue() if self.suivi else {"disponible": False, "phrase": ""}
@@ -1767,6 +1784,79 @@ class Requetes(BaseHTTPRequestHandler):
     def log_message(self, *arguments) -> None:
         return None
 
+    def _hotes(self) -> set[str]:
+        """Les deux noms du tableau de bord, avec le port réel du serveur."""
+        port = self.server.server_address[1]
+        return {f"127.0.0.1:{port}", f"localhost:{port}"}
+
+    def _refus(self, ecriture: bool = False) -> tuple[int, str] | None:
+        """Le code et la phrase du refus, ou None si la demande vient bien du tableau de bord.
+
+        - l'en-tête Host doit être l'un des deux noms du tableau, au bon port : un nom de site
+          qui se ferait passer pour la machine (une page qui a repris l'adresse 127.0.0.1) est
+          refusé, comme un Host absent ;
+        - une demande qui dit venir d'un autre site (Origin, Sec-Fetch-Site) est refusée ;
+        - une écriture doit être du JSON, ce qu'une page d'un autre site ne peut pas envoyer
+          sans l'accord du serveur, qui ne le donne jamais (aucun Access-Control-Allow-*).
+        """
+        hotes = self.headers.get_all("Host") or []
+        if len(hotes) != 1 or hotes[0].strip().lower() not in self._hotes():
+            return 403, self.HOTE_REFUSE
+        origines = self.headers.get_all("Origin") or []
+        permises = {f"http://{hote}" for hote in self._hotes()}
+        if len(origines) > 1 or any(o.strip().lower() not in permises for o in origines):
+            return 403, self.AUTRE_SITE
+        provenance = self.headers.get("Sec-Fetch-Site")
+        if provenance is not None and provenance.strip().lower() not in self.PROVENANCES:
+            return 403, self.AUTRE_SITE
+        nature = (self.headers.get("Content-Type") or "").split(";")[0].strip().lower()
+        if ecriture and nature != "application/json":
+            return 415, self.PAS_DU_JSON
+        return None
+
+    def _longueur(self) -> int | None:
+        """La longueur annoncée du corps (0 sans en-tête), None si illisible ou démesurée."""
+        if "Transfer-Encoding" in self.headers:
+            return None  # un corps en morceaux : le tableau de bord n'en envoie jamais
+        brut = self.headers.get("Content-Length")
+        if brut is None:
+            return 0
+        if not re.fullmatch(r"[0-9]{1,10}", brut.strip()) or int(brut) > self.LONGUEUR_MAX:
+            return None
+        return int(brut)
+
+    def _lire_corps(self) -> tuple[int | None, bytes]:
+        """Lit le corps annoncé, même s'il doit être refusé : la réponse arrive alors entière."""
+        longueur = self._longueur()
+        return longueur, self.rfile.read(longueur) if longueur else b""
+
+    def _sorte_refusee(self) -> None:
+        """OPTIONS, PUT, DELETE, PATCH : jamais d'accord, en particulier pour un autre site."""
+        self._lire_corps()
+        self.send_response(405)
+        self.send_header("Allow", "GET, POST")
+        corps = json.dumps({"erreur": self.SORTE_REFUSEE}, ensure_ascii=False).encode("utf-8")
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(corps)))
+        self.end_headers()
+        self.wfile.write(corps)
+
+    do_OPTIONS = do_PUT = do_DELETE = do_PATCH = _sorte_refusee
+
+    def send_error(self, code: int, message=None, explain=None) -> None:
+        """Les erreurs que relève http.server lui-même (sorte de demande inconnue, ligne
+        illisible) : en JSON et en français, comme les autres refus."""
+        phrase = self.SORTE_REFUSEE if code == 501 else self.DEMANDE_ILLISIBLE
+        corps = json.dumps({"erreur": phrase}, ensure_ascii=False).encode("utf-8")
+        self.close_connection = True
+        self.send_response(code)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(corps)))
+        self.send_header("Connection", "close")
+        self.end_headers()
+        if self.command != "HEAD":
+            self.wfile.write(corps)
+
     def _repondre(self, code: int, corps: bytes, nature: str) -> None:
         self.send_response(code)
         binaire = nature.startswith(("image/", "font/"))
@@ -1780,6 +1870,9 @@ class Requetes(BaseHTTPRequestHandler):
         self._repondre(code, corps, "application/json")
 
     def do_GET(self) -> None:
+        refus = self._refus()
+        if refus:
+            return self._json({"erreur": refus[1]}, refus[0])
         if self.path == "/api/etat":
             return self._json(self.vue())
         if self.path in ("/", "/index.html"):
@@ -1794,9 +1887,14 @@ class Requetes(BaseHTTPRequestHandler):
         return self._json({"erreur": "Adresse inconnue."}, 404)
 
     def do_POST(self) -> None:
-        longueur = int(self.headers.get("Content-Length") or 0)
+        longueur, brut = self._lire_corps()
+        refus = self._refus(ecriture=True)
+        if refus:
+            return self._json({"erreur": refus[1]}, refus[0])
+        if longueur is None:
+            return self._json({"erreur": self.LONGUEUR_ILLISIBLE}, 400)
         try:
-            corps = json.loads(self.rfile.read(longueur) or b"{}")
+            corps = json.loads(brut or b"{}")
             action = ROUTES.get(self.path)
             if action is None:
                 return self._json({"erreur": "Adresse inconnue."}, 404)
@@ -1806,7 +1904,7 @@ class Requetes(BaseHTTPRequestHandler):
         except ProjetImpossible as erreur:
             return self._json({"erreur": str(erreur)}, 400)
         except (KeyError, StopIteration, ValueError):
-            return self._json({"erreur": "Demande introuvable ou incomplète."}, 400)
+            return self._json({"erreur": self.CORPS_ILLISIBLE}, 400)
         self._json({**self.vue(), **(en_plus or {})})
         if self.apres:
             self.wfile.flush()  # la page a sa réponse : le processus peut s'arrêter

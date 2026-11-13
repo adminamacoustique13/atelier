@@ -150,7 +150,7 @@ async function main() {
     verifier("aucune erreur dans la page", erreurs.length === 0, erreurs);
     await contexte.close();
 
-    const direct = await fetch(`${s.url}/api/mise-a-jour`, { method: "POST" });
+    const direct = await fetch(`${s.url}/api/mise-a-jour`, { method: "POST", headers: { "Content-Type": "application/json" } });
     const corps = await direct.json();
     verifier("la route répond la vue plus mise_a_jour_faite {fait, phrase}", direct.status === 200 && corps.mise_a_jour_faite.fait === true && corps.mise_a_jour_faite.phrase === attendue && Array.isArray(corps.taches), corps.mise_a_jour_faite);
     verifier("et la démonstration tourne encore après cet appel direct", s.processus.exitCode === null && (await etat(s)).mode === "démonstration");

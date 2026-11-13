@@ -4,7 +4,7 @@
 
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
-| P1. Le serveur local refuse une demande venue d'un autre site | en cours | Opus, effort élevé | complète, Fable | 1 | |
+| P1. Le serveur local refuse une demande venue d'un autre site | vérifié | Opus, effort élevé | complète, Fable : accepté du premier coup, aucun défaut bloquant | 1 | 53 tests de l'ouvrier (44 échouaient avant) et 35 du vérificateur ; attaques réelles depuis Chrome sans aucune réponse 2xx ; 56 mutations, 43 tuées par l'ouvrier, toutes sauf deux avec les compléments ; suite 1 881, ruff propre, huit essais verts |
 | P2. Seul un vrai `true` du vérificateur vaut accord | vérifié | Sonnet, effort moyen | mécanique : 8 tests échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests ajoutés ; suite 1 793, ruff propre ; enregistré 99a111e |
 | P3. Secrets illisibles et git en écriture refusés d'office à tout agent | en cours | Opus, effort élevé | complète, Fable | 1 | |
 | P4. Un fichier au nom accentué est reconnu dans son périmètre | vérifié | Sonnet, effort moyen | mécanique : 9 tests sur 15 échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests nouveaux ; suite 1 778 puis 1 793 avec P2, ruff propre ; enregistré 7b75090 |
@@ -61,6 +61,10 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 
 ## Écarts acceptés en route
 - P4 : pour un renommage, `fichiers_modifies` rend désormais l'ancien et le nouveau nom (avant : le nouveau seul). La disparition de l'ancien fichier est bien une modification, et un ancien nom hors périmètre doit se voir.
+- P1 : l'essai `G-mise-a-jour.js` envoyait à sa ligne 153 un POST sans `Content-Type`, exactement ce que la protection refuse ; l'orchestrateur a ajouté l'en-tête JSON à cette seule ligne (exception arbitrée, jugée juste par le vérificateur : la page n'envoie que du JSON). Les 35 tests du vérificateur entrent tels quels dans `tests/test_serveur_origine_complement.py`.
+
+## Peut attendre (relevé par les vérificateurs)
+- P1 : un lien cliqué depuis un autre site vers le tableau de bord est refusé (403), et le rechargement aussi : il faut retaper l'adresse. À adoucir pour la seule page, qui ne porte aucun secret. Une ligne de demande HTTP/0.9 lève une exception (rien n'est servi). Depuis le tableau seulement, un champ du mauvais type (`{"texte": 3}`) ou un JSON très imbriqué coupe la connexion, comme avant. Deux mutations survivent : une phrase de refus en anglais, un accord croisé sur un seul 404.
 
 ## Relevés des ouvriers, hors périmètre
 - P4 : `atelier/essai.py:358` lit `git ls-files` sans `-z` puis coupe aux espaces ; sans effet aujourd'hui (l'essai ne livre que `calcul.py`).
