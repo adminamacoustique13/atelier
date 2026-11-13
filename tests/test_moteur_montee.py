@@ -55,7 +55,7 @@ def test_des_controles_rouges_ne_font_jamais_monter():
     assert a.tentatives == c.contrat.max_tentatives
 
 
-def test_le_meme_refus_deux_fois_de_suite_bloque_la_tache_au_lieu_de_la_faire_monter():
+def test_le_meme_refus_a_deux_departs_de_suite_bloque_la_tache_au_lieu_de_la_faire_monter():
     a = tache("A", type="mecanique")
     rouges = [rouge("test_un")] * 10
     c, m, agent, _ = monter([a], PROFIL, Controles(sorties=rouges))
@@ -63,7 +63,30 @@ def test_le_meme_refus_deux_fois_de_suite_bloque_la_tache_au_lieu_de_la_faire_mo
     assert a.etat == "revenu" and c.montees == 0
     (demande,) = [d for d in c.demandes if d.get("nature") == "blocage"]
     assert demande["tache"] == "A"
-    assert len(traces(a)) == 2  # deux passes ont suffi : la seconde redonnait le même échec
+    # Le départ et son retour au même ouvrier butent deux fois : un autre ouvrier repart au même
+    # niveau. Il bute au même endroit : la tâche revient, sans retour ni troisième départ.
+    assert traces(a) == [
+        (1, "ne_sait_pas", False), (1, "ne_sait_pas", True), (2, "ne_sait_pas", False),
+    ]  # fmt: skip
+
+
+def test_le_meme_refus_deux_fois_dans_un_seul_depart_ne_bloque_pas():
+    a = tache("A", type="mecanique")
+    rouges = [rouge("test_un")] * 2  # le départ et son retour ; le départ suivant passe
+    c, m, agent, _ = monter([a], PROFIL, Controles(sorties=rouges))
+    m.executer()
+    assert a.etat == "verifie" and a.tentatives == 2 and c.montees == 0
+    assert c.demandes == []
+    assert any("je repars au même niveau" in e["texte"] for e in c.evenements)
+
+
+def test_a_sa_derniere_tentative_le_meme_refus_deux_fois_bloque_tout_de_suite():
+    a = tache("A", type="mecanique")
+    c, m, agent, _ = monter([a], PROFIL, Controles(sorties=[rouge("test_un")] * 10))
+    c.contrat.max_tentatives = 1
+    m.executer()
+    assert a.etat == "revenu" and len(traces(a)) == 2
+    assert [d.get("nature") for d in c.demandes] == ["blocage"]
 
 
 def test_un_fond_juge_faux_au_plafond_du_contrat_ne_monte_pas():

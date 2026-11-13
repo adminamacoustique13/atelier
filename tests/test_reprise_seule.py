@@ -390,6 +390,31 @@ def test_arreter_pendant_le_delai_annule_la_reprise(tmp_path, serveur):
     assert rouvert.taches_interrompues() == []  # elle ne repartira pas seule plus tard
 
 
+def test_le_bouton_arreter_de_la_page_annule_la_reprise_annoncee(tmp_path, serveur):
+    a = atelier_sur(tmp_path, chantier([tache("A", etat="en_cours", tentatives=2)]))
+    vues, retours = [], []
+
+    def attendre(delai_s, annulee):
+        vues.append(a.vue()["reprise_en_attente"])  # la page montre alors « Arrêter »
+        retours.append(a.arreter())  # le clic : la demande d'arrêt sans tâche
+        return annulee.is_set()
+
+    a.reprendre_apres_arret(serveur, attendre)
+    finir(a)
+    assert vues == [True] and retours == [{"fait": True, "phrase": ANNULEE}]
+    assert a.vue()["reprise_en_attente"] is False
+    assert a.moteur.chantier.tache("A").etat == "revenu" and a.moteur.agent.appels == []
+
+
+def test_sans_reprise_annoncee_arreter_garde_son_sens_d_avant(tmp_path):
+    a = atelier_sur(tmp_path, chantier([tache("A")]))
+    assert a.vue()["reprise_en_attente"] is False
+    assert a.arreter() == {
+        "fait": False,
+        "phrase": "L'orchestrateur ne répond à rien en ce moment : rien à arrêter.",
+    }
+
+
 def test_arreter_apres_la_relance_ne_rend_rien(tmp_path, serveur):
     a = atelier_sur(tmp_path, chantier([tache("A", etat="en_cours", tentatives=1)]))
     a.reprendre_apres_arret(serveur, sans_attendre())

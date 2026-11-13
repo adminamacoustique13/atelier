@@ -281,16 +281,65 @@ def statistiques(chantier: Chantier) -> list[dict]:
     return lignes
 
 
+# Comment la page nomme chaque niveau de vérification, et ce qui juge une tâche mécanique.
+VERIFICATIONS_FR = {
+    dosage.COMPLETE: "Vérification complète",
+    dosage.BORNEE: "Vérification bornée",
+    dosage.MECANIQUE: "Vérification mécanique seule",
+}
+SANS_VERIFICATEUR = "les contrôles automatiques, sans vérificateur"
+
+
+def vue_du_budget(depense: float, budget: float) -> dict | None:
+    """Ce que la page affiche du budget du chantier, ou None sans budget : la dépense, le
+    budget, s'il est atteint, et la phrase « 12,40 $ sur 40,00 $ »."""
+    if not budget or budget <= 0:
+        return None
+    return {
+        "depense_usd": round(depense, 4),
+        "budget_usd": round(budget, 4),
+        "atteint": depense >= budget,
+        "fr": f"{_dollars(depense)} $ sur {_dollars(budget)} $",
+    }
+
+
+def _dollars(montant: float) -> str:
+    """Un montant écrit comme la page l'écrit : deux décimales, une virgule, et une espace fine
+    insécable entre les milliers (« 1 234,50 »)."""
+    return f"{montant:,.2f}".replace(",", "\u202f").replace(".", ",")
+
+
 def vue(
-    chantier: Chantier, en_marche: bool, mode: str, occupe=False, brouillon=None, autorisations=0
+    chantier: Chantier,
+    en_marche: bool,
+    mode: str,
+    occupe=False,
+    brouillon=None,
+    autorisations=0,
+    niveaux: dict | None = None,
+    budget: float = 0.0,
 ) -> dict:
-    """Prépare tout ce que le tableau de bord affiche."""
+    """Prépare tout ce que le tableau de bord affiche.
+
+    `niveaux` : le niveau de vérification de chaque tâche, par identifiant (`Moteur.niveau_prevu`) ;
+    une tâche absente est dite vérifiée complètement. `budget` : celui du chantier en dollars,
+    0 pour aucun. Chaque tâche porte `verification`, `verification_fr`, `verificateur_fr` (le
+    vérificateur de ce niveau, ou les contrôles seuls) et `travail_garde` : vrai pour une
+    tâche revenue dont la copie de travail est restée.
+    """
     donnees = chantier.en_dict()
     for tache in donnees["taches"]:
         tache["etat_fr"] = ETATS_FR.get(tache["etat"], tache["etat"])
         tache["dosage_fr"] = dosage.libelle(tache["modele"], tache["effort"])
-        verificateur = dosage.verificateur(tache["modele"], tache["effort"])
-        tache["verificateur_fr"] = dosage.libelle(*verificateur)
+        niveau = (niveaux or {}).get(tache["id"], dosage.COMPLETE)
+        niveau = niveau if niveau in VERIFICATIONS_FR else dosage.COMPLETE
+        verificateur = dosage.verificateur_selon_niveau(tache["modele"], tache["effort"], niveau)
+        tache["verification"] = niveau
+        tache["verification_fr"] = VERIFICATIONS_FR[niveau]
+        juge = dosage.libelle(*verificateur) if verificateur else SANS_VERIFICATEUR
+        tache["verificateur_fr"] = juge
+        tache["travail_garde"] = tache["etat"] == "revenu" and bool(tache.get("copie"))
+    donnees["budget"] = vue_du_budget(chantier.cout_usd, budget)
     contrat = donnees["contrat"]
     contrat["plafond_fr"] = dosage.libelle(contrat["plafond_modele"], contrat["plafond_effort"])
     donnees["point_d_etape"] = point_d_etape(chantier, en_marche, autorisations)
@@ -905,6 +954,7 @@ class Atelier:
                 "texte": _avant_balises(self.brouillon["texte"]),
                 "outils": list(self.brouillon["outils"]),
             }
+            taches = self.moteur.chantier.taches
             donnees = vue(
                 self.moteur.chantier,
                 self.en_marche(),
@@ -912,10 +962,13 @@ class Atelier:
                 self.occupe,
                 brouillon,
                 len(autorisations),
+                niveaux={t.id: self.moteur.niveau_prevu(t) for t in taches},
+                budget=self.moteur.budget_prevu(),
             )
             for tache in donnees["taches"]:
                 if tache["etat"] in ("en_cours", "en_verification"):
                     tache["phase"] = self.moteur.phase(tache["id"])
+            donnees["reprise_en_attente"] = self._reprise == "attente"
         donnees["autorisations"] = autorisations
         donnees["agents"] = self.activite.agents()
         donnees["rythmes"] = self.activite.rythme()
@@ -1630,8 +1683,15 @@ class Atelier:
     # --- l'arrêt -----------------------------------------------------------------
 
     def arreter(self, tache=None) -> dict:
-        """Arrête l'agent d'une tâche, ou sans tâche la réponse en cours de l'orchestrateur."""
+        """Arrête l'agent d'une tâche, ou sans tâche la réponse en cours de l'orchestrateur.
+
+        Sans tâche, pendant le délai d'une reprise annoncée (`reprendre_apres_arret`), c'est
+        cette reprise qui est annulée : rien ne repart seul (`annuler_reprise`)."""
         if tache in (None, ""):
+            with self.moteur.verrou:
+                en_attente = self._reprise == "attente"
+            if en_attente:
+                return self.annuler_reprise()
             if self.moteur.agent.arreter():
                 return {"fait": True, "phrase": "Arrêt demandé : la réponse en cours s'arrête."}
             phrase = "L'orchestrateur ne répond à rien en ce moment : rien à arrêter."

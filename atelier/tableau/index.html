@@ -109,6 +109,9 @@ input[type="text"]:focus-visible { border-color: var(--gris); }
 .carte h2 .num { color: var(--faible); }
 .carte h2 .note { margin-left: auto; color: var(--faible); font-style: normal; text-transform: none; letter-spacing: 0.02em; }
 .calme { color: var(--discret); }
+.budget-atteint { color: var(--attend); }
+.demande-budget { color: var(--attend); font-weight: 500; }
+.travail-garde { color: var(--discret); font-size: 12px; }
 .petit { color: var(--faible); font-size: 11.5px; }
 code { font-family: var(--mono); }
 button {
@@ -203,6 +206,7 @@ textarea::placeholder { color: var(--faible); }
 .chiffres { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 20px; padding-top: 6px; }
 .chiffres span { display: block; margin-bottom: 4px; }
 .chiffres b { font: 900 30px/1 var(--points); letter-spacing: 0.01em; }
+.chiffres b small { display: block; margin-top: 8px; font: 400 12px var(--mono); letter-spacing: 0; }
 
 /* ---------- Chantier : des modules numérotés, comme les cadrans d'un appareil ---------- */
 .defilante { overflow-y: auto; }
@@ -899,6 +903,14 @@ const nombre = (n) => Number(n || 0).toLocaleString("fr-FR");
 /* Un coût sans son unité, toujours avec deux décimales : « 1 234,50 ». */
 const montant = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 const euros = (n) => montant(n) + " $";
+/* Le coût du chantier : seul, ou « X $ sur Y $ » quand le chantier a un budget (vue.budget), en ambre s'il est atteint. */
+function coutHtml(vue, petit) {
+  const unite = petit ? "<small> $</small>" : "$";
+  if (!vue.budget) return `<b>${montant(vue.cout_usd)}${unite}</b>`;
+  return `<b data-budget class="${vue.budget.atteint ? "budget-atteint" : ""}" title="${vue.budget.atteint ? "Le budget du chantier est atteint : plus aucun ouvrier ne part." : "Dépense du chantier, sur son budget."}">${montant(vue.budget.depense_usd)}${petit ? "<small> $ " : "$<small>"}sur ${montant(vue.budget.budget_usd)} $</small></b>`;
+}
+/* Qui juge la tâche, selon son niveau de vérification : un vérificateur, ou les contrôles automatiques seuls. */
+const jugeePar = (t) => (t.verification === "mecanique" ? "Jugée par les contrôles automatiques, sans vérificateur" : `Vérifiée par ${t.verificateur_fr}`);
 /* Un nombre de tokens en clair, rendu en deux morceaux, le nombre et son unité, que chaque endroit assemble à sa façon :
    sous 1 000 le nombre entier ; jusqu'à 999 499 des milliers entiers (« k ») ; à partir de 999 500 des millions à une
    décimale au plus (« M »), si bien qu'on ne lit jamais « 1000k ». Une valeur absente compte pour 0. */
@@ -1068,7 +1080,8 @@ function autorisationHtml(a) {
 const boutonValider = `<button class="principal" data-action="valider">Valider le contrat et lancer</button>`;
 
 function demandeHtml(d) {
-  return `<p>${propre(d.question)}</p><div class="boutons">${d.options.map((o, i) =>
+  const budget = d.nature === "budget" && derniere && derniere.budget;
+  return `${budget ? `<p class="demande-budget" data-demande-budget>Budget du chantier atteint : ${propre(budget.fr)}</p>` : ""}<p>${propre(d.question)}</p><div class="boutons">${d.options.map((o, i) =>
     `<button class="${i ? "" : "principal"}" data-action="decider" data-id="${propre(d.id)}" data-choix="${propre(o)}">${propre(o)}</button>`).join("")}</div>`;
 }
 
@@ -1205,8 +1218,12 @@ function afficherConversation(vue) {
     ? "Session Claude Code de l'orchestrateur, gardée d'un message à l'autre. Elle lit le dépôt, elle n'écrit rien."
     : "Démonstration : réponses et agents simulés, aucun appel à Claude Code.");
   const arret = document.getElementById("arret-orch");
-  arret.hidden = !vue.occupe || rejoue;
+  arret.hidden = !(vue.occupe || vue.reprise_en_attente) || rejoue;
   habillerArret(arret, "orchestrateur");
+  if (vue.reprise_en_attente && !arretes.has("orchestrateur")) {
+    arret.textContent = "Arrêter la reprise";
+    arret.title = "Empêche les tâches interrompues de repartir seules : elles te reviennent, travail gardé.";
+  }
 }
 
 /* Ce que montre le bouton d'arrêt de la clé donnée : arrêt déjà demandé, armé ou au repos, son libellé et son titre. */
@@ -1251,7 +1268,7 @@ function poste(t, x, y, agent, rythme, etat) {
   const couleur = etat === "attend" ? COULEURS.attend : actif ? COULEURS.en_cours : etat === "verifie" ? COULEURS.verifie : "rgba(220,220,220,0.52)";
   const sous = actif && agent && agent.etape ? `Étape ${agent.etape}`
     : actif && t.phase ? `${t.phase.texte} · ${duree(t.phase.depuis_s)}`
-    : controle ? `Vérifiée par ${t.verificateur_fr}` : `${libelleEtat(t)}${t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
+    : controle ? jugeePar(t) : `${libelleEtat(t)}${t.travail_garde ? " · travail gardé" : t.tentatives > 1 ? ` · tentative ${t.tentatives}` : ""}`;
   const derniere = agent && agent.lignes.length ? agent.lignes[agent.lignes.length - 1] : "";
   const ouvrir = agent ? ` data-action="derouler" data-nom="${propre(agent.nom)}" role="button" tabindex="0" aria-label="Activité de la tâche ${propre(t.id)} : ${propre(derniere || "aucune ligne pour l'instant")}"` : "";
   const classes = [t.etat, agent ? "poste-actif" : "", etat === "attend" ? "attendue" : ""].filter(Boolean).join(" ");
@@ -1407,11 +1424,11 @@ function afficherChantier(vue) {
   const tokens = tokensEnClair(vue.tokens);
   poser("jauges", compte("Agents lancés", vue.agents_lances)
     + jauge("Montées en gamme", vue.montees, c.max_montees)
-    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${montant(vue.cout_usd)}$</b></div>
+    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span>${coutHtml(vue, false)}</div>
        <div><span>Tokens</span><b>${tokens.nombre}${tokens.unite}</b></div></div>`);
   poser("lignes", vue.taches.map((t) => `<tr>
     <td><span class="puce">${propre(t.id)}</span></td>
-    <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}</td>
+    <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}${t.travail_garde ? `<span class="badge" data-garde>Travail gardé</span>` : ""}</td>
     <td class="dose">${propre(doseCourte(t))}${t.montees ? " ↑" : ""}</td>
     <td class="droite">${t.tentatives}</td>
     <td><span class="etat ${propre(t.etat)}"><i class="rond ${propre(t.etat)}" aria-hidden="true"></i>${propre(libelleEtat(t))}</span>${t.phase ? `<span class="etat-phase">${propre(t.phase.texte)} · ${duree(t.phase.depuis_s)}</span>` : ""}</td>
@@ -1547,14 +1564,16 @@ function fiche(vue) {
   const essais = (t.historique || []).map((h) => {
     const ok = h.issue === "valide", stoppee = h.issue === "arretee", neutre = stoppee || h.issue === "attente_panne";
     const modele = String(h.modele || "");
-    return `<li><span class="${ok ? "ok" : neutre ? "neutre" : "non"}">${ok ? "✓" : neutre ? "–" : "✕"}</span><span>Tentative ${h.tentative} · ${propre(modele.charAt(0).toUpperCase() + modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
+    return `<li><span class="${ok ? "ok" : neutre ? "neutre" : "non"}">${ok ? "✓" : neutre ? "–" : "✕"}</span><span>${h.sous_tache ? `Sous-tâche ${propre(h.sous_tache)}` : `Tentative ${h.tentative}`} · ${propre(modele.charAt(0).toUpperCase() + modele.slice(1))}, effort ${propre(EFFORTS[h.effort] || h.effort)}${
       stoppee ? `<br><span class="petit">Arrêtée par toi.</span>` : h.detail ? `<br><span class="petit">${propre(h.detail)}</span>` : ""}</span></li>`;
   }).join("");
   const demandes = autorisationsDe(vue).filter((a) => tacheDeAgent(a.agent) === t.id).map(autorisationHtml).join("");
   return `<header><div class="fiche-id"><span class="puce">${propre(t.id)}</span><span class="etat ${propre(t.etat)} etat-mot ${etat}">${propre(etat === "attend" ? "● t'attend" : libelleEtat(t))}</span></div>
       <h2>${propre(t.titre)}</h2></header>
     ${demandes}
+    ${t.travail_garde ? `<p class="travail-garde" data-garde>Travail gardé dans sa copie : la relancer le reprend, sans tout refaire.</p>` : ""}
     <section><h3>Agent</h3><p>${propre(t.dosage_fr)} · tâche ${propre(TYPES[t.type] || t.type)}${t.ajoutee ? " · ajoutée en route" : ""}</p></section>
+    <section data-verification><h3>Vérification</h3><p>${propre(t.verification_fr || "Vérification complète")} · ${propre(t.verification === "mecanique" ? t.verificateur_fr : `vérificateur ${t.verificateur_fr}`)}</p></section>
     ${t.pourquoi ? `<section><h3>Pourquoi</h3><p class="calme">${propre(t.pourquoi)}</p></section>` : ""}
     <section><h3>Critères de vérification</h3>${t.criteres.length ? `<ol>${t.criteres.map((c) => `<li>${propre(c)}</li>`).join("")}</ol>` : `<p class="calme">Aucun critère.</p>`}</section>
     <section><h3>Périmètre</h3>${t.perimetre.length ? liste(t.perimetre, "fichiers") : `<p class="calme">Non précisé.</p>`}</section>
@@ -1751,7 +1770,7 @@ function afficherSalle(vue) {
   const tokens = tokensEnClair(vue.tokens);
   poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}</b></div>
     <div><span>Montées</span><b>${vue.montees}<small> / ${c.max_montees}</small></b></div>
-    <div><span>Coût équiv.</span><b>${montant(vue.cout_usd)}<small> $</small></b></div>
+    <div><span>Coût équiv.</span>${coutHtml(vue, true)}</div>
     <div><span>Tokens</span><b>${tokens.nombre}${tokens.unite ? `<small> ${tokens.unite}</small>` : ""}</b></div>` : "");
   const attente = document.getElementById("salle-attente");
   attente.classList.toggle("attend", attendue);
@@ -1933,7 +1952,8 @@ async function repondre(id, choix, message) {
 async function arreter(cle, tache) {
   if (arretes.has(cle)) return;
   if (armee === cle && performance.now() - armeeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
-  if (armee !== cle) {
+  const reprise = cle === "orchestrateur" && derniere && derniere.reprise_en_attente; // rien à perdre : un seul clic
+  if (armee !== cle && !reprise) {
     armee = cle; armeeLe = performance.now();
     clearTimeout(minuteArmee);
     minuteArmee = setTimeout(() => { armee = ""; rafraichir(); }, 5000);

@@ -24,6 +24,13 @@ from atelier.serveur import PAGE, POLICES, Atelier, SuiviMiseAJour, creer_serveu
 OBJECTIF_DEMO = "Moteur de calcul : formules de la norme, validées sur les cas de référence."
 
 
+# La démonstration garde la règle d'escalade d'avant (« une seconde chance, puis un cran de plus
+# après tout refus ») : son scénario montre ainsi une montée de modèle, puis une tâche au plafond
+# qui revient avec une décision à prendre. Sous la règle du produit (le modèle ne monte que si le
+# fond est jugé faux), le même scénario se termine sans rien demander à personne.
+PROFIL_DE_DEMONSTRATION = {"montee": "refus"}
+
+
 def plan_de_demonstration() -> tuple[dict, dict]:
     """Prépare le découpage d'exemple et le scénario que joueront les agents simulés."""
 
@@ -82,7 +89,13 @@ def projet_simule(dossier: Path, nom: str, delai_s: float) -> Atelier:
     # Un vrai guichet : la demande d'exemple du premier ouvrier attend un clic sur la carte.
     guichet = Guichet()
     atelier = Atelier(
-        dossier, chantier, agent, ControlesSimules(), {}, mode="démonstration", guichet=guichet
+        dossier,
+        chantier,
+        agent,
+        ControlesSimules(),
+        dict(PROFIL_DE_DEMONSTRATION),
+        mode="démonstration",
+        guichet=guichet,
     )
     atelier.annoncer_connexion()
     return atelier

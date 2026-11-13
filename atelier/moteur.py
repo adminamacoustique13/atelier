@@ -656,6 +656,15 @@ class Moteur:
                     contrat.max_cout_usd = float(regle)
             return max(0.0, contrat.max_cout_usd)
 
+    def budget_prevu(self) -> float:
+        """Le budget du chantier en dollars, pour le tableau de bord ; 0 : aucun. Celui du
+        contrat, sinon celui du profil. Ne recopie rien dans le contrat."""
+        with self.verrou:
+            ecrit = self.chantier.contrat.max_cout_usd
+        regle = self.profil.get("budget_usd")
+        lisible = isinstance(regle, (int, float)) and not isinstance(regle, bool) and regle > 0
+        return float(ecrit) if ecrit > 0 else float(regle) if lisible else 0.0
+
     def _budget_atteint(self) -> bool:
         budget = self._budget()
         with self.verrou:
@@ -825,8 +834,8 @@ class Moteur:
         self._tracer(tache, INTERROMPUE, DETAIL_INTERROMPUE)
         if rejugee:
             tache.historique[-1]["pendant"] = "verification"
-        elif tache.tentatives > 0:
-            tache.tentatives -= 1
+        else:  # la tentative coupée ne compte pas, ni la sous-tâche coupée
+            self._rendre_le_tour(tache)
         tache.etat = "a_lancer"
 
     @staticmethod
@@ -1374,14 +1383,12 @@ class Moteur:
                 return self._arret_avant_depart(tache)
             if self._nature(resultat) == NATURE_BUDGET:  # coupé par son plafond : rien de compté
                 with self.verrou:
-                    tache.tentatives -= 1
-                    self._defaire_sous_tache(tache)
+                    self._rendre_le_tour(tache)
                 self._copie_apres(tache, dossier, resultat, None)
                 return self._rendre_pour_budget(tache)
             if self._suspendre(tache, resultat):  # la tentative ne compte pas non plus
                 with self.verrou:
-                    tache.tentatives -= 1
-                    self._defaire_sous_tache(tache)
+                    self._rendre_le_tour(tache)
                 self._copie_apres(tache, dossier, resultat, None)
             else:
                 jugement = self._jugement_du_depart(tache, dossier, resultat, rejuge is not None)
@@ -1852,7 +1859,7 @@ class Moteur:
             ),
             *self._dosage_du_tour(tache),
             dossier,
-            contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
+            contexte={"role": "ouvrier", "tache": tache.id, "tentative": self._passage(tache)},
             reprendre=session,
             **self._garder_ouvert(),
             **self._plafond(),
@@ -1877,7 +1884,8 @@ class Moteur:
         gardee = self._copie_a_reprendre(tache)
         with self.verrou:
             sous_tache = self._ouvrir_sous_tache(tache, gardee is not None)
-            tache.tentatives += 1
+            if not sous_tache:  # une sous-tâche garde le numéro du départ qu'elle continue
+                tache.tentatives += 1
             tache.etat = "en_cours"
         modele, effort = self._dosage_du_tour(tache)
         self._annoncer_le_depart(tache, sous_tache, dosage.libelle(modele, effort))
@@ -1889,8 +1897,7 @@ class Moteur:
         self._retenir_copie(tache, dossier)
         if self._arretee(tache):  # relu juste avant l'appel : rien de lent ne s'intercale
             with self.verrou:
-                tache.tentatives -= 1
-                self._defaire_sous_tache(tache, partie=False)
+                self._rendre_le_tour(tache, partie=False)
                 self.chantier.agents_lances -= 1
             return dossier, None
         self._phase(tache, PHASES["ouvrier"].format(tache.tentatives))
@@ -1899,7 +1906,7 @@ class Moteur:
             modele,
             effort,
             dossier,
-            contexte={"role": "ouvrier", "tache": tache.id, "tentative": tache.tentatives},
+            contexte={"role": "ouvrier", "tache": tache.id, "tentative": self._passage(tache)},
             **self._garder_ouvert(),
             **self._plafond(),
         )
@@ -1953,8 +1960,8 @@ class Moteur:
         a nommé ce qui reste d'un travail gardé (`Tache.sous_tache_possible`) ; rend son nom
         (« A-a », « A-b »), ou "" pour un départ ordinaire.
 
-        Une sous-tâche ne compte pas de tentative : le départ garde son numéro pour l'historique,
-        et la rallonge de la tâche grandit d'autant. Son dosage vient du reste, pas de la tâche
+        Une sous-tâche ne compte pas de tentative : elle garde, dans l'historique, le numéro
+        de la tentative qu'elle continue, avec son nom. Son dosage vient du reste, pas de la tâche
         (`dosage.sous_tache`) ; hors du plafond du contrat, elle garde celui de la tâche. Sans
         copie gardée, il n'y a plus rien à continuer : le reste est oublié.
         """
@@ -1967,7 +1974,6 @@ class Moteur:
         if not tache.reste.get("points") or not tache.sous_tache_possible(permises):
             return ""
         tache.sous_taches += 1
-        tache.rallonge += 1
         nom = f"{tache.id}-{chr(ord('a') + min(tache.sous_taches, 26) - 1)}"
         tache.reste["en_cours"] = nom
         tache.reste["dosage"] = list(self._dosage_de_sous_tache(tache))
@@ -1994,17 +2000,33 @@ class Moteur:
                 return choisi[0], choisi[1]
             return tache.modele, tache.effort
 
-    def _defaire_sous_tache(self, tache: Tache, partie: bool = True) -> None:
-        """Sous le verrou : le tour n'a pas compté (arrêt, suspension, budget) ; la sous-tâche
-        qu'il ouvrait rend son numéro. Si son ouvrier est parti (`partie`), les fichiers que le
-        vérificateur lui avait nommés restent permis sur la copie : il a pu y toucher."""
+    def _defaire_sous_tache(self, tache: Tache, partie: bool = True) -> bool:
+        """Sous le verrou : le tour n'a pas compté (arrêt, suspension, budget, arrêt de
+        l'Atelier). Si c'était une sous-tâche, elle rend son numéro et la fonction rend True ;
+        sinon elle rend False, et c'est la tentative que l'appelant rend. Si son ouvrier est
+        parti (`partie`), les fichiers que le vérificateur lui avait nommés restent permis sur
+        la copie : il a pu y toucher."""
         if not tache.reste.pop("en_cours", None):
-            return
+            return False
         tache.reste.pop("dosage", None)
-        tache.sous_taches -= 1
-        tache.rallonge -= 1
+        tache.sous_taches = max(0, tache.sous_taches - 1)
         if partie:
             self._permettre(tache.reste, tache.reste.get("fichiers", []))
+        return True
+
+    def _rendre_le_tour(self, tache: Tache, partie: bool = True) -> None:
+        """Sous le verrou : le tour qui vient de partir ne compte pas ; il rend le numéro de sa
+        sous-tâche, ou celui de sa tentative."""
+        if not self._defaire_sous_tache(tache, partie) and tache.tentatives > 0:
+            tache.tentatives -= 1
+
+    def _passage(self, tache: Tache) -> int:
+        """Le rang du passage d'ouvrier en cours pour cette tâche, sous-tâches comprises : ce
+        que reçoit l'agent comme numéro (`contexte["tentative"]`), pour que deux ouvriers de
+        la tâche n'aient jamais le même nom au tableau de bord. Sans sous-tâche, c'est le
+        numéro de la tentative."""
+        with self.verrou:
+            return tache.tentatives + tache.sous_taches
 
     @staticmethod
     def _permettre(reste: dict, fichiers) -> None:
@@ -2050,6 +2072,12 @@ class Moteur:
         permises = self._sous_taches_permises()
         nomme = bool(self._reste_nomme(jugement)[1])
         return nomme and bool(tache.copie) and tache.sous_taches < permises
+
+    def _sous_tache_de_verdict(self, tache: Tache) -> bool:
+        """Dit si le tour en cours est une sous-tâche née du verdict d'un vérificateur : le
+        reste du travail a déjà été jugé conforme, le relevé de ce vérificateur vaut encore."""
+        with self.verrou:
+            return bool(tache.reste.get("en_cours")) and tache.reste.get("genre") == "verdict"
 
     def _sous_tache_prete(self, tache: Tache) -> bool:
         """Dit si le départ suivant sera une sous-tâche, une fois le reste du refus écrit dans
@@ -2100,13 +2128,14 @@ class Moteur:
         Rend un `Jugement` sans motif si le livrable est accepté. `precedent` est le refus qui a
         conduit à une reprise : venu du vérificateur, il appelle une vérification restreinte.
 
-        Une passe sans `precedent` ouvre un départ, dans une copie neuve : ce qu'un vérificateur
-        avait relevé sur une autre copie ne vaut plus (`_retenir_releve`). Un débord l'efface
-        aussi ; un refus des contrôles ou une erreur de l'ouvrier le laissent.
+        Une passe sans `precedent` ouvre un départ : ce qu'un vérificateur avait relevé avant
+        ne vaut plus (`_retenir_releve`), sauf pour une sous-tâche née d'un verdict, qui règle
+        justement ce relevé sur la copie gardée : sa vérification sera une retouche. Un débord
+        l'efface aussi ; un refus des contrôles ou une erreur de l'ouvrier le laissent.
         """
         if self._arretee(tache, resultat):
             return ARRET
-        if precedent is None:
+        if precedent is None and not self._sous_tache_de_verdict(tache):
             self._retenir_releve(tache)
         if not resultat.ok:
             detail = f"L'agent s'est arrêté sur une erreur : {resultat.erreur}"
@@ -2177,16 +2206,28 @@ class Moteur:
         plus aucun contrôle. Le fil le dit une fois ; il dit aussi, une fois pour chaque tâche
         concernée, qu'un type inconnu sera vérifié complètement.
         """
+        niveau, phrase, par_tache = self._niveau_et_sa_phrase(tache)
+        if phrase:
+            self._dire_une_fois(phrase, tache, par_tache=par_tache)
+        return niveau
+
+    def _niveau_et_sa_phrase(self, tache: Tache) -> tuple[str, str, bool]:
+        """Le niveau de vérification de la tâche, la phrase que le fil doit dire une fois ("" :
+        aucune), et si elle se dit une fois par tâche. Ne dit ni n'écrit rien."""
         if not self._type_connu(tache):
             ecrit = f"« {tache.type} »" if str(tache.type or "").strip() else "vide"
-            self._dire_une_fois(TYPE_INCONNU.format(type=ecrit), tache, par_tache=True)
-            return COMPLETE
+            return COMPLETE, TYPE_INCONNU.format(type=ecrit), True
         reparation = tache.id.startswith(PREFIXE_REPARATION)
         niveau = dosage.niveau_verification(tache.type, self.profil.get("verification"), reparation)
         if niveau == dosage.MECANIQUE and not self._commandes_au_profil():
-            self._dire_une_fois(MECANIQUE_SANS_CONTROLE, tache)
-            return BORNEE
-        return niveau
+            return BORNEE, MECANIQUE_SANS_CONTROLE, False
+        return niveau, "", False
+
+    def niveau_prevu(self, tache: Tache) -> str:
+        """Le niveau de vérification que recevra la tâche (« complete », « bornee » ou
+        « mecanique »), pour le tableau de bord : le même que celui du moteur, sans rien dire
+        au fil."""
+        return self._niveau_et_sa_phrase(tache)[0]
 
     @staticmethod
     def _type_connu(tache: Tache) -> bool:
@@ -2493,7 +2534,11 @@ class Moteur:
                 effort,
                 copie or dossier,
                 lecture_seule=True,
-                contexte={"role": "verificateur", "tache": tache.id, "tentative": tache.tentatives},
+                contexte={
+                    "role": "verificateur",
+                    "tache": tache.id,
+                    "tentative": self._passage(tache),
+                },
                 **en_plus,
                 **self._plafond(),
             )
@@ -2718,10 +2763,30 @@ class Moteur:
         fenetre = self._fenetre(tache)
         identique = len(fenetre) >= 2 and refus.meme_refus(fenetre[-2], fenetre[-1])
         if identique and not self._cran_disponible(tache, jugement):
-            return SANS_CRAN
+            if not self._suite_au_meme_niveau(tache, jugement, fenetre):
+                return SANS_CRAN
         if refus.refus_de_meme_forme_de_suite(fenetre) >= 3:
             return REPETE
         return ""
+
+    def _suite_au_meme_niveau(self, tache: Tache, jugement: Jugement, fenetre: list) -> bool:
+        """Sous le verrou, sous la règle « fond », devant deux refus identiques de suite sans
+        cran à monter : dit si la tâche a encore une suite au même niveau, qui lui évite le
+        blocage.
+
+        Une sous-tâche qui peut partir en est une (`_sous_tache_apres`). Deux refus du même
+        départ aussi (la passe, puis son retour au même ouvrier), tant qu'il reste une
+        tentative : c'est le même agent qui a buté deux fois, le départ suivant en lance un
+        autre sur le travail gardé. Le même refus à deux départs de suite bloque : rien ne
+        tourne sans fin. Jamais après une erreur d'agent, ni sous l'ancienne règle."""
+        if self._montee() != "fond" or jugement.fond_faux or jugement.origine == "agent":
+            return False
+        if self._sous_tache_apres(tache, jugement):
+            return True
+        depart = [(e.get("tentative"), e.get("sous_tache", "")) for e in fenetre[-2:]]
+        contrat = self.chantier.contrat
+        encore = tache.tentatives < contrat.max_tentatives + tache.rallonge
+        return depart[0] == depart[1] and encore
 
     def _empeche(self, jugement: Jugement) -> bool:
         """Dit si un agent est empêché de travailler : relancer la tâche buterait au même endroit.
@@ -2753,14 +2818,13 @@ class Moteur:
         """Sous le verrou : dit si l'escalade pourrait encore monter d'un cran après ce refus.
 
         Jamais après une erreur d'agent. Sous la règle « fond », quand le fond n'est pas jugé
-        faux, rien ne monte : le même refus deux fois de suite bloque alors la tâche, sauf si
-        une sous-tâche peut encore partir (`_sous_tache_apres`). Tentatives épuisées, seule la
+        faux, rien ne monte (voir `_suite_au_meme_niveau`). Tentatives épuisées, seule la
         relance seule monterait.
         """
         if jugement.origine == "agent":
             return False
         if self._montee() == "fond" and not jugement.fond_faux:
-            return self._sous_tache_apres(tache, jugement)  # elle passe avant le blocage
+            return False
         if not self._sous_plafond(dosage.monter(tache.modele, tache.effort, jugement.motif)):
             return False
         contrat = self.chantier.contrat

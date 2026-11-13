@@ -924,6 +924,12 @@ def test_les_instantanes_se_terminent_vite_et_montrent_la_demande_ouverte(tmp_pa
     assert reglees == [{"reglee": True, "phrase": "Autorisé cette fois."}]  # réglée, pas expirée
     assert any(a["lignes"] for v in ouvertes for a in v["agents"])
     assert vues[-1]["autorisations"] == [] and vues[-1]["termine"] is True
+    # La démonstration va au bout, avec une montée de modèle et une décision : les essais du
+    # navigateur comptent ces 43 vues, et un changement de règle du moteur se voit ici d'abord.
+    assert len(vues) == 43
+    assert {t["etat"] for t in vues[-1]["taches"]} == {"verifie"}
+    assert [d["reponse"] for d in vues[-1]["demandes"]] == ["Relancer un cran plus haut"]
+    assert vues[-1]["montees"] >= 1
 
 
 # --- le fil, les verrous, la mémoire ------------------------------------------------------

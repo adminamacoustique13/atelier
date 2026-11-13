@@ -32,6 +32,9 @@ pytestmark = pytest.mark.montee_sur_le_fond  # la règle sans réglage : monter 
 POINT = "Traiter la liste vide dans `b.py`, ligne 12."
 LOCAL = verdict(motif="local", resume="La liste vide plante.", reste=[POINT], fichiers=["b.py"])
 BACLE = verdict(reste=["Ajouter le test du cas vide."], fichiers=[])
+AUTRE = verdict(motif="local", resume="Le cache garde une valeur périmée.",
+                reste=["Vider le cache après une modification."], fichiers=["a.py"])  # fmt: skip
+TROIS_REFUS = {1: LOCAL, 2: BACLE, 3: AUTRE}  # trois refus qui ne se ressemblent pas
 REDACTION = verdict(reste=["Corriger le résumé."], fichiers=["a_notes.md"])
 CONFORME = "Le reste de ce travail est conforme"
 JAMAIS = "test -f a_jamais.txt"  # un contrôle rouge tant que personne n'écrit ce fichier
@@ -93,7 +96,8 @@ def test_apres_des_controles_rouges_le_depart_suivant_est_une_sous_tache(depot):
     assert "lignes : 2" in second["consigne"]  # ce qui a échoué, tel que les contrôles l'ont dit
     assert SUR_PLACE not in second["consigne"] and "Sous-tâche" not in premier["consigne"]
     assert sous_taches(a) == ["", "", "A-a"]
-    assert [e["tentative"] for e in a.historique] == [1, 1, 2]
+    assert [e["tentative"] for e in a.historique] == [1, 1, 1]  # elle garde le numéro du départ
+    assert a.tentatives == 1 and a.sous_taches == 1 and a.rallonge == 0
     annonce = "Sous-tâche A-a lancée (Sonnet, effort élevé), 1 sur 2"
     assert any(t.startswith(annonce) for t in fil(c))
     assert sum(t.startswith("Ouvrier lancé") for t in fil(c)) == 1  # la sous-tâche a sa phrase
@@ -131,9 +135,10 @@ def test_un_refus_qui_ne_nomme_rien_n_ouvre_pas_de_sous_tache(depot):  # noqa: F
     assert a.sous_taches == 0 and a.rallonge == 0 and a.reste == {}
     assert all("Sous-tâche" not in p["consigne"] for p in agent.passages)
     assert not any(t.startswith("Sous-tâche") for t in fil(c))
-    assert sous_taches(a) == ["", ""]
-    # Sans sous-tâche possible, le même refus deux fois de suite rend la tâche à la personne.
-    assert a.etat == "revenu" and c.demandes[-1]["nature"] == "blocage"
+    assert sous_taches(a) == ["", "", ""]
+    # Le départ suivant est une tentative ordinaire, qui reprend la copie gardée.
+    assert a.etat == "verifie" and a.tentatives == 2
+    assert SUR_PLACE in agent.departs()[1]["consigne"]
 
 
 def test_un_reste_sans_point_n_ouvre_pas_de_sous_tache():
@@ -156,9 +161,11 @@ def test_sans_copie_gardee_le_reste_est_oublie():
 
 
 def rendue_apres_ses_sous_taches(depot, **reglages):  # noqa: F811
-    """Mène A, dont les contrôles restent rouges, jusqu'à ce qu'elle revienne à la personne. Le
-    contrat ne lui donne qu'une tentative."""
-    c, m, agent, controles = mener(depot, commandes=[JAMAIS], max_tentatives=1, **reglages)
+    """Mène A, que son vérificateur refuse à chaque passage pour une raison nouvelle, jusqu'à
+    ce qu'elle revienne à la personne. Le contrat ne lui donne qu'une tentative."""
+    scenario = {"A": ["bacle"]}
+    c, m, agent, controles = mener(depot, scenario, verdicts=TROIS_REFUS, max_tentatives=1,
+                                   **reglages)  # fmt: skip
     m.executer()
     return c, m, agent, controles
 
@@ -172,25 +179,38 @@ def test_deux_sous_taches_partent_au_dela_de_la_seule_tentative_du_contrat(depot
     c, m, agent, _ = rendue_apres_ses_sous_taches(depot)
     a = c.tache("A")
     assert [nom_de_sous_tache(p) for p in agent.departs()] == ["", "A-a", "A-b"]
-    assert a.sous_taches == 2 and a.rallonge == 2
-    assert a.tentatives - a.rallonge == 1  # une seule tentative comptée, celle du contrat
-    assert [e["tentative"] for e in a.historique if not e["reprise"]] == [1, 2, 3]
-    # Ses deux sous-tâches passées, le même refus deux fois de suite la rend à la personne.
-    assert a.etat == "revenu" and c.demandes[-1]["nature"] == "blocage"
+    assert a.tentatives == 1 and a.sous_taches == 2 and a.rallonge == 0  # une seule comptée
+    assert {e["tentative"] for e in a.historique} == {1}
+    assert sous_taches(a) == ["", "", "A-a", "A-a", "A-b", "A-b"]
+    assert a.etat == "revenu"  # ses deux sous-tâches passées, elle revient à la personne
     assert "en_cours" not in a.reste and "dosage" not in a.reste
-    assert a.reste["genre"] == "controles" and a.reste["points"]
+    assert a.reste["genre"] == "verdict" and a.reste["points"]
 
 
-def test_une_sous_tache_part_meme_quand_le_meme_refus_revient(depot):  # noqa: F811
+def test_chaque_passage_d_ouvrier_a_son_propre_numero_pour_l_agent(depot):  # noqa: F811
     c, m, agent, _ = rendue_apres_ses_sous_taches(depot)
+    assert [p["tentative"] for p in agent.departs()] == [1, 2, 3]  # le rang du passage
+    verificateurs = [x["tentative"] for x in agent.appels if x.get("role") == "verificateur"]
+    assert verificateurs == [1, 1, 2, 2, 3, 3]
+
+
+def test_une_sous_tache_part_meme_quand_le_meme_refus_revient_puis_la_tache_est_bloquee(depot):  # noqa: F811
+    c, m, agent, _ = mener(depot, commandes=[JAMAIS], max_tentatives=1)
+    m.executer()
+    a = c.tache("A")
     textes = fil(c)
     annonces = [t for t in textes if "une sous-tâche règle ce qui reste" in t]
-    assert len(annonces) == 2 and all(t.startswith("Refusée.") for t in annonces)
-    assert sum("refusée deux fois de suite" in t for t in textes) == 1  # seulement à la fin
+    assert len(annonces) == 1 and annonces[0].startswith("Refusée.")
+    assert [nom_de_sous_tache(p) for p in agent.departs()] == ["", "A-a"]
+    # Le même refus une troisième fois de suite : la tâche revient, sans seconde sous-tâche.
+    assert a.etat == "revenu" and c.demandes[-1]["nature"] == "blocage"
+    assert sous_taches(a) == ["", "", "A-a"] and a.sous_taches == 1
 
 
 def test_le_profil_peut_couper_les_sous_taches(depot):  # noqa: F811
-    c, m, agent, _ = rendue_apres_ses_sous_taches(depot, profil={"sous_taches": 0})
+    c, m, agent, _ = mener(depot, commandes=[JAMAIS], max_tentatives=1,
+                           profil={"sous_taches": 0})  # fmt: skip
+    m.executer()
     a = c.tache("A")
     assert a.etat == "revenu" and a.tentatives == 1 and a.rallonge == 0 and a.sous_taches == 0
     assert all("Sous-tâche" not in p["consigne"] for p in agent.passages)
@@ -206,12 +226,14 @@ def test_un_reglage_illisible_garde_deux_sous_taches(depot, reglage):  # noqa: F
 def test_une_relance_par_la_personne_rend_ses_sous_taches_a_la_tache(depot):  # noqa: F811
     c, m, agent, _ = rendue_apres_ses_sous_taches(depot)
     a = c.tache("A")
+    assert a.sous_taches == 2
     m.repondre(c.demandes[-1]["id"], RELANCER_TEL)
     assert a.sous_taches == 0
-    (agent.passages[0]["dossier"] / "a_jamais.txt").write_text("là\n", "utf-8")  # contrôle vert
+    agent.verdicts = {}  # le vérificateur suit désormais le scénario : il accepte
+    agent.scenario = {"A": ["ok"]}
     m.executer()
     assert a.etat == "verifie"
-    assert "## Sous-tâche A-a" in agent.departs()[-1]["consigne"]  # elle repart de la première
+    assert nom_de_sous_tache(agent.departs()[-1]) == "A-a"  # elle repart de la première
     assert sous_taches(a)[-1] == "A-a" and a.sous_taches == 1
 
 
@@ -227,7 +249,7 @@ def test_une_sous_tache_suspendue_rend_son_numero_et_repart_sous_le_meme_nom(dep
     assert a.etat == "verifie"
     refusee, repartie = agent.departs()[1:]
     assert nom_de_sous_tache(refusee) == nom_de_sous_tache(repartie) == "A-a"
-    assert a.sous_taches == 1 and a.rallonge == 1 and a.tentatives == 2
+    assert a.sous_taches == 1 and a.rallonge == 0 and a.tentatives == 1
     assert sum(t.startswith("Sous-tâche A-a lancée") for t in fil(c)) == 2
     assert sous_taches(a)[-1] == "A-a"
 
@@ -336,7 +358,7 @@ def test_au_dela_du_plafond_du_contrat_la_sous_tache_garde_le_dosage_de_la_tache
 
 def test_la_seconde_sous_tache_monte_d_un_cran_d_effort(depot):  # noqa: F811
     scenario = {"A": ["bacle", "bacle", "ok"]}
-    c, m, agent, _ = mener(depot, scenario, verdicts={1: LOCAL, 2: LOCAL},
+    c, m, agent, _ = mener(depot, scenario, verdicts={1: LOCAL, 2: AUTRE},
                            plafond_modele="fable", plafond_effort="max")  # fmt: skip
     m.executer()
     assert agent.departs_doses()[1:] == [("sonnet", "high"), ("sonnet", "xhigh")]
