@@ -7,13 +7,17 @@ principale sans avoir été vérifié.
 
 from __future__ import annotations
 
+import json
 import os
+import re
 import shutil
 import signal
 import subprocess
 import threading
+import time
 from collections.abc import Iterable
 from contextlib import suppress
+from datetime import datetime
 from fnmatch import fnmatch
 from pathlib import Path
 
@@ -205,6 +209,10 @@ class ControlesSimules:
 
     def annuler(self, tache, dossier) -> None:
         return None
+
+    def etat_du_depot(self, taches, profil: dict | None = None) -> dict:
+        """Un état du dépôt d'exemple, sans git, de la même forme que `ControlesGit`."""
+        return etat_du_depot_d_exemple(taches)
 
 
 class ControlesGit:
@@ -561,3 +569,482 @@ class ControlesGit:
         if dossier and Path(dossier).exists():
             with self.verrou_fusion:
                 self._git("worktree", "remove", "--force", str(dossier))
+
+    def etat_du_depot(self, taches, profil: dict | None = None) -> dict:
+        """Lit l'état du dépôt pour le tableau de bord, sans rien changer ni rien demander au
+        réseau.
+
+        `taches` : les tâches du chantier (de chacune, `id`, `titre` et `etat` sont lus).
+        `profil` : le profil du projet, pour les fichiers partagés ; sans lui, c'est le fichier
+        `chantier/profil.json` qui est lu. Rend un dictionnaire fait de textes, de nombres, de
+        listes et de dictionnaires (voir `chantier/relais/D1.md` pour chaque clé). Ne lève jamais :
+        ce qui n'a pas pu être lu reste vide, avec une phrase sous la clé `probleme` de la partie
+        touchée.
+        """
+        taches = _taches_lisibles(taches)
+        try:
+            return _LectureDepot(self.depot, taches, profil).lire()
+        except Exception as erreur:  # le tableau de bord ne doit jamais tomber sur cette lecture
+            return _etat_vide(taches, f"La lecture du dépôt a échoué ({type(erreur).__name__}).")
+
+
+# ---------------------------------------------------------------------------------------------
+# La lecture de l'état du dépôt (`ControlesGit.etat_du_depot`) : tout ce qui suit lui sert.
+# Elle ne change rien : git ne prend aucun verrou facultatif (`GIT_OPTIONAL_LOCKS=0`, sans quoi
+# `git status` réécrirait l'index), aucune commande n'écrit, aucune n'interroge le réseau.
+# ---------------------------------------------------------------------------------------------
+DELAI_LECTURE_S = 5.0  # le temps laissé à chaque commande git de la lecture
+BUDGET_LECTURE_S = 20.0  # et à la lecture entière : passé ce temps, le reste n'est pas lu
+ENREGISTREMENTS_LUS = 2000  # la profondeur d'historique où l'on cherche l'entrée d'une tâche
+ENREGISTREMENTS_MONTRES = 8
+FICHIERS_NOMMES = 20  # les noms rendus par tâche (le nombre, lui, est complet)
+FICHIERS_LUS_POUR_MARQUEURS = 500
+OCTETS_LUS_POUR_MARQUEURS = 2_000_000
+COMMANDES_PAR_TACHE = 4  # au plus : point commun, départ, retard, fichiers modifiés
+ETATS_EN_ROUTE = ("en_cours", "en_verification")  # des tâches qui ont branche et copie
+ETAT_ENTREE = "verifie"  # l'état que le moteur donne à une tâche une fois son travail entré
+SANS_VERROU = {"GIT_OPTIONAL_LOCKS": "0"}
+FORMAT_ENREGISTREMENT = "%H%x1f%h%x1f%P%x1f%ct%x1f%s"
+REFUS = "git a refusé la commande"
+
+
+def _quand(secondes: int) -> dict[str, str]:
+    """L'heure d'un enregistrement : « 14:16 » pour l'écran, et l'instant en ISO 8601."""
+    try:
+        instant = datetime.fromtimestamp(secondes).astimezone()
+    except (OverflowError, OSError, ValueError):
+        return {"heure": "", "instant": ""}
+    return {"heure": instant.strftime("%H:%M"), "instant": instant.isoformat(timespec="seconds")}
+
+
+def _montrer(enregistrement: dict) -> dict:
+    """Un enregistrement tel que le rend la lecture : id court, message, heure, instant."""
+    return {
+        "id": enregistrement["court"],
+        "message": enregistrement["message"],
+        **_quand(enregistrement["secondes"]),
+    }
+
+
+def _lire_enregistrement(ligne: str) -> dict | None:
+    morceaux = ligne.split("\x1f", 4)
+    if len(morceaux) != 5 or not morceaux[3].isdigit():
+        return None
+    complet, court, parents, secondes, message = morceaux
+    return {
+        "complet": complet, "court": court, "parents": parents.split(),
+        "secondes": int(secondes), "message": message,
+    }  # fmt: skip
+
+
+def _taches_lisibles(taches) -> list:
+    """Les tâches qui ont un identifiant : les autres sont sautées, la lecture n'en dit rien."""
+    try:
+        return [t for t in taches if getattr(t, "id", None) not in (None, "")]
+    except TypeError:  # pas une suite de tâches
+        return []
+
+
+def _sujet(texte: str) -> str:
+    """Le sujet d'un enregistrement fait de ce texte, comme git le rend (`%s`) : le premier
+    paragraphe, ses lignes réunies par des espaces."""
+    return " ".join(texte.split("\n\n")[0].split())
+
+
+def _message_du_travail(tache) -> str:
+    """Le message que l'Atelier donne à l'enregistrement du travail : « <id> : <titre> »."""
+    return _sujet(f"{tache.id} : {getattr(tache, 'titre', '')}")
+
+
+def _message_du_cahier(identifiant) -> str:
+    """Le message de l'enregistrement du cahier, qui fait entrer la tâche dans le chantier."""
+    return f"Cahier : {identifiant} enregistrée"
+
+
+def _tache_du_message(message: str, taches: list) -> str:
+    """La tâche que dit un message de l'Atelier, ou "" : exactement « <id> : <titre> » (le
+    travail), « Cahier : <id> enregistrée » (l'entrée) ou « Merge ... into tache/<id> » (la
+    branche du chantier fusionnée dans la sienne), pour une tâche donnée. Un début de message
+    qui ressemble ne suffit pas : un enregistrement d'une personne n'est à aucune tâche."""
+    fusion = re.fullmatch(r"Merge (?:commit|branch) .* into tache/(.+)", message)
+    for tache in taches:
+        identifiant = str(tache.id)
+        if message in (_message_du_travail(tache), _message_du_cahier(identifiant)):
+            return identifiant
+        if fusion and fusion.group(1) == identifiant:
+            return identifiant
+    return ""
+
+
+def _avec_marqueurs(dossier: Path, noms: list[str]) -> list[str]:
+    """Ceux de ces fichiers (de la copie) qui portent encore une ligne de marqueur de conflit."""
+    trouves = []
+    for nom in noms[:FICHIERS_LUS_POUR_MARQUEURS]:
+        chemin = dossier / nom
+        try:
+            if chemin.is_symlink() or not chemin.is_file():
+                continue
+            if chemin.stat().st_size > OCTETS_LUS_POUR_MARQUEURS:
+                continue
+            lignes = chemin.read_text("utf-8", "replace").splitlines()
+        except OSError:
+            continue
+        if any(ligne.startswith(DEBUTS_DE_MARQUEUR) for ligne in lignes):
+            trouves.append(nom)
+    return trouves
+
+
+def _fiche_vide(identifiant: str, probleme: str = "") -> dict:
+    return {
+        "branche": {"nom": f"tache/{identifiant}", "existe": False},
+        "copie": {"existe": False, "dossier": f".atelier/arbres/{identifiant.replace('/', '_')}"},
+        "depart": None,
+        "retard": None,
+        "modifies": {"nombre": 0, "noms": []},
+        "conflits": [],
+        "entree": None,
+        "probleme": probleme,
+    }
+
+
+def _etat_vide(taches: list, probleme: str) -> dict:
+    """L'état quand rien n'a pu être lu : toutes les parties vides, la phrase au chantier."""
+    return {
+        "chantier": {
+            "branche": "", "detachee": False, "dernier": None, "derniers": [],
+            "probleme": probleme,
+        },
+        "taches": {str(t.id): _fiche_vide(str(t.id), probleme) for t in taches},
+        "en_ligne": {"suivie": "", "avance": None, "connu": None, "probleme": ""},
+        "partages": {"fichiers": [], "probleme": ""},
+    }  # fmt: skip
+
+
+class _Reponse:
+    """Ce que rend une commande de la lecture : sa sortie, ou la phrase de son échec."""
+
+    def __init__(self, sortie: str = "", probleme: str = ""):
+        self.sortie, self.probleme = sortie, probleme
+
+    @property
+    def ok(self) -> bool:
+        return not self.probleme
+
+
+class _Lecteur:
+    """Lance les commandes git de la lecture : un délai par commande, un budget pour l'ensemble,
+    et jamais d'exception (un git absent, trop lent ou en échec devient une phrase)."""
+
+    def __init__(self):
+        self.fin = time.monotonic() + BUDGET_LECTURE_S
+
+    def git(self, dossier: Path, *arguments: str) -> _Reponse:
+        reste = self.fin - time.monotonic()
+        if reste <= 0:
+            return _Reponse(probleme="la lecture a pris trop de temps")
+        try:
+            resultat = lancer_git(
+                dossier, *arguments, delai=min(DELAI_LECTURE_S, reste), environnement=SANS_VERROU
+            )
+        except subprocess.TimeoutExpired:
+            return _Reponse(probleme="git n'a pas répondu à temps")
+        except OSError:
+            return _Reponse(probleme="git ou le dossier est inaccessible")
+        except ValueError:
+            return _Reponse(probleme="git a rendu un texte illisible")
+        if resultat.returncode != 0:
+            return _Reponse(probleme=REFUS)
+        return _Reponse(resultat.stdout)
+
+
+def _phrase(partie: str, cause: str) -> str:
+    return f"{partie} n'a pas pu être lu : {cause}."
+
+
+def _noter(fiche: dict, phrase: str) -> None:
+    """Garde la première phrase de problème d'une tâche."""
+    if phrase and not fiche["probleme"]:
+        fiche["probleme"] = phrase
+
+
+class _LectureDepot:
+    """Une lecture de l'état du dépôt. Chaque partie se lit seule : celle qui échoue reste vide
+    avec sa phrase, les autres sont rendues."""
+
+    def __init__(self, depot, taches: list, profil: dict | None):
+        self.depot = Path(depot)
+        self.taches = taches
+        self.profil = profil
+        self.historique_lu = False
+        self.cause_historique = ""
+        self.git = _Lecteur()
+        self.enregistrements: list[dict] = []
+        self.branches: set[str] | None = None
+        self.probleme_branches = ""
+
+    def lire(self) -> dict:
+        racine = self.git.git(self.depot, "rev-parse", "--git-dir")
+        if racine.ok:
+            etat = _etat_vide(self.taches, "")
+            etat["chantier"] = self._chantier()
+            self._lire_branches()
+            etat["taches"] = {str(t.id): self._tache(t) for t in self.taches}
+            etat["en_ligne"] = self._en_ligne(etat["chantier"]["branche"])
+        elif racine.probleme == REFUS:
+            etat = _etat_vide(self.taches, "Ce dossier n'est pas un dépôt git.")
+        else:
+            etat = _etat_vide(self.taches, f"Le dépôt n'a pas pu être lu : {racine.probleme}.")
+        etat["partages"] = self._partages()
+        return etat
+
+    # ---- la branche du chantier et ses enregistrements -------------------------------------
+
+    def _chantier(self) -> dict:
+        chantier = _etat_vide([], "")["chantier"]
+        branche = self.git.git(self.depot, "symbolic-ref", "-q", "HEAD")
+        if branche.ok:
+            chantier["branche"] = branche.sortie.strip().removeprefix("refs/heads/")
+        elif branche.probleme == REFUS:  # avec `-q`, un simple échec dit une tête détachée
+            chantier["detachee"] = True
+            chantier["probleme"] = "Le dossier du projet n'est sur aucune branche (tête détachée)."
+        else:
+            chantier["probleme"] = _phrase("La branche du chantier", branche.probleme)
+        phrase = self._lire_enregistrements()
+        if phrase and not chantier["probleme"]:
+            chantier["probleme"] = phrase
+        chantier["derniers"] = [
+            {**_montrer(e), "tache": _tache_du_message(e["message"], self.taches)}
+            for e in self.enregistrements[:ENREGISTREMENTS_MONTRES]
+        ]
+        chantier["dernier"] = chantier["derniers"][0] if chantier["derniers"] else None
+        return chantier
+
+    def _lire_enregistrements(self) -> str:
+        """Lit l'historique du chantier d'un coup ; rend la phrase du problème, ou ""."""
+        reponse = self.git.git(
+            self.depot, "log", "--date-order", f"--max-count={ENREGISTREMENTS_LUS}",
+            f"--format={FORMAT_ENREGISTREMENT}", "HEAD", "--",
+        )  # fmt: skip
+        if reponse.ok:
+            self.historique_lu = True
+            lus = (_lire_enregistrement(ligne) for ligne in reponse.sortie.splitlines())
+            self.enregistrements = [e for e in lus if e]
+            return ""
+        if reponse.probleme == REFUS:
+            sans_tete = not self.git.git(self.depot, "rev-parse", "--verify", "-q", "HEAD").ok
+            if sans_tete:
+                self.cause_historique = "ce dépôt n'a encore aucun enregistrement"
+                return "Ce dépôt n'a encore aucun enregistrement."
+        self.cause_historique = reponse.probleme
+        return f"Les enregistrements n'ont pas pu être lus : {reponse.probleme}."
+
+    # ---- les tâches --------------------------------------------------------------------------
+
+    def _lire_branches(self) -> None:
+        reponse = self.git.git(
+            self.depot, "for-each-ref", "--format=%(refname)", "refs/heads/tache/"
+        )
+        if reponse.ok:
+            self.branches = set(reponse.sortie.split("\n"))
+        else:
+            self.probleme_branches = f"Les branches n'ont pas pu être lues : {reponse.probleme}."
+
+    def _tache(self, tache) -> dict:
+        ident = str(tache.id)
+        fiche = _fiche_vide(ident, self.probleme_branches)
+        nom = fiche["branche"]["nom"]
+        dossier = self.depot / fiche["copie"]["dossier"]
+        # Les branches sont lues et cherchées par leur nom complet : un tag `tache/X` n'en est pas.
+        fiche["branche"]["existe"] = bool(self.branches) and f"refs/heads/{nom}" in self.branches
+        fiche["copie"]["existe"] = dossier.is_dir()
+        if fiche["branche"]["existe"]:
+            self._depart_et_retard(fiche, f"refs/heads/{nom}")
+            if fiche["copie"]["existe"]:
+                self._modifications(fiche, dossier)
+        # Seule une tâche que le chantier dit entrée (`verifie`) a une entrée.
+        if getattr(tache, "etat", "") == ETAT_ENTREE:
+            self._entree(fiche, tache)
+        _noter(fiche, self._absence(fiche, getattr(tache, "etat", "")))
+        return fiche
+
+    def _depart_et_retard(self, fiche: dict, nom: str) -> None:
+        """Remplit `depart` et `retard` de la tâche, `nom` étant sa branche (nom complet)."""
+        commun = self.git.git(self.depot, "merge-base", "HEAD", nom)
+        if not commun.ok:
+            _noter(fiche, _phrase("Le point de départ", commun.probleme))
+            return
+        format_ = f"--format={FORMAT_ENREGISTREMENT}"
+        depart = self.git.git(self.depot, "log", "-1", format_, commun.sortie.strip(), "--")
+        lu = _lire_enregistrement(depart.sortie.strip()) if depart.ok else None
+        if lu:
+            fiche["depart"] = _montrer(lu)
+        else:
+            _noter(fiche, _phrase("Le point de départ", depart.probleme or REFUS))
+        ecarts = self.git.git(
+            self.depot, "rev-list", "--left-right", "--count", f"HEAD...{nom}", "--"
+        )
+        gauche, _, droite = ecarts.sortie.strip().partition("\t")
+        if ecarts.ok and gauche.isdigit() and droite.isdigit():
+            fiche["retard"] = int(gauche)
+        else:
+            _noter(fiche, _phrase("Le retard", ecarts.probleme or REFUS))
+
+    def _modifications(self, fiche: dict, dossier: Path) -> None:
+        """Les fichiers modifiés et pas enregistrés de la copie, et ceux à marqueurs."""
+        if not (dossier / ".git").exists():
+            _noter(fiche, "Ce dossier n'est plus une copie de travail git.")
+            return
+        statut = self.git.git(dossier, "status", "--porcelain", "-z", "--untracked-files=all")
+        if not statut.ok:
+            _noter(fiche, _phrase("L'état de la copie", statut.probleme))
+            return
+        noms = _chemins_du_statut(statut.sortie)
+        fiche["modifies"] = {"nombre": len(noms), "noms": noms[:FICHIERS_NOMMES]}
+        fiche["conflits"] = _avec_marqueurs(dossier, noms)
+
+    def _entree(self, fiche: dict, tache) -> None:
+        """Pose `entree` : l'enregistrement par lequel le travail de la tâche est entré, et la
+        façon dont. Il porte exactement le message que l'Atelier écrit pour elle ; s'il y en a
+        plusieurs, c'est le plus ancien. Sans lui, une phrase dit pourquoi, et rien n'est deviné."""
+        travail = _message_du_travail(tache)
+        trouves = [e for e in self.enregistrements if e["message"] == travail]
+        if trouves:
+            bout, fusions = self._suite_des_fusions(trouves[-1], str(tache.id))
+            facon = "apres_fusion" if fusions else "directe"
+            fiche["entree"] = {**_montrer(bout), "facon": facon}
+            return
+        if not self.historique_lu:
+            cause = self.cause_historique
+            _noter(fiche, f"L'entrée de la tâche n'a pas pu être cherchée : {cause}.")
+        else:
+            _noter(
+                fiche,
+                "L'enregistrement d'entrée de cette tâche est introuvable dans l'historique lu "
+                f"(jusqu'à {ENREGISTREMENTS_LUS} enregistrements) ; une tâche qui n'a rien "
+                "changé n'en laisse pas.",
+            )
+
+    def _suite_des_fusions(self, travail: dict, identifiant: str) -> tuple[dict, int]:
+        """Suit, après l'enregistrement du travail, les fusions de la branche du chantier dans
+        celle de la tâche : des enregistrements à deux parents, dont le premier est le précédent
+        et dont le message est celui de git pour cette fusion (« Merge ... into tache/<id> »)."""
+        suivants: dict[str, dict] = {}
+        for e in self.enregistrements:
+            if (
+                len(e["parents"]) == 2
+                and e["message"].startswith("Merge ")
+                and e["message"].endswith(f" into tache/{identifiant}")
+            ):
+                suivants.setdefault(e["parents"][0], e)
+        courant, fusions = travail, 0
+        while courant["complet"] in suivants and fusions < len(self.enregistrements):
+            courant, fusions = suivants[courant["complet"]], fusions + 1
+        return courant, fusions
+
+    @staticmethod
+    def _absence(fiche: dict, etat: str) -> str:
+        branche, copie = fiche["branche"], fiche["copie"]
+        if copie["existe"] and not branche["existe"]:
+            return f"La branche {branche['nom']} n'existe plus, mais sa copie de travail est là."
+        if etat in ETATS_EN_ROUTE and not fiche["entree"]:
+            if not branche["existe"]:
+                return f"La branche {branche['nom']} et la copie de travail de la tâche manquent."
+            if not copie["existe"]:
+                return "La copie de travail de la tâche a disparu."
+        return ""
+
+    # ---- le dépôt en ligne, tel que git le connaît sur le disque ---------------------------
+
+    def _en_ligne(self, branche: str) -> dict:
+        en_ligne = _etat_vide([], "")["en_ligne"]
+        if not branche:
+            return en_ligne
+        suivie, en_ligne["probleme"] = self._branche_suivie(branche)
+        if not suivie:
+            return en_ligne
+        en_ligne["suivie"] = suivie.removeprefix("refs/remotes/").removeprefix("refs/heads/")
+        avance = self.git.git(self.depot, "rev-list", "--count", f"{suivie}..HEAD", "--")
+        if avance.ok and avance.sortie.strip().isdigit():
+            en_ligne["avance"] = int(avance.sortie.strip())
+        else:
+            en_ligne["probleme"] = _phrase("L'avance", avance.probleme or REFUS)
+        format_ = f"--format={FORMAT_ENREGISTREMENT}"
+        connu = self.git.git(self.depot, "log", "-1", format_, suivie, "--")
+        lu = _lire_enregistrement(connu.sortie.strip()) if connu.ok else None
+        en_ligne["connu"] = _montrer(lu) if lu else None
+        return en_ligne
+
+    def _branche_suivie(self, branche: str) -> tuple[str, str]:
+        """La branche en ligne que git connaît sur le disque, par son nom complet (celle que le
+        réglage de suivi désigne, sinon `refs/remotes/origin/<branche>`), et le problème.
+        ("", "") sans dépôt en ligne ni branche suivie."""
+        reglage = self.git.git(
+            self.depot, "for-each-ref", "--format=%(upstream)", f"refs/heads/{branche}"
+        )
+        if not reglage.ok:
+            return "", _phrase("La branche suivie", reglage.probleme)
+        complet = reglage.sortie.strip() or f"refs/remotes/origin/{branche}"
+        connue = self.git.git(self.depot, "rev-parse", "--verify", "-q", complet)
+        if connue.ok:
+            return complet, ""
+        if connue.probleme != REFUS:
+            return "", _phrase("La branche suivie", connue.probleme)
+        if reglage.sortie.strip():
+            return "", "La branche suivie n'est pas connue sur ce disque : rien n'en a été reçu."
+        return "", ""
+
+    # ---- les fichiers partagés ---------------------------------------------------------------
+
+    def _partages(self) -> dict:
+        profil, probleme = self.profil, ""
+        if profil is None:
+            chemin = self.depot / "chantier" / "profil.json"
+            try:
+                profil = json.loads(chemin.read_text("utf-8")) if chemin.exists() else {}
+            except (OSError, ValueError):
+                profil, probleme = {}, "Le profil du projet (chantier/profil.json) est illisible."
+        fichiers = [{"motif": m, "fusion": f} for m, f in fichiers_partages(profil).items()]
+        return {"fichiers": fichiers, "probleme": probleme}
+
+
+def etat_du_depot_d_exemple(taches) -> dict:
+    """Un état du dépôt cohérent avec la démonstration, sans git : les tâches vérifiées sont
+    entrées (la première en entrée directe, la suivante après fusion), les tâches en route ont
+    leur branche et quelques fichiers modifiés, les autres n'ont encore rien. Sans dépôt en ligne.
+    """
+    taches = list(taches)
+    maintenant = int(time.time())
+    entrees = [str(t.id) for t in taches if getattr(t, "etat", "") == "verifie"]
+    fiches, derniers = {}, []
+    for tache in taches:
+        ident, etat = str(tache.id), getattr(tache, "etat", "")
+        fiche = _fiche_vide(ident)
+        if ident in entrees:
+            rang = entrees.index(ident)
+            quand = _quand(maintenant - 60 * (len(entrees) - rang))
+            entree = {"id": f"{rang + 1:02d}a1c9e", "message": f"{ident} : {tache.titre}"}
+            facon = "apres_fusion" if rang % 2 else "directe"
+            fiche["entree"] = {**entree, **quand, "facon": facon}
+            derniers.insert(0, {**entree, **quand, "tache": ident})
+        elif etat in ETATS_EN_ROUTE:
+            _poser_travail_d_exemple(fiche, tache, maintenant, len(entrees))
+        fiches[ident] = fiche
+    tete = derniers[:ENREGISTREMENTS_MONTRES]
+    return {
+        "chantier": {
+            "branche": "main", "detachee": False, "dernier": tete[0] if tete else None,
+            "derniers": tete, "probleme": "",
+        },
+        "taches": fiches,
+        "en_ligne": {"suivie": "", "avance": None, "connu": None, "probleme": ""},
+        "partages": {"fichiers": [], "probleme": ""},
+    }  # fmt: skip
+
+
+def _poser_travail_d_exemple(fiche: dict, tache, maintenant: int, entrees: int) -> None:
+    """Pour une tâche en route : sa branche, sa copie, son point de départ et ses fichiers."""
+    fiche["branche"]["existe"] = fiche["copie"]["existe"] = True
+    fiche["depart"] = {"id": "3f9a1c7", "message": "Cahier du chantier", **_quand(maintenant - 600)}
+    fiche["retard"] = entrees
+    noms = list(tache.perimetre) or [f"coeur/{str(tache.id).lower()}.py"]
+    fiche["modifies"] = {"nombre": len(noms), "noms": noms[:FICHIERS_NOMMES]}
