@@ -479,6 +479,10 @@ class _Arret:
             self.boucle.call_soon_threadsafe(self.evenement.set)
 
 
+DELAI_VIDAGE_S = 0.05  # attente d'un message resté en file, avant d'envoyer une suite
+VIDAGE_MAX = 10_000  # messages jetés au plus avant une suite : une borne, jamais atteinte en vrai
+
+
 class SessionSDK:
     """Une session de l'Agent SDK pour un agent d'Atelier, utilisable depuis n'importe quel fil."""
 
@@ -562,6 +566,9 @@ class SessionSDK:
         self._formes = _Memoire()  # identifiant d'appel d'outil -> « Bash(uv sync) »
         self._refus = _Memoire()  # appels déjà annoncés comme refusés, ou passés par le guichet
         self._auto_vu = False  # le mode auto a-t-il valu pendant le tour ?
+        # Vrai quand une suite demandée sur cette connexion déjà servie n'a pas pu partir : le
+        # programme n'était plus là. L'appelant se replie alors sur la reprise par session.
+        self.suite_perdue = False
 
     # --- Côté fils synchrones -------------------------------------------------------------
 
@@ -821,13 +828,54 @@ class SessionSDK:
             async with self._verrou_client:  # un changement de mode attend la connexion
                 self._client = self._fabriquer()
                 await self._client.connect()
-        self._auto_vu = (self.mode_applique or self.mode_permission) == "auto"
-        await self._client.query(consigne)
+            self._auto_vu = (self.mode_applique or self.mode_permission) == "auto"
+            await self._client.query(consigne)
+        else:  # une suite, sur la connexion gardée ouverte depuis le tour d'avant
+            self._auto_vu = (self.mode_applique or self.mode_permission) == "auto"
+            await self._envoyer_la_suite(consigne)
         morceaux: list[str] = []
         final = None
         async for message in self._client.receive_response():
             final = self._suivre(message, morceaux) or final
         return lire_resultat(final, morceaux)
+
+    async def _envoyer_la_suite(self, consigne: str) -> None:
+        """Envoie une suite à un Claude Code resté connecté depuis le tour d'avant.
+
+        Deux choses ont pu arriver pendant qu'il attendait, que le SDK ne dit qu'à la lecture ou
+        à l'écriture suivante. Il a pu jouer un tour de lui-même (une tâche de fond qui finit le
+        réveille) : ces messages sont jetés d'abord, sinon la réponse lue serait celle de ce
+        tour, et toutes les suivantes seraient décalées d'un cran. Il a pu mourir : la suite ne
+        peut alors pas partir, `suite_perdue` le dit, et l'erreur remonte.
+
+        Limite connue : un tour de fond encore en cours au moment de l'envoi n'est pas vu.
+        """
+        try:
+            await self._vider()
+            await self._client.query(consigne)
+        except BaseException:
+            self.suite_perdue = True
+            raise
+
+    async def _vider(self) -> None:
+        """Jette ce que Claude Code a émis depuis le dernier tour lu. Un client sans lecture
+        continue (`receive_messages`) n'a pas de file : rien à vider. Une fin de flux veut dire
+        que le programme est sorti."""
+        lire = getattr(self._client, "receive_messages", None)
+        if lire is None:
+            return
+        flux = lire().__aiter__()
+        try:
+            for _ in range(VIDAGE_MAX):
+                try:
+                    await asyncio.wait_for(flux.__anext__(), DELAI_VIDAGE_S)
+                except asyncio.TimeoutError:
+                    return  # plus rien en attente
+                except StopAsyncIteration:
+                    raise RuntimeError("Claude Code est sorti pendant l'attente.") from None
+        finally:
+            with suppress(Exception):
+                await flux.aclose()
 
     def _fabriquer(self):
         """Crée le client SDK. C'est ici, et seulement ici, qu'on charge la bibliothèque."""
