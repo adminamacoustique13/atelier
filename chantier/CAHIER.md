@@ -5,9 +5,9 @@
 | Tâche | État | Ouvrier | Vérification | Tentatives | Preuve |
 |---|---|---|---|---|---|
 | P1. Le serveur local refuse une demande venue d'un autre site | en cours | Opus, effort élevé | complète, Fable | 1 | |
-| P2. Seul un vrai `true` du vérificateur vaut accord | en cours | Sonnet, effort moyen | mécanique : test qui échouait avant | 1 | |
+| P2. Seul un vrai `true` du vérificateur vaut accord | vérifié | Sonnet, effort moyen | mécanique : 8 tests échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests ajoutés ; suite 1 793, ruff propre ; enregistré 99a111e |
 | P3. Secrets illisibles et git en écriture refusés d'office à tout agent | en cours | Opus, effort élevé | complète, Fable | 1 | |
-| P4. Un fichier au nom accentué est reconnu dans son périmètre | en cours | Sonnet, effort moyen | mécanique : test qui échouait avant | 1 | |
+| P4. Un fichier au nom accentué est reconnu dans son périmètre | vérifié | Sonnet, effort moyen | mécanique : 9 tests sur 15 échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests nouveaux ; suite 1 778 puis 1 793 avec P2, ruff propre ; enregistré 7b75090 |
 
 ## P1. Le serveur local refuse une demande venue d'un autre site
 Périmètre : `atelier/serveur.py` (la classe `Requetes` et `creer_serveur`), `tests/test_serveur_origine.py` (nouveau).
@@ -41,3 +41,13 @@ Périmètre : `atelier/controles.py` (la lecture des fichiers modifiés), `tests
 2. Même résultat pour un nom avec une espace, un nom avec un guillemet, un fichier nouveau et un fichier renommé.
 3. Un fichier accentué hors périmètre est signalé sous son vrai nom.
 4. Le résultat ne dépend pas du réglage `core.quotePath` de la machine.
+
+## Écarts acceptés en route
+- P4 : pour un renommage, `fichiers_modifies` rend désormais l'ancien et le nouveau nom (avant : le nouveau seul). La disparition de l'ancien fichier est bien une modification, et un ancien nom hors périmètre doit se voir.
+
+## Relevés des ouvriers, hors périmètre
+- P4 : `atelier/essai.py:358` lit `git ls-files` sans `-z` puis coupe aux espaces ; sans effet aujourd'hui (l'essai ne livre que `calcul.py`).
+- P2 : aucun autre booléen venu d'un agent n'est lu par sa seule vérité.
+
+## Incident de lancement
+Les quatre copies de travail des ouvriers ont été créées sur `main` (9d4cf2c) au lieu de la branche de travail. Vu avant toute modification : l'orchestrateur les a replacées sur a862a2f et a prévenu chaque ouvrier de relire ses fichiers. À refaire à chaque lancement en copie isolée : vérifier le commit de départ.
