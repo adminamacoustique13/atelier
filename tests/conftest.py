@@ -38,3 +38,16 @@ def pont_sans_attente_ni_memoire_des_couts(monkeypatch):
     vider_les_cumuls()
     yield
     vider_les_cumuls()
+
+
+@pytest.fixture(autouse=True)
+def montee_d_avant(request, monkeypatch):
+    """Les tests écrits avant le 2026-11-13 prouvent la règle « refus » : après tout refus, une
+    seconde chance puis un cran de plus. Elle reste dans le produit (`"montee": "refus"` au
+    profil) et ils continuent de la prouver. Le produit, lui, suit sans réglage la règle
+    « fond » (le modèle ne monte que si le fond est jugé faux) : les tests qui la prouvent
+    portent la marque `montee_sur_le_fond`, et ne reçoivent pas ce réglage."""
+    if request.node.get_closest_marker("montee_sur_le_fond") is None:
+        from atelier import moteur
+
+        monkeypatch.setattr(moteur, "MONTEE_SANS_REGLAGE", "refus")

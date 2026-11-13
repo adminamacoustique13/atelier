@@ -102,6 +102,10 @@ REPRISES_PAR_DEPART = 1
 RETOURS_CONTROLES = 3
 COMPLEMENTS = 1
 REPONSE_AU_FIL = 300  # signes gardés de la réponse d'un ouvrier qui n'a rien changé
+# Quand le modèle monte après un refus (réglage `montee` du profil) : "fond", seulement si le
+# vérificateur juge le fond faux ; "refus", après tout refus, comme avant le 2026-11-13.
+MONTEES = ("fond", "refus")
+MONTEE_SANS_REGLAGE = "fond"
 MOTIFS_REPRIS = ("bacle", "ne_sait_pas")  # un verdict « consigne » revient à la personne
 VERDICT_GARDE = 8000  # les derniers caractères du texte du vérificateur, gardés et transmis
 SORTIE_REPRISE = 4000  # les derniers caractères de la sortie des contrôles, pour la reprise
@@ -1524,6 +1528,10 @@ class Moteur:
             return False
         if jugement.origine == "agent":
             return self._apres_erreur_d_agent(tache, jugement)
+        if self._montee() == "fond" and jugement.motif not in (ARRETEE, "consigne"):
+            return self._suite_sur_le_fond(
+                tache, jugement.motif, jugement.detail, jugement.fond_faux
+            )
         repris = self._repris_hors_fusion(tache)
         return self._apres_echec(tache, jugement.motif, jugement.detail, repris)
 
@@ -1658,6 +1666,8 @@ class Moteur:
         faits = {"controles": 0, "autres": 0, "tous": 0}
         while jugement.reprenable:
             if jugement.origine != "integration":
+                if self._montee() == "fond" and jugement.fond_faux:
+                    break  # un fond jugé faux ne revient jamais au même ouvrier : il fait monter
                 if not self._retour_permis(jugement, faits):
                     break
             suivant = self._reprise(tache, dossier, session, jugement)
@@ -2294,12 +2304,21 @@ class Moteur:
             self._noter(f"Copie du vérificateur impossible, il relit seulement : {erreur}", tache)
             return None
 
+    def _montee(self) -> str:
+        """La règle de montée du profil (`montee`) : "fond" sans réglage ou mal réglée."""
+        regle = self.profil.get("montee")
+        return regle if regle in MONTEES else MONTEE_SANS_REGLAGE
+
     def _apres_echec(self, tache: Tache, motif: str, detail: str, repris: bool = False) -> bool:
         """Décide de la suite après un refus. Rend False si la tâche s'arrête là.
 
-        `repris` : le refus vient de la reprise à chaud de ce départ. Elle tient lieu de seconde
-        chance au même niveau : le départ neuf qui suit monte d'un cran si le contrat le permet,
-        sinon repart au même niveau si c'était le premier départ, sinon la tâche revient.
+        C'est la règle « refus » (`"montee": "refus"` au profil), et, sous la règle « fond », la
+        suite d'un arrêt ou d'une consigne mal posée ; pour les autres refus, la règle « fond »
+        passe par `_suite_sur_le_fond`.
+
+        `repris` dit que le refus vient de la reprise à chaud de ce départ. Elle tient lieu de
+        seconde chance au même niveau : le départ neuf qui suit monte d'un cran si le contrat le
+        permet, sinon repart au même niveau si c'était le premier départ, sinon la tâche revient.
         """
         contrat = self.chantier.contrat
         if motif == ARRETEE:  # ni seconde chance ni montée : la personne reprend la main
@@ -2318,6 +2337,28 @@ class Moteur:
             self._noter(f"Refusée. {detail} Seconde chance au même niveau.", tache)
             return True
         return self._monter(tache, motif, detail, repris, premier)
+
+    def _suite_sur_le_fond(self, tache: Tache, motif: str, detail: str, fond_faux: bool) -> bool:
+        """La suite d'un refus sous la règle « fond » (sans réglage) : le modèle ne monte que si
+        le vérificateur juge le fond faux ; un manque, un contrôle rouge ou un débord se
+        corrigent au même niveau, sur le travail gardé. Seul un fond jugé faux fait monter, et
+        seul lui permet la relance seule d'une tâche épuisée ; tout autre refus repart au même
+        niveau tant qu'il reste une tentative, puis la tâche revient à la personne."""
+        contrat = self.chantier.contrat
+        if tache.tentatives >= contrat.max_tentatives + tache.rallonge:
+            if fond_faux and self._relancer_seul(tache, motif, detail):
+                return True
+            self._rendre(tache, f"{tache.tentatives} tentatives sans succès. {detail}")
+            return False
+        if fond_faux:
+            premier = tache.tentatives - tache.rallonge == 1
+            return self._monter(tache, motif, detail, False, premier)
+        self._noter(
+            f"Refusée. {detail} Le fond n'est pas en cause : je repars au même niveau, sans "
+            "monter de modèle.",
+            tache,
+        )
+        return True
 
     def _monter(self, tache: Tache, motif: str, detail: str, repris: bool, premier: bool) -> bool:
         """Monte d'un cran pour le départ suivant, si le contrat le permet.
@@ -2454,9 +2495,13 @@ class Moteur:
     def _cran_disponible(self, tache: Tache, jugement: Jugement) -> bool:
         """Sous le verrou : dit si l'escalade pourrait encore monter d'un cran après ce refus.
 
-        Jamais après une erreur d'agent. Tentatives épuisées, seule la relance seule monterait.
+        Jamais après une erreur d'agent. Sous la règle « fond », jamais non plus quand le fond
+        n'est pas jugé faux : le même refus deux fois de suite bloque alors la tâche. Tentatives
+        épuisées, seule la relance seule monterait.
         """
         if jugement.origine == "agent":
+            return False
+        if self._montee() == "fond" and not jugement.fond_faux:
             return False
         if not self._sous_plafond(dosage.monter(tache.modele, tache.effort, jugement.motif)):
             return False

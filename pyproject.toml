@@ -8,6 +8,7 @@ dependencies = ["claude-agent-sdk>=0.2.172"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = ["montee_sur_le_fond: le test prouve la règle de montée du produit sans réglage"]
 
 [tool.ruff]
 line-length = 100
