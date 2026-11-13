@@ -9,7 +9,7 @@
 | P3. Secrets illisibles et git en écriture refusés d'office à tout agent | en cours | Opus, effort élevé | complète, Fable | 1 | |
 | P4. Un fichier au nom accentué est reconnu dans son périmètre | vérifié | Sonnet, effort moyen | mécanique : 9 tests sur 15 échouaient sur l'ancien code (rejoués par l'orchestrateur) | 1 | 15 tests nouveaux ; suite 1 778 puis 1 793 avec P2, ruff propre ; enregistré 7b75090 |
 | V1. Maquettes de la Salle à plusieurs agents et de l'état du dépôt (hors produit) | en cours | Fable, effort élevé | par la personne responsable, sur les images | 1 | |
-| M1. Formats (état, résultat d'un agent, dosage) | en cours | Sonnet, effort moyen | bornée | 1 | |
+| M1. Formats (état, résultat d'un agent, dosage) | vérifié | Sonnet, effort moyen | mécanique et lecture du diff par l'orchestrateur, à la place de la vérification bornée prévue : 16 tests sur 21 échouaient sur l'ancien code, les trois fonctions de dosage sont identiques à la référence (arbres de syntaxe comparés), aucun test existant touché | 1 | 59 tests ajoutés, 3 mutations tuées par l'ouvrier ; suite 1 940 avec P1, ruff propre |
 | M2. Consignes (preuve par critère, contrôles non rejoués, sous-tâche, verdict local) | en cours | Sonnet, effort élevé | bornée | 1 | |
 | M3. Agents : l'ouvrier reste ouvert | à lancer (vague 1) | Opus, effort élevé | complète | | |
 | M4. Pont : coût juste et nature des échecs | à lancer (vague 1) | Opus, effort élevé | complète | | |

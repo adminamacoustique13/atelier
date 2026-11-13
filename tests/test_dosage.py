@@ -169,3 +169,82 @@ def test_l_appel_d_aujourd_hui_au_verificateur_est_inchange():
     assert dosage.verificateur("sonnet", "high") == ("opus", "high")
     assert dosage.verificateur("opus", "max") == ("fable", "max")
     assert dosage.verificateur("fable", "low") == ("fable", "max")
+
+
+# --- M1 : le dosage d'une correction (mêmes réponses que la référence) --------------------------
+
+
+@pytest.mark.parametrize(
+    ("modele", "prevu", "attendu"),
+    [
+        ("fable", "opus", "opus"),  # montée après une erreur : retour au correcteur
+        ("fable", "fable", "fable"),  # prévue complexe : elle garde son modèle
+        ("fable", "", "opus"),
+        ("sonnet", "fable", "sonnet"),  # jamais au-dessus du modèle de la tâche
+        ("opus", "fable", "opus"),
+        ("opus", "opus", "opus"),
+        ("haiku", "", "sonnet"),  # jamais sous Sonnet
+        ("haiku", "haiku", "sonnet"),
+        ("sonnet", "inconnu", "sonnet"),  # un modèle prévu hors échelle est ignoré
+    ],
+)
+def test_le_correcteur_ne_depasse_opus_que_pour_une_tache_prevue_au_dessus(
+    modele, prevu, attendu
+):
+    assert dosage.correcteur(modele, prevu) == attendu
+
+
+def test_le_correcteur_d_un_modele_hors_echelle_leve():
+    with pytest.raises(ValueError):
+        dosage.correcteur("inconnu")
+
+
+@pytest.mark.parametrize(
+    ("modele", "prevu", "documents", "rang", "attendu"),
+    [
+        ("opus", "opus", True, 1, ("sonnet", "medium")),  # un résumé : de la rédaction
+        ("fable", "opus", True, 1, ("sonnet", "medium")),
+        ("opus", "opus", True, 0, ("sonnet", "medium")),  # rang sous 1 : comme le rang 1
+        ("opus", "opus", True, 2, ("opus", "high")),  # le résumé n'est toujours pas bon
+        ("fable", "fable", True, 2, ("fable", "medium")),  # Fable corrige à effort mesuré
+        ("opus", "opus", False, 1, ("opus", "high")),  # une correction de code
+        ("opus", "opus", False, 2, ("opus", "xhigh")),  # le défaut revient : l'effort monte
+        ("opus", "opus", False, 3, ("opus", "xhigh")),  # au-delà du rang 2 : le même cran
+        ("fable", "opus", False, 1, ("opus", "high")),  # montée après une erreur : retour à Opus
+        ("fable", "opus", False, 2, ("opus", "xhigh")),
+        ("fable", "fable", False, 1, ("fable", "medium")),  # prévue complexe : garde Fable,
+        ("fable", "fable", False, 2, ("fable", "high")),  # à effort mesuré
+        ("sonnet", "sonnet", False, 1, ("sonnet", "high")),
+        ("haiku", "haiku", False, 1, ("sonnet", "high")),  # jamais sous Sonnet
+        ("opus", "", False, 1, ("opus", "high")),
+    ],
+)
+def test_le_dosage_d_une_sous_tache_vient_du_reste_pas_de_la_tache(
+    modele, prevu, documents, rang, attendu
+):
+    assert dosage.sous_tache(modele, prevu, documents, rang) == attendu
+
+
+def test_une_sous_tache_se_dose_par_defaut_comme_une_correction_de_code_de_rang_1():
+    assert dosage.sous_tache("opus") == ("opus", "high")
+    assert dosage.sous_tache("opus", "opus", False, 1) == dosage.sous_tache("opus")
+
+
+@pytest.mark.parametrize(
+    ("fichiers", "attendu"),
+    [
+        (["RESUME.md", "AVIS.txt"], True),
+        (["notes.rst"], True),
+        (["LISEZMOI.MD", "Avis.TXT"], True),  # la casse ne compte pas
+        (("RESUME.md",), True),  # un tuple convient
+        (["RESUME.md", "db/social.py"], False),  # un seul fichier de code suffit
+        (["db/social.py"], False),
+        (["resume.md.bak"], False),  # c'est l'extension qui compte
+        (["resume"], False),
+        ([], False),  # aucun fichier nommé : faux
+        (None, False),
+        ("", False),
+    ],
+)
+def test_un_reste_n_est_de_la_redaction_que_si_tous_ses_fichiers_le_sont(fichiers, attendu):
+    assert dosage.que_des_documents(fichiers) is attendu

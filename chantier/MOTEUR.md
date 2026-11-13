@@ -33,8 +33,10 @@ Tout se décide sur des champs de `Jugement` (`origine`, `motif`, plus `lisible`
 Sûre à ces conditions : `tache.copie` est écrit dans l'état avant chaque départ ; le chargement ne fait que changer l'état, et le serveur relance seulement avec un contrat validé, le port pris et un verrou par dépôt tenu ; la relance est annoncée au fil et attend 30 s ; la tentative est rendue trois fois au plus par tâche ; une tâche « revenue » ne repart jamais seule ; la barrière du budget s'applique ; `reprise_auto: false` rétablit la règle d'avant.
 
 ### d. Formats
-- `Tache` : `copie`, `reste`, `sous_taches`, `releve`, `releve_sur`, `pannes`.
-- `Contrat` : `max_cout_usd` (0 : pas de budget).
+- `Tache` (types fixés par M1, alignés sur la référence) : `copie: str` ("" : aucune), `reste: dict` (`genre`, `points`, `fichiers`, `en_cours` ; vide quand rien ne reste), `sous_taches: int`, `releve: str`, `releve_sur: str`, `pannes: int`. `Tache.sous_tache_possible(maxi)` : `reste` non vide, `copie` non vide et `sous_taches < maxi`.
+- `Resultat` (M1) : `ouverte: bool`, `nature: str` (chaîne libre, vide sans échec), `cout_incomplet: bool`, tous hors comparaison.
+- `dosage` (M1) : `correcteur(modele, prevu="")`, `sous_tache(modele, prevu="", documents=False, rang=1)`, `que_des_documents(fichiers)`.
+- `Contrat` : `max_cout_usd: float` (0 : pas de budget).
 - Historique : issues `interrompue` et `attente_panne`, clés `retour`, `sous_tache`, `pendant`.
 - Profil : `budget_usd`, `pauses_panne_s`, `ouvrier_ouvert`, `ouverts_max`, `retours_controles` (3), `complements` (1), `sous_taches` (2), `reprise_auto`, `reprise_apres_arret_s`.
 - Un état écrit par le code actuel reste lisible : `depuis_dict` donne leur valeur par défaut aux clés absentes, et les clés inconnues sont ignorées.

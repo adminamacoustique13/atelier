@@ -170,6 +170,50 @@ def verificateur_selon_niveau(modele: str, effort: str, niveau: str) -> tuple[st
     return verificateur(modele, effort)
 
 
+# Une correction ne monte pas au-dessus de ce modèle, sauf pour une tâche classée dès le départ
+# au-dessus : le dernier modèle sert quand le travail le mérite, pas pour reprendre une erreur.
+CORRECTEUR_MAX = "opus"
+DOCUMENTS = (".md", ".txt", ".rst")  # un reste qui ne touche que ces fichiers est de la rédaction
+
+
+def correcteur(modele: str, prevu: str = "") -> str:
+    """Le modèle qui corrige un reste nommé dans un travail gardé, ou vérifie cette retouche.
+
+    `modele` est celui de la tâche aujourd'hui, `prevu` celui de son type au départ. Une tâche
+    partie plus bas et montée après un refus revient à `CORRECTEUR_MAX` pour sa correction ; une
+    tâche prévue dès le départ au-dessus (un travail complexe) garde son modèle. Jamais sous
+    Sonnet, jamais au-dessus du modèle de la tâche.
+    """
+    haut = max(MODELES.index(CORRECTEUR_MAX), MODELES.index(prevu) if prevu in MODELES else 0)
+    return MODELES[max(min(MODELES.index(modele), haut), MODELES.index("sonnet"))]
+
+
+def sous_tache(
+    modele: str, prevu: str = "", documents: bool = False, rang: int = 1
+) -> tuple[str, str]:
+    """Le dosage d'une sous-tâche : régler ce qui reste d'un travail jugé bon par ailleurs.
+
+    Un reste de rédaction (résumé, compte rendu) part en Sonnet, effort moyen. Une correction
+    de code part sur le modèle correcteur, à l'effort normal, puis un cran d'effort plus haut si
+    le défaut revient (`rang` 2). Le tout dernier modèle, gardé pour une tâche complexe, corrige
+    à effort mesuré : la mission est petite, elle n'a pas besoin de plus.
+    """
+    if documents and rang <= 1:
+        return "sonnet", "medium"
+    choisi = correcteur(modele, prevu)
+    mesure = choisi == MODELES[-1]
+    if documents:
+        return choisi, "medium" if mesure else "high"
+    premier, second = ("medium", "high") if mesure else ("high", "xhigh")
+    return choisi, premier if rang <= 1 else second
+
+
+def que_des_documents(fichiers) -> bool:
+    """Dit si tous les fichiers nommés sont de la rédaction (faux quand aucun n'est nommé)."""
+    noms = [str(f).lower() for f in fichiers or []]
+    return bool(noms) and all(nom.endswith(DOCUMENTS) for nom in noms)
+
+
 def libelle(modele: str, effort: str) -> str:
     """Écrit un dosage en clair, par exemple « Sonnet, effort moyen »."""
     return f"{modele.capitalize()}, effort {EFFORTS_FR.get(effort, effort)}"

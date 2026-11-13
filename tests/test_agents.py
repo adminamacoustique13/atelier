@@ -1397,3 +1397,35 @@ def test_un_chemin_absolu_ou_qui_remonte_n_est_pas_permis_la_ou_claude_code_le_v
     profil, commande, attendu
 ):
     assert commande_permise(profil, commande) is attendu
+
+
+# --- M1 : les champs nouveaux de `Resultat` ne comptent pas dans la comparaison ----------------
+
+
+@pytest.mark.parametrize(
+    "champ, valeur",
+    [
+        ("ouverte", True),
+        ("nature", "panne"),
+        ("nature", "budget"),
+        ("cout_incomplet", True),
+    ],
+)
+def test_un_champ_nouveau_de_resultat_ne_change_pas_la_comparaison(champ, valeur):
+    base = Resultat(True, "texte", 0.5, 10)
+    autre = Resultat(True, "texte", 0.5, 10, **{champ: valeur})
+    assert autre == base and not autre != base
+    assert getattr(autre, champ) == valeur
+
+
+def test_les_champs_nouveaux_de_resultat_ont_leur_valeur_par_defaut():
+    resultat = Resultat(False, erreur="coupé")
+    assert resultat.ouverte is False
+    assert resultat.nature == ""
+    assert resultat.cout_incomplet is False
+
+
+def test_un_champ_ancien_de_resultat_compte_toujours_dans_la_comparaison():
+    # Garde-fou : la comparaison n'est pas devenue vide pour autant.
+    assert Resultat(True, "a", 0.5, 10, nature="panne") != Resultat(True, "b", 0.5, 10)
+    assert Resultat(True, "a", 0.5, 10, ouverte=True) != Resultat(True, "a", 0.6, 10)

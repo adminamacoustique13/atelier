@@ -153,6 +153,14 @@ class Resultat:
     # Les outils refusés pendant le tour, sous leur forme courte (« Bash(uv sync) ») : sans
     # doublon, dans l'ordre, REFUSES_MAX au plus. Hors comparaison, comme `session`.
     refuses: list[str] = field(default_factory=list, compare=False)
+    # Vrai quand l'agent est resté ouvert après avoir rendu la main : la suite (un contrôle
+    # rouge, un manque relevé) peut lui être donnée tout de suite. Hors comparaison.
+    ouverte: bool = field(default=False, compare=False)
+    # Pourquoi l'agent a échoué, en un mot : « arret », « delai », « limite », « surcharge »,
+    # « reprise », « connexion », « budget » ou « panne » ; vide sans échec ou si inconnu.
+    nature: str = field(default="", compare=False)
+    # Vrai quand le coût rendu est incomplet (agent coupé avant son message de fin).
+    cout_incomplet: bool = field(default=False, compare=False)
 
 
 def decrire_limite(statut: str, type_limite: str, fin=None, utilisation=None) -> str:

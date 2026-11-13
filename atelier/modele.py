@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import os
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 
@@ -83,6 +83,27 @@ class Tache:
     cout_usd: float = 0.0
     tokens: int = 0
     historique: list[dict] = field(default_factory=list)
+    # La copie de travail qui porte le travail en cours ou refusé ("" : aucune).
+    copie: str = ""
+    # Ce qui reste à régler d'un travail gardé dans sa copie, quand un refus le nomme : un
+    # dictionnaire (`genre`, `points`, `fichiers`, `en_cours`), vide quand rien ne reste.
+    reste: dict = field(default_factory=dict)
+    # Le nombre de sous-tâches déjà parties pour cette tâche.
+    sous_taches: int = 0
+    # Ce que le vérificateur a relevé quand tout le reste était conforme, et l'état de la copie
+    # qu'il a vue ("" : rien) : le tour suivant est une retouche sur ces seuls points.
+    releve: str = ""
+    releve_sur: str = ""
+    # Les pannes d'agent de suite (réseau, quota) : elles font patienter, sans coûter d'essai.
+    pannes: int = 0
+
+    def sous_tache_possible(self, maxi: int) -> bool:
+        """Dit si le tour suivant peut être une sous-tâche.
+
+        Vrai seulement s'il reste des points à régler, si la tâche a une copie gardée et si son
+        nombre de sous-tâches est strictement sous `maxi` (donc jamais avec `maxi` à 0).
+        """
+        return bool(self.reste) and bool(self.copie) and self.sous_taches < maxi
 
 
 @dataclass
@@ -97,6 +118,7 @@ class Contrat:
     plafond_effort: str = "high"
     zones_rouges: list[str] = field(default_factory=lambda: list(ZONES_ROUGES))
     valide: bool = False
+    max_cout_usd: float = 0.0  # 0 : pas de budget ; sinon plus aucun agent ne part au-delà
 
 
 @dataclass
@@ -146,19 +168,29 @@ class Chantier:
 
     @classmethod
     def depuis_dict(cls, donnees: dict) -> Chantier:
-        """Reconstruit un chantier à partir d'un dictionnaire."""
+        """Reconstruit un chantier à partir d'un dictionnaire.
+
+        Une clé absente prend sa valeur par défaut ; une clé inconnue du chantier, d'une tâche ou
+        du contrat (écrite par une version plus récente) est ignorée, sans empêcher l'ouverture.
+        """
         donnees = dict(donnees)
         donnees.setdefault("ouvert_le", "")  # un état d'avant cette date : inconnue
         reglages = dict(donnees.pop("contrat"))
         reglages.pop("max_agents", None)  # l'ancien plafond d'agents, retiré le 12 novembre 2026
-        contrat = Contrat(**reglages)
-        taches = [Tache(**t) for t in donnees.pop("taches", [])]
-        return cls(contrat=contrat, taches=taches, **donnees)
+        contrat = Contrat(**_connus(Contrat, reglages))
+        taches = [Tache(**_connus(Tache, t)) for t in donnees.pop("taches", [])]
+        return cls(contrat=contrat, taches=taches, **_connus(cls, donnees))
 
     @classmethod
     def charger(cls, chemin: Path) -> Chantier:
         """Lit l'état du chantier depuis un fichier JSON."""
         return cls.depuis_dict(json.loads(chemin.read_text("utf-8")))
+
+
+def _connus(classe, donnees: dict) -> dict:
+    """Ne garde d'un dictionnaire que les champs que la classe connaît."""
+    noms = {champ.name for champ in fields(classe)}
+    return {cle: valeur for cle, valeur in donnees.items() if cle in noms}
 
 
 def ecrire_cahier(chantier: Chantier, chemin: Path) -> None:
