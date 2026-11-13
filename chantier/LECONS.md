@@ -47,3 +47,12 @@ Leçons validées par la personne responsable. L'orchestrateur les lit à l'ouve
 - **Preuve** : chantier « Agent SDK ». D3 et G, coupées en un fond et une page, ont avancé en parallèle : Ga a pris trois minutes d'ouvrier et trois de vérification, D3b et Gb sont passées du premier coup. Les tâches d'un seul bloc (E, D1, D2) ont toutes demandé au moins deux passes.
 - **Portée** : ce dépôt.
 - **À revoir** : le 2027-05-11.
+
+## Livrer vite : la vitesse décide juste après « ne rien casser »
+
+- **Règle** : un chantier plus lent que ce que la personne responsable ferait à la main a échoué, même juste. L'orchestrateur (celui de l'Atelier comme celui qui travaille dans Claude Code avec le skill `orchestrateur-chantier`) garde toujours plusieurs agents au travail ; lance la tâche suivante sur la base de la précédente sans attendre sa vérification ; laisse deux tâches modifier le même fichier si elles touchent des fonctions différentes, chacune dans sa copie, puis les réunit et relance toute la suite ; reprend à chaud un agent recalé, dans sa session, au lieu d'en lancer un neuf ; proportionne la vérification (complète seulement pour le sensible ; une correction prouvée par un test qui échouait avant entre sans vérificateur) ; vise 20 minutes par ouvrier et 10 par vérification ; ne lance d'audit ou d'architecte que si plusieurs tâches dépendent de sa réponse ; n'attend jamais la personne pour ce qui est réversible.
+- **Validée par** : la personne responsable, le 2026-11-12 (« Ça doit être ton obsession de livrer beaucoup plus vite », « toutes les prochaines fois que j'utilise l'orchestrateur, même via Claude Code, ça doit être beaucoup plus rapide »).
+- **Preuve** : chantier « ménage » du 2026-11-12. Plus de six heures pour ce que la personne estimait faire plus vite seule. Causes mesurées : les tâches du moteur enchaînées une à une par prudence, chacune 30 à 45 minutes d'ouvrier puis 15 à 25 minutes de vérification complète sur le modèle le plus lent ; une dizaine de secondes passes d'une demi-heure chacune ; des audits et des plans préparés à l'avance. Une fois le travail à la chaîne et les tâches parallèles sur un même fichier adoptés, cinq agents tournaient en même temps sans casse : chaque intégration a été rejouée sur toute la suite et les essais.
+- **Portée** : ce dépôt, et le skill `orchestrateur-chantier`, qui vit hors du dépôt : une version revue est proposée à la personne responsable, à reporter dans ses skills.
+- **À revoir** : le 2027-05-12, ou plus tôt si une intégration à plusieurs casse la branche principale.
+

@@ -198,7 +198,6 @@ def test_la_vue_montre_l_explication_a_jour_sinon_le_commentaire(tmp_path):
     assert fiches["app/outils.py"]["en_cours"] == ["A-ouvrier-1"]
     assert fiches["app/__init__.py"]["resume"] == "Un fichier de code Python, de 0 lignes."
     assert fiches["pyproject.toml"]["resume"].startswith("Un fichier de réglages")
-    assert v["nouveaux_absents"] == ["app/futur.py"]
     assert fiches["app/calcul.py"]["pieces"][0] == {
         "nom": "total",
         "ligne": 6,
@@ -386,3 +385,166 @@ def test_la_synthese_part_du_lisezmoi_et_ne_garde_que_les_dossiers_connus(tmp_pa
     autre = {"fichiers": [{"chemin": "app/calcul.py", "resume": "Autre."}]}
     carte.appliquer(k, [("app/calcul.py", "")], autre)
     assert carte.synthese_a_faire(k)  # une explication a changé : le portrait est à refaire
+
+
+# --- le suivi, conduit dans le fil du test : ni attente ni veille réelle ------------------------
+
+
+class ExplicateurQuiLeve:
+    reel = True
+
+    def expliquer(self, texte):
+        raise RuntimeError("Claude injoignable")
+
+
+def suivi_sans_veille(d, explicateur=None):
+    """Un suivi dont on compte les démarrages de veille au lieu de lancer un fil."""
+    suivi = carte.SuiviCarte(d, explicateur)
+    suivi.veilles = []
+    suivi.demarrer_veille = lambda: suivi.veilles.append(suivi.travail)
+    return suivi
+
+
+def releve_en_panne(depot, ancienne=None):
+    raise OSError("disque illisible")
+
+
+def test_une_analyse_reussie_sauve_la_carte_remet_le_travail_a_zero_et_relance_la_veille(
+    tmp_path,
+):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d)
+    suivi._analyser()
+    assert suivi.travail == "" and suivi.restants == 0 and suivi.probleme == ""
+    assert suivi.veilles == [""]  # une fois, le travail fini
+    assert carte.charger(d) == suivi.carte and suivi.carte["commit"]
+
+
+def test_avec_claude_la_carte_sauvee_porte_les_explications_et_le_portrait(tmp_path):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d, FauxExplicateur())
+    suivi._analyser()
+    sur_disque = carte.charger(d)
+    assert sur_disque == suivi.carte
+    assert carte.a_expliquer(sur_disque) == [] and sur_disque["synthese"]["portrait"]
+    assert suivi.travail == "" and suivi.restants == 0
+
+
+def test_une_mise_a_jour_sauve_la_carte_sans_relancer_la_veille(tmp_path):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d, FauxExplicateur())
+    suivi._analyser()
+    ecrire(d, {"app/outils.py": PROJET["app/outils.py"] + "\n\ndef produit(x):\n    return x\n"})
+    git(d, "commit", "-q", "-am", "produit")
+    suivi._mettre_a_jour()
+    assert suivi.veilles == [""]  # seulement celle de l'analyse
+    assert suivi.travail == "" and suivi.restants == 0 and suivi.probleme == ""
+    sur_disque = carte.charger(d)
+    assert sur_disque == suivi.carte and sur_disque["changements"]["modifies"] == ["app/outils.py"]
+    assert carte.a_expliquer(sur_disque) == []
+
+
+def test_une_erreur_du_releve_pendant_l_analyse_est_dite_avec_son_prefixe(tmp_path, monkeypatch):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d)
+    monkeypatch.setattr(carte, "relever", releve_en_panne)
+    suivi._analyser()
+    assert suivi.probleme == "L'analyse s'est arrêtée : disque illisible"
+    assert suivi.travail == "" and suivi.restants == 0
+    assert suivi.veilles == [""]  # même après une erreur, la veille reprend
+
+
+def test_une_erreur_du_releve_pendant_la_mise_a_jour_est_dite_avec_son_prefixe(
+    tmp_path, monkeypatch
+):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d)
+    suivi._analyser()
+    monkeypatch.setattr(carte, "relever", releve_en_panne)
+    suivi._mettre_a_jour()
+    assert suivi.probleme == "La mise à jour de la carte s'est arrêtée : disque illisible"
+    assert suivi.travail == "" and suivi.restants == 0
+    assert suivi.veilles == [""]
+
+
+def test_une_erreur_de_l_explication_est_dite_et_le_travail_remis_a_zero(tmp_path):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d, ExplicateurQuiLeve())
+    suivi._analyser()
+    assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
+    assert suivi.travail == "" and suivi.restants == 0
+    assert carte.charger(d) == suivi.carte  # le relevé, fait avant l'erreur, est gardé
+    suivi._mettre_a_jour()
+    assert suivi.probleme == "La mise à jour de la carte s'est arrêtée : Claude injoignable"
+    assert suivi.travail == "" and suivi.restants == 0
+
+
+def test_une_analyse_reussie_efface_le_probleme_de_la_precedente(tmp_path, monkeypatch):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d)
+    with monkeypatch.context() as m:
+        m.setattr(carte, "relever", releve_en_panne)
+        suivi._analyser()
+    assert suivi.probleme.startswith("L'analyse s'est arrêtée")
+    suivi._analyser()
+    assert suivi.probleme == "" and carte.charger(d) == suivi.carte
+
+
+def test_les_explications_recues_sont_sur_le_disque_meme_si_le_portrait_echoue(tmp_path):
+    class PortraitEnPanne(FauxExplicateur):
+        def expliquer(self, texte):
+            if "=== Dossier" in texte:
+                raise RuntimeError("Claude injoignable")
+            return super().expliquer(texte)
+
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d, PortraitEnPanne())
+    suivi._analyser()
+    assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
+    sur_disque = carte.charger(d)
+    assert carte.a_expliquer(sur_disque) == [] and sur_disque == suivi.carte
+
+
+def test_une_mise_a_jour_reussie_efface_le_probleme_de_la_precedente(tmp_path, monkeypatch):
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d)
+    suivi._analyser()
+    with monkeypatch.context() as m:
+        m.setattr(carte, "relever", releve_en_panne)
+        suivi._mettre_a_jour()
+    assert suivi.probleme == "La mise à jour de la carte s'est arrêtée : disque illisible"
+    suivi._mettre_a_jour()
+    assert suivi.probleme == "" and carte.charger(d) == suivi.carte
+
+
+def test_une_erreur_sur_un_lot_est_dite_meme_si_la_synthese_reussit(tmp_path):
+    class LotEnPanne(FauxExplicateur):
+        def expliquer(self, texte):
+            if "=== Dossier" not in texte:  # un lot de fichiers, pas la synthèse
+                raise RuntimeError("Claude injoignable")
+            return super().expliquer(texte)
+
+    d = depot(tmp_path, PROJET)
+    suivi = suivi_sans_veille(d, LotEnPanne())
+    suivi._analyser()
+    assert suivi.probleme == "L'analyse s'est arrêtée : Claude injoignable"
+    assert suivi.travail == "" and suivi.restants == 0
+
+
+def test_une_ecriture_de_la_carte_interrompue_laisse_la_carte_d_avant(tmp_path, monkeypatch):
+    carte.sauver(tmp_path, {"version": 1, "fichiers": {"a.py": "é"}})
+    chemin = tmp_path / carte.FICHIER
+    avant = chemin.read_bytes()
+
+    def refuser(*_):
+        raise OSError("disque plein")
+
+    monkeypatch.setattr("os.replace", refuser)
+    try:
+        carte.sauver(tmp_path, {"version": 2, "fichiers": {}})
+    except OSError as erreur:
+        assert str(erreur) == "disque plein"
+    else:
+        raise AssertionError("l'erreur de mise en place aurait dû remonter")
+    assert chemin.read_bytes() == avant
+    assert [p.name for p in chemin.parent.iterdir()] == [chemin.name]

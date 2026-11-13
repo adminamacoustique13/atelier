@@ -82,14 +82,14 @@ def compter_git(monkeypatch):
 
 def test_a_jour_quand_rien_n_a_avance(depots):
     _, atelier, _ = depots
-    assert maj_avec(atelier).verifier() == Etat(False, "Atelier est à jour.", True)
+    assert maj_avec(atelier).verifier() == Etat(False, "Atelier est à jour.")
 
 
 def test_disponible_quand_le_depot_en_ligne_a_avance(depots):
     _, atelier, collegue = depots
     publier(collegue)
     assert maj_avec(atelier).verifier() == Etat(
-        True, "Une mise à jour d'Atelier est disponible.", True)
+        True, "Une mise à jour d'Atelier est disponible.")
 
 
 def test_dossier_en_avance_sur_le_depot_en_ligne_n_a_pas_de_mise_a_jour(depots):
@@ -155,14 +155,14 @@ def test_deux_appels_simultanes_ne_lancent_qu_une_interrogation(depots, monkeypa
     fil = threading.Thread(target=maj.verifier, daemon=True)
     fil.start()
     assert entree.wait(10)
-    pendant = maj.verifier()  # rend tout de suite la réponse connue, sans interroger
-    assert pendant.verifie is False
+    # Rend tout de suite la réponse connue, sans interroger.
+    assert maj.verifier() == Etat(False, "La vérification n'a pas encore eu lieu.")
     assert appels == ["ls-remote"]
     sortie.set()
     fil.join(10)
     assert not fil.is_alive()
     assert appels.count("ls-remote") == 1
-    assert maj.verifier().verifie is True
+    assert maj.verifier() == Etat(False, "Atelier est à jour.")
 
 
 def test_depot_injoignable_ne_fait_pas_croire_a_un_atelier_a_jour(depots, monkeypatch):
@@ -171,7 +171,7 @@ def test_depot_injoignable_ne_fait_pas_croire_a_un_atelier_a_jour(depots, monkey
     maj = maj_avec(atelier)
     etat = maj.verifier()
     assert etat == Etat(
-        False, "Impossible de vérifier pour l'instant : le dépôt en ligne ne répond pas.", False)
+        False, "Impossible de vérifier pour l'instant : le dépôt en ligne ne répond pas.")
 
 
 def test_echec_garde_la_disponibilite_precedente_et_ne_reessaie_pas(depots, monkeypatch):
@@ -185,7 +185,7 @@ def test_echec_garde_la_disponibilite_precedente_et_ne_reessaie_pas(depots, monk
     appels = compter_git(monkeypatch)
     etat = maj.verifier()
     assert etat == Etat(
-        True, "Impossible de vérifier pour l'instant : le dépôt en ligne est introuvable.", True)
+        True, "Impossible de vérifier pour l'instant : le dépôt en ligne est introuvable.")
     n = len(appels)
     horloge.t += 3599
     assert maj.verifier() == etat
@@ -200,12 +200,12 @@ def test_verifier_ne_leve_jamais(depots, monkeypatch):
 
     maj = maj_avec(atelier)
     monkeypatch.setattr(mise_a_jour, "_git", casse)
-    assert maj.verifier().verifie is False
+    assert maj.verifier() == Etat(False, "La vérification n'a pas encore eu lieu.")
 
 
 def test_dossier_qui_n_est_pas_un_depot(tmp_path):
     etat = maj_avec(tmp_path / "absent").verifier()
-    assert etat.disponible is False and etat.verifie is False
+    assert etat.disponible is False
     assert etat.phrase.startswith("Impossible de vérifier pour l'instant")
 
 
@@ -231,7 +231,7 @@ def test_apres_une_mise_a_jour_reussie_plus_rien_de_disponible(depots, monkeypat
     maj.verifier()
     maj.mettre_a_jour(False)
     appels = compter_git(monkeypatch)
-    assert maj.verifier() == Etat(False, "Atelier est à jour.", True)
+    assert maj.verifier() == Etat(False, "Atelier est à jour.")
     assert appels == []
     assert maj_avec(atelier).verifier().disponible is False
 
@@ -439,7 +439,7 @@ def test_double_simule_annonce_une_mise_a_jour_et_reussit_sans_git(monkeypatch):
     monkeypatch.setattr(subprocess, "run", interdit)
     monkeypatch.setattr(mise_a_jour, "_git", interdit)
     simulee = MiseAJourSimulee()
-    assert simulee.verifier() == Etat(True, "Une mise à jour d'Atelier est disponible.", True)
+    assert simulee.verifier() == Etat(True, "Une mise à jour d'Atelier est disponible.")
     assert simulee.mettre_a_jour(False) == Resultat(
         True, "Mise à jour simulée : rien n'a changé.")
     assert simulee.mettre_a_jour(True).fait is False

@@ -28,10 +28,11 @@ from atelier.agents import (  # noqa: E402
 )
 from atelier.consignes import ROLE_ORCHESTRATEUR  # noqa: E402
 from atelier.controles import ControlesSimules  # noqa: E402
-from atelier.guichet import Guichet, GuichetSimule  # noqa: E402
+from atelier.guichet import Guichet  # noqa: E402
 from atelier.modele import Chantier, Contrat, Tache  # noqa: E402
 from atelier.moteur import Moteur  # noqa: E402
 from atelier.sdk import SessionSDK  # noqa: E402
+from tests.doubles import GuichetSimule  # noqa: E402
 from tests.test_sdk import (  # noqa: E402
     BLOQUE,
     UUID,
@@ -973,3 +974,426 @@ def test_une_erreur_en_lisant_les_regles_du_chantier_n_en_donne_aucune():
     agent.regles_chantier = casse
     assert lancer(agent).ok
     assert fabrique.clients[0].options.allowed_tools == agent._outils(False)
+
+
+# --- Tâche V5 : limites de l'abonnement et reprise, par l'agent du SDK ----------------------
+
+from atelier.agents import (  # noqa: E402
+    LIMITE_ATTEINTE,
+    REPRISE_IMPOSSIBLE,
+    decrire_limite,
+)
+from tests.test_sdk import FIN_LIMITE, limite  # noqa: E402
+
+VERDICT = "Le vérificateur a refusé : le calcul est faux pour n = 0. Corrige ce point."
+
+
+def reprendre(agent, session, dossier=None, contexte=None):
+    contexte = contexte or {"role": "ouvrier", "tache": "B", "tentative": 2}
+    return agent.executer(VERDICT, "opus", "high", dossier, False, contexte, reprendre=session)
+
+
+def test_un_refus_pour_limite_est_rendu_par_l_agent_et_annonce_en_direct():
+    agent, _ = claude([init(), limite("rejected"), fin(result="Limite.", is_error=True)])
+    evenements = []
+    agent.sur_evenement = evenements.append
+    resultat = lancer(agent)
+    assert (resultat.ok, resultat.erreur) == (False, LIMITE_ATTEINTE)
+    assert (resultat.type_limite, resultat.fin_limite) == ("five_hour", FIN_LIMITE)
+    assert [e["type"] for e in evenements] == ["limite", "fin"]
+    assert evenements[0]["statut"] == "atteinte" and evenements[0]["agent"] == "B-ouvrier-1"
+
+
+def test_une_alerte_passe_par_l_agent_et_le_travail_continue():
+    agent, _ = claude([init(), limite("allowed_warning", "seven_day", part=0.8), fin()])
+    evenements = []
+    agent.sur_evenement = evenements.append
+    assert lancer(agent).ok
+    alerte = [e for e in evenements if e["type"] == "limite"]
+    assert [(e["statut"], e["limite"], e["fin"]) for e in alerte] == [
+        ("alerte", "seven_day", FIN_LIMITE)
+    ]
+    assert evenements[-1]["type"] == "fin"
+
+
+def test_le_resultat_d_un_ouvrier_donne_sa_session_et_un_appel_d_aujourd_hui_ne_change_pas():
+    agent, fabrique = claude([init(), fin()])
+    resultat = lancer(agent)
+    assert resultat == Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)
+    assert resultat.session == UUID
+    assert (fabrique.clients[0].options.session_id, fabrique.clients[0].options.resume) == (
+        None, None
+    )  # fmt: skip
+
+
+def test_reprendre_repart_dans_la_session_et_le_dossier_avec_le_verdict(tmp_path):
+    agent, fabrique = claude([init(), fin()])
+    resultat = reprendre(agent, UUID, tmp_path)
+    assert resultat.ok and resultat.session == UUID
+    client = fabrique.clients[0]
+    assert (client.options.session_id, client.options.resume) == (None, UUID)
+    assert client.options.cwd == tmp_path
+    assert client.consignes == [VERDICT]
+    assert "Write" in client.options.allowed_tools  # toujours un ouvrier, qui écrit
+
+
+def test_une_reprise_impossible_rend_son_erreur_a_part_sans_rien_tenter_d_autre():
+    agent, fabrique = claude([fin(result="No conversation found", is_error=True)])
+    resultat = reprendre(agent, UUID)
+    assert (resultat.ok, resultat.erreur, resultat.session) == (False, REPRISE_IMPOSSIBLE, "")
+    assert len(fabrique.clients) == 1  # aucune session neuve tentée à la place
+    assert all(client.deconnecte for client in fabrique.clients)
+
+
+def test_une_limite_pendant_une_reprise_l_emporte_sur_la_reprise():
+    agent, _ = claude([limite("rejected"), fin(result="Limite.", is_error=True)])
+    assert reprendre(agent, UUID).erreur == LIMITE_ATTEINTE
+
+
+@pytest.mark.parametrize(
+    "statut, type_limite, fin_limite, part, attendu",
+    [
+        ("alerte", "five_hour", None, 0.82,
+         "Limite de l'abonnement proche (fenêtre de 5 heures, 82 % consommés)."),
+        ("atteinte", "inconnue", None, None, "Limite de l'abonnement atteinte (limite inconnue)."),
+        ("atteinte", "", None, True, "Limite de l'abonnement atteinte (limite inconnue)."),
+        ("atteinte", "nouvelle", None, None,
+         "Limite de l'abonnement atteinte (limite nouvelle)."),
+    ],
+)  # fmt: skip
+def test_decrire_limite(statut, type_limite, fin_limite, part, attendu):
+    assert decrire_limite(statut, type_limite, fin_limite, part) == attendu
+
+
+def test_decrire_limite_donne_l_heure_de_remise_a_zero():
+    heure = time.strftime("%H:%M", time.localtime(FIN_LIMITE))
+    assert decrire_limite("atteinte", "seven_day_sonnet", FIN_LIMITE) == (
+        f"Limite de l'abonnement atteinte (fenêtre de 7 jours de Sonnet) ; remise à zéro à {heure}."
+    )
+
+
+# --- Tâche V5 : l'agent simulé joue les limites et la reprise -------------------------------
+
+
+def test_par_defaut_l_agent_simule_ne_joue_ni_limite_ni_reprise():
+    agent, evenements = simule()
+    resultat = lancer(agent, ouvrier("A"))
+    assert resultat.ok and resultat.erreur == "" and resultat.type_limite == ""
+    assert [e["type"] for e in evenements] == ["outil", "fin"]
+    assert agent.appels == [{**ouvrier("A"), "modele": "opus", "effort": "high"}]
+    assert agent.reprises == []
+
+
+def test_l_agent_simule_joue_un_refus_pour_limite_puis_reprend_son_scenario():
+    agent, evenements = simule()
+    agent.limites = {"A": ["refus"]}
+    avant = time.time()
+    refus = lancer(agent, ouvrier("A"))
+    assert (refus.ok, refus.erreur, refus.type_limite) == (False, LIMITE_ATTEINTE, "five_hour")
+    assert avant + 3600 <= refus.fin_limite <= time.time() + 3600
+    assert [e["type"] for e in evenements] == ["limite", "fin"]
+    assert evenements[0]["statut"] == "atteinte" and evenements[0]["fin"] == refus.fin_limite
+    assert evenements[1]["contenu"] == LIMITE_ATTEINTE
+    assert lancer(agent, ouvrier("A")).ok  # la liste est épuisée : le scénario reprend
+    assert lancer(agent, ouvrier("B")).ok  # les autres tâches ne sont pas touchées
+
+
+def test_l_agent_simule_joue_une_alerte_et_le_travail_continue():
+    agent, evenements = simule()
+    agent.limites = {"A": ["", "alerte"]}
+    agent.type_limite, agent.delai_limite_s = "seven_day", None
+    assert lancer(agent, ouvrier("A")).ok
+    evenements.clear()
+    resultat = lancer(agent, ouvrier("A"))
+    assert resultat.ok and resultat.fichiers == ["a.py"]
+    assert [e["type"] for e in evenements] == ["outil", "limite", "fin"]
+    alerte = evenements[1]
+    assert (alerte["statut"], alerte["limite"], alerte["fin"]) == ("alerte", "seven_day", None)
+
+
+def test_l_agent_simule_joue_un_refus_au_verificateur_et_a_l_orchestrateur():
+    agent, _ = simule()
+    agent.limites = {"A": ["", "refus"], "orchestrateur": ["refus"]}
+    assert lancer(agent, ouvrier("A")).ok
+    verif = {"role": "verificateur", "tache": "A", "tentative": 1}
+    assert lancer(agent, verif, lecture_seule=True).erreur == LIMITE_ATTEINTE
+    assert lancer(agent, {"role": "orchestrateur"}).erreur == LIMITE_ATTEINTE
+
+
+def test_l_agent_simule_joue_une_reprise_et_la_note():
+    agent, evenements = simule()
+    premier = lancer(agent, ouvrier("A"))
+    assert premier.session
+    repris = reprendre(agent, premier.session, contexte=ouvrier("A", 2))
+    assert repris.ok and repris.session == premier.session
+    assert agent.reprises == [
+        {"tache": "A", "role": "ouvrier", "tentative": 2, "session": premier.session,
+         "message": VERDICT}
+    ]  # fmt: skip
+    assert agent.appels[-1]["reprise"] == premier.session
+    assert lancer(agent, ouvrier("B")).session not in ("", premier.session)
+
+
+def test_l_agent_simule_joue_une_reprise_impossible():
+    agent, evenements = simule()
+    inconnue = reprendre(agent, "session-inexistante")
+    assert (inconnue.ok, inconnue.erreur, inconnue.session) == (False, REPRISE_IMPOSSIBLE, "")
+    assert evenements[-1] == {"agent": "B-ouvrier-2", "type": "fin", "contenu": REPRISE_IMPOSSIBLE}
+    session = lancer(agent, ouvrier("A")).session
+    agent.oublier_sessions()
+    assert reprendre(agent, session).erreur == REPRISE_IMPOSSIBLE
+    assert agent.reprises == []
+    assert lancer(agent, ouvrier("A")).session != session  # jamais deux fois le même numéro
+
+
+# --- Tâche V5, seconde passe : une reprise demandée d'une session vide -----------------------
+
+
+@pytest.mark.parametrize("vide", ["", "   "])
+def test_reprendre_une_session_vide_rend_l_erreur_sans_lancer_d_agent(vide):
+    agent, fabrique = claude([init(), fin()])
+    evenements = []
+    agent.sur_evenement = evenements.append
+    resultat = reprendre(agent, vide)
+    assert (resultat.ok, resultat.erreur, resultat.session) == (False, REPRISE_IMPOSSIBLE, "")
+    assert fabrique.clients == []  # aucune session, neuve ou reprise
+    assert evenements == [{"agent": "B-ouvrier-2", "type": "fin", "contenu": REPRISE_IMPOSSIBLE}]
+    assert lancer(agent).ok  # None, ou rien : une session neuve, comme avant
+    assert fabrique.clients[0].options.resume is None
+
+
+@pytest.mark.parametrize("vide", ["", "   "])
+def test_l_agent_simule_rend_aussi_l_erreur_pour_une_session_vide(vide):
+    agent, evenements = simule()
+    assert lancer(agent, ouvrier("A")).ok
+    resultat = reprendre(agent, vide)
+    assert (resultat.ok, resultat.erreur, resultat.session) == (False, REPRISE_IMPOSSIBLE, "")
+    assert agent.reprises == []
+    assert evenements[-1] == {"agent": "B-ouvrier-2", "type": "fin", "contenu": REPRISE_IMPOSSIBLE}
+
+
+# --- Tâche P1 : la forme courte d'un outil, et les outils refusés rendus par l'agent --------
+
+from atelier.agents import SURCHARGE, commande_permise, forme_courte  # noqa: E402
+from tests.test_sdk import AssistantMessage, TextBlock  # noqa: E402
+
+UV_SYNC = {"command": "uv sync"}
+
+
+def test_forme_courte():
+    racine = "/projets/p/.atelier/arbres/A"
+    commande = {"command": "uv sync\nuv run pytest -q", "description": "Installer et tester"}
+    assert forme_courte({"name": "Bash", "input": commande}) == "Bash(uv sync ; uv run pytest -q)"
+    ecrit = {"name": "Write", "input": {"file_path": f"{racine}/coeur/calcul.py"}}
+    assert forme_courte(ecrit, racine) == "Write(coeur/calcul.py)"
+    assert forme_courte(ecrit) == f"Write({racine}/coeur/calcul.py)"
+    assert forme_courte({"name": "WebFetch", "input": {"url": "https://x.y"}}) == (
+        "WebFetch(https://x.y)"
+    )  # fmt: skip
+    assert forme_courte({"name": "TodoWrite", "input": {"todos": []}}) == "TodoWrite"
+    assert forme_courte({"name": "Bash", "input": None}) == "Bash"
+    assert forme_courte({"name": None, "input": UV_SYNC}) == "Outil"
+    longue = forme_courte({"name": "Bash", "input": {"command": "x" * 500}})
+    assert longue == "Bash(" + "x" * 119 + "…)"
+
+
+def test_l_agent_rend_les_outils_refuses_sans_changer_l_egalite_des_resultats():
+    agent, _ = claude([init(), Permission("Bash", UV_SYNC), fin()])
+    agent.guichet = FauxGuichet(Reponse("non"))
+    resultat = lancer(agent)
+    assert resultat.refuses == ["Bash(uv sync)"]
+    assert resultat == Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)
+    agent, _ = claude([init(), fin()])
+    assert lancer(agent).refuses == []
+
+
+def test_l_agent_rend_une_surcharge_a_part():
+    message = "API Error: Server is temporarily limiting requests (not your usage limit) · x"
+    erreur = AssistantMessage(content=[TextBlock(text=message)], model="opus", error="rate_limit")
+    agent, _ = claude([init(), erreur, fin(result=message, is_error=True)])
+    resultat = lancer(agent)
+    assert (resultat.ok, resultat.erreur, resultat.type_limite) == (False, SURCHARGE, "")
+
+
+# --- Tâche P1 : l'agent simulé joue un ouvrier empêché, et une surcharge --------------------
+
+
+def test_par_defaut_l_ouvrier_simule_n_est_pas_empeche():
+    agent, _ = simule()
+    resultat = lancer(agent, ouvrier("A"))
+    assert resultat.refuses == [] and resultat.texte == "Compte rendu simulé."
+
+
+def test_l_ouvrier_simule_empeche_porte_ses_refus_et_le_dit_dans_son_compte_rendu(tmp_path):
+    agent, evenements = simule()
+    agent.empeches = {"A": ["Bash(uv sync)"]}
+    verif = {"role": "verificateur", "tache": "A", "tentative": 1}
+    assert lancer(agent, verif, lecture_seule=True).refuses == []  # le vérificateur n'y touche pas
+    resultat = lancer(agent, ouvrier("A"), dossier=tmp_path)
+    assert resultat.ok and resultat.fichiers == ["a.py"]  # le scénario reste celui écrit
+    assert resultat.refuses == ["Bash(uv sync)"]
+    lignes = resultat.texte.splitlines()
+    assert lignes[0] == "Compte rendu simulé."
+    assert [ligne for ligne in lignes if ligne.startswith("EMPÊCHÉ : ")] == [
+        "EMPÊCHÉ : uv sync — l'outil a été refusé : je ne peux pas aller plus loin."
+    ]
+    assert evenements[-1]["type"] == "fin"
+    suivant = lancer(agent, ouvrier("A", 2))  # la liste est épuisée : plus d'empêchement
+    assert suivant.refuses == [] and "EMPÊCHÉ" not in suivant.texte
+    assert lancer(agent, ouvrier("B")).refuses == []
+
+
+def test_l_ouvrier_simule_peut_etre_empeche_par_plusieurs_outils_et_apres_un_echec():
+    agent, _ = simule()
+    agent.scenario = {"A": ["ok", "erreur"]}
+    agent.empeches = {"A": ["", ["Bash(uv sync)", "Bash(uv run pytest)", "Bash(uv sync)"]]}
+    assert lancer(agent, ouvrier("A")).refuses == []
+    resultat = lancer(agent, ouvrier("A", 2))
+    assert resultat.erreur == "Arrêt simulé de l'agent."
+    assert resultat.refuses == ["Bash(uv sync)", "Bash(uv run pytest)"]
+    assert resultat.texte.startswith("EMPÊCHÉ : uv sync — ")
+    assert resultat.texte.splitlines()[1].startswith("EMPÊCHÉ : uv run pytest — ")
+
+
+def test_l_agent_simule_joue_une_surcharge_sans_annoncer_de_limite():
+    agent, evenements = simule()
+    agent.limites = {"A": ["surcharge"]}
+    resultat = lancer(agent, ouvrier("A"))
+    assert (resultat.ok, resultat.erreur) == (False, SURCHARGE)
+    assert (resultat.type_limite, resultat.fin_limite) == ("", None) and resultat.session
+    assert evenements == [{"agent": "A-ouvrier-1", "type": "fin", "contenu": SURCHARGE}]
+    assert lancer(agent, ouvrier("A")).ok  # la liste est épuisée : le scénario reprend
+
+
+# --- Tâche P1 : une commande est-elle permise à un ouvrier sans demander ? ------------------
+
+
+@pytest.mark.parametrize(
+    "profil, commande, attendu",
+    [
+        ({}, "uv sync", False),  # le cas mesuré : uv n'est pas permis
+        ({"commandes_permises": ["npm"]}, "uv sync", False),
+        ({"commandes_permises": ["uv"]}, "uv sync", True),
+        ({"commandes_permises": ["uv"]}, "uv run pytest -q", True),
+        ({"commandes_permises": ["uv"]}, "uv", True),
+        ({"commandes_permises": ["uv"]}, "uvx ruff", False),  # un préfixe s'arrête à un mot
+        ({}, "pytest -q", True),  # le socle
+        ({}, "ruff check .", True),
+        ({}, "git status", True),
+        ({}, "git commit -m x", False),
+        ({}, "ruff check . && pytest -q", True),  # une commande composée
+        ({}, "pytest -q && uv sync", False),
+        ({"commandes_permises": ["uv"]}, "uv sync && uv run pytest -q", True),
+        ({}, "pytest -q | tail -5", True),
+        ({}, "pytest -q > sortie.txt 2>&1", True),  # les redirections sont ignorées
+        ({}, "cd sous && pytest -q", False),  # cd n'est pas une règle du socle
+        ({}, "FORCE=1 pytest -q", False),
+        ({"autorisations": ["Bash(uv sync)"]}, "uv sync", True),  # retenue dans le profil
+        ({"autorisations": ["Bash(uv sync)"]}, "uv sync --frozen", False),
+        ({"autorisations": ["Bash"]}, "uv sync --frozen", True),
+        ({"commandes_permises": "uv"}, "uv sync", False),  # profil mal formé
+        ({"commandes_permises": ["uv", 3]}, "uv sync", True),
+        (None, "pytest -q", True),
+    ],
+)  # fmt: skip
+def test_commande_permise(profil, commande, attendu):
+    assert commande_permise(profil, commande) is attendu
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["", "   ", None, 42, "pytest $(rm -rf .)", "pytest `id`", "pytest -q\nuv sync",
+     "pytest -q &&", "&& pytest -q", "pytest -q ;; ruff check ."],
+)  # fmt: skip
+def test_une_commande_vide_ou_mal_formee_n_est_jamais_permise(commande):
+    assert commande_permise({"commandes_permises": ["uv"], "autorisations": ["Bash"]},
+                            commande) is False  # fmt: skip
+
+
+def test_commande_permise_suit_les_regles_donnees_aux_ouvriers():
+    profil = {"commandes_permises": ["uv", "cargo"]}
+    agent, _ = claude(profil=profil)
+    prefixes = [r[len("Bash("):-len(":*)")] for r in agent._outils(False) if r.endswith(":*)")]
+    assert {"uv", "cargo", "pytest", "git status"} <= set(prefixes)
+    assert all(commande_permise(profil, f"{p} --version") for p in prefixes)
+
+
+# --- Tâche P1, seconde passe : ce que Claude Code fait demander malgré une règle ------------
+# Les cas viennent de la sonde du vrai Claude Code (2.1.308, faux serveur d'API, modes
+# « acceptEdits » et « default ») : chaque « vrai » y passe sans demande, chaque « faux » y est
+# demandé, sauf ceux marqués « prudence », que Claude Code laisse passer ou qui n'ont pas été
+# essayés : la fonction dit faux plutôt que de risquer un « vrai » à tort.
+
+DEFAUT = {"mode_ouvriers": "default"}
+
+
+@pytest.mark.parametrize(
+    "profil, commande, attendu",
+    [
+        ({}, "pytest -q > /tmp/x", False),
+        ({}, "pytest -q > ../x", False),
+        ({}, "git diff HEAD~1 > /tmp/x", False),
+        ({}, "pytest -q < /etc/hostname", False),
+        ({}, "cat <<< bonjour", False),  # prudence
+        ({}, "pytest -q >", False),  # prudence : mal formée
+        ({}, "pytest -q > sortie.txt", True),  # dans la copie, en mode « acceptEdits »
+        ({}, "pytest -q >> sortie.txt", True),
+        ({}, "pytest -q &> sous/x.txt", True),
+        (DEFAUT, "pytest -q > sortie.txt", False),  # en mode « default », Claude Code demande
+        (DEFAUT, "pytest -q >> sortie.txt", False),
+        (DEFAUT, "pytest -q 2>&1 | tail -5", True),
+        (DEFAUT, "pytest -q 2>/dev/null", True),
+        (DEFAUT, "ruff check . > /dev/null", True),
+        (DEFAUT, "pytest -q >&2", True),
+        (DEFAUT, "uniq < pyproject.toml", True),  # une lecture dans la copie
+        (DEFAUT, "cat < /dev/null", True),
+    ],
+)  # fmt: skip
+def test_une_redirection_hors_de_la_copie_n_est_pas_permise(profil, commande, attendu):
+    assert commande_permise(profil, commande) is attendu
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["cat $HOME/.bashrc", 'cat "$HOME/x"', "pytest $ARGS", "pytest --junitxml=${TMPDIR}/j.xml",
+     "pytest '$x'"],  # prudence pour le dernier : Claude Code le laisse passer
+)  # fmt: skip
+def test_une_variable_n_est_jamais_permise(commande):
+    assert commande_permise({"autorisations": ["Bash"]}, commande) is False
+
+
+@pytest.mark.parametrize(
+    "commande, attendu",
+    [("cat ~/.bashrc", False), ("ls -la ~", False),
+     ("pytest ~/x", False), ("pytest --basetemp=~/bt", False),  # prudence
+     ("git diff HEAD~1", True), ("git log -1 @~2", True)],
+)  # fmt: skip
+def test_un_tilde_en_debut_de_mot_n_est_pas_permis(commande, attendu):
+    assert commande_permise({}, commande) is attendu
+
+
+@pytest.mark.parametrize(
+    "profil, commande, attendu",
+    [
+        ({}, "cat /etc/hostname", False),
+        ({}, "ls /", False),
+        ({}, "ls ..", False),
+        ({}, "grep -r x /etc/hostname", False),
+        ({}, "cat sous/../pyproject.toml", False),
+        ({}, "git -C /tmp status", False),
+        ({}, "wc -l --files0-from=/etc/hostname", False),  # prudence
+        ({}, 'cat "/etc/hostname"', False),  # prudence
+        ({"autorisations": ["Bash"]}, "cat /etc/hostname", False),  # prudence
+        ({}, "ls -la sous", True),
+        ({}, "cat ./pyproject.toml", True),
+        # Claude Code ne vérifie pas les chemins de ces commandes : il les laisse passer.
+        ({}, "pytest /tmp", True),
+        ({}, "python -m pytest -q --basetemp=/tmp/bt", True),
+        ({}, "du -sh /", True),
+        ({"commandes_permises": ["uv"]}, "/usr/bin/uv sync", False),  # comme avant : sans règle
+    ],
+)  # fmt: skip
+def test_un_chemin_absolu_ou_qui_remonte_n_est_pas_permis_la_ou_claude_code_le_verifie(
+    profil, commande, attendu
+):
+    assert commande_permise(profil, commande) is attendu

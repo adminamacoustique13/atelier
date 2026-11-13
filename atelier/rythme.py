@@ -32,7 +32,7 @@ CARACTERES_PAR_ACTION = 120  # du texte écrit : une action par tranche de 120 c
 GENRES_ACTION = {"outil": 1.0, "refus": 1.0, "attente": 1.0, "mode": 0.0}
 
 
-def _poste(nom: str) -> tuple[str, str]:
+def poste(nom: str) -> tuple[str, str]:
     """Rend (tâche, rôle) d'après le nom d'un agent, « B-ouvrier-1 » ; sans tâche pour le chef."""
     morceaux = nom.rsplit("-", 2)
     return (morceaux[0], morceaux[1]) if len(morceaux) == 3 else ("", nom)
@@ -89,7 +89,7 @@ class Rythmes:
     def _finir(self, nom: str) -> None:
         tranches = self._tranches.pop(nom, None)
         self._attentes.pop(nom, None)
-        tache, role = _poste(nom)
+        tache, role = poste(nom)
         if not tranches or not tache or role != "ouvrier":
             return
         debut, fin = min(tranches), max(tranches)
@@ -115,7 +115,7 @@ class Rythmes:
         ici, maintenant = self._tranche(), self.horloge()
         en_direct = {}
         for nom, tranches in self._tranches.items():
-            tache, role = _poste(nom)
+            tache, role = poste(nom)
             depuis = self._attentes.get(nom)
             attente = 0
             if depuis is not None:

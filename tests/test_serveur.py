@@ -6,31 +6,39 @@ Aucun appel réel : des agents simulés, un guichet de l'atelier, et le vrai ser
 
 import json
 import pathlib
+import shutil
 import sys
 import threading
 import time
 import urllib.error
 import urllib.request
 from argparse import Namespace
+from dataclasses import dataclass, field
 
 import pytest
 
 from atelier import mise_a_jour as mise_a_jour_module
+from atelier import modele as modele_module
 from atelier.__main__ import commande_instantanes, projet_simule
 from atelier.agents import AgentClaude, AgentSimule, Resultat
+from atelier.consignes import MARQUE_BLOCAGE, message_de_diagnostic
 from atelier.controles import ControlesSimules
-from atelier.guichet import Guichet
+from atelier.guichet import ARRETE, Guichet
 from atelier.mise_a_jour import Etat, MiseAJour, MiseAJourSimulee
 from atelier.mise_a_jour import Resultat as ResultatMaj
 from atelier.modele import Chantier, Contrat, Tache
-from atelier.moteur import Moteur
+from atelier.moteur import ABANDONNER, RELANCER_TEL, Moteur
 from atelier.projets import Projets
 from atelier.serveur import (
     ACCEPTER_OUTILS,
+    DEBLOQUE,
+    LANCEURS_GENERAUX,
+    REFUSER_OUTILS,
     Activite,
     Atelier,
     SuiviMiseAJour,
     creer_serveur,
+    lanceur_general,
     point_d_etape,
     statistiques,
 )
@@ -732,14 +740,17 @@ def test_un_arret_pendant_la_note_du_verificateur_l_empeche_de_partir():
 
 def test_un_arret_apres_un_refus_garde_aussi_sa_trace_dans_l_historique():
     controles = ControlesEspions("annuler")
-    agent = AgentSimule({"A": ["bacle", "ok"]})
+    agent = AgentSimule({"A": ["bacle", "ok"]})  # la reprise à chaud rejoue le refus
     moteur = moteur_de([tache("A")], agent=agent, controles=controles)
     controles.moteur = moteur
     moteur.executer()
     t = moteur.chantier.tache("A")
-    assert [h["issue"] for h in t.historique] == ["bacle", "arretee"]
-    assert [h["tentative"] for h in t.historique] == [1, 2]
-    assert [a["role"] for a in agent.appels] == ["ouvrier", "verificateur"]
+    # La copie n'est jetée qu'après la reprise refusée : c'est là que l'arrêt est demandé.
+    assert controles.annulees == ["A"]
+    assert [h["issue"] for h in t.historique] == ["bacle", "bacle", "arretee"]
+    assert [h["tentative"] for h in t.historique] == [1, 1, 2]
+    assert [h["reprise"] for h in t.historique] == [False, True, False]
+    assert [a["role"] for a in agent.appels] == ["ouvrier", "verificateur"] * 2
     assert t.etat == "revenu" and t.tentatives == 1
     assert moteur.chantier.demandes[-1]["question"].endswith("arrêtée par toi.")
 
@@ -814,8 +825,8 @@ def test_l_arret_se_lit_dans_le_resultat_meme_sans_drapeau(role):
     moteur = moteur_de([tache("A")], agent=agent)
     moteur.executer()
     verifier_retour_a_la_personne(moteur)
-    # Le coût du tour arrêté est compté (celui d'un ouvrier simulé haiku : 0,02).
-    attendu = {"ouvrier": 0.5, "verificateur": 0.52}[role]
+    # Le coût du tour arrêté est compté (celui d'un ouvrier simulé sonnet : 0,09).
+    attendu = {"ouvrier": 0.5, "verificateur": 0.59}[role]
     assert moteur.chantier.tache("A").cout_usd == pytest.approx(attendu)
     assert moteur.chantier.tache("A").tentatives == 1
 
@@ -973,6 +984,60 @@ def test_les_deux_ecritures_du_profil_passent_par_le_meme_verrou(tmp_path):
         atelier, lambda: atelier.decider(demande["id"], ACCEPTER_OUTILS), chemin
     )
     assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["make"]
+
+
+class ControlesQuiNotent(ControlesSimules):
+    """Des contrôles simulés qui retiennent chaque réglage d'outils reçu."""
+
+    def __init__(self):
+        super().__init__()
+        self.reglages = []
+
+    def regler_outils(self, profil: dict) -> None:
+        self.reglages.append(profil)
+
+
+ILLISIBLE = "le profil du projet (chantier/profil.json) n'est pas lisible, corrige-le."
+NON_ECRIT = "le profil du projet (chantier/profil.json) n'a pas pu être écrit."
+
+
+@pytest.mark.parametrize(
+    ("contenu", "ecriture_refusee", "raison"),
+    [
+        ("[1, 2]", False, ILLISIBLE),
+        ("pas du json", False, ILLISIBLE),
+        ('{"commandes_permises": ["ls"]}', True, NON_ECRIT),
+    ],
+)
+def test_un_reglage_d_outils_sur_un_profil_inutilisable_n_applique_rien_et_le_dit(
+    tmp_path, monkeypatch, contenu, ecriture_refusee, raison
+):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text(contenu, "utf-8")
+    controles = ControlesQuiNotent()
+    profil = {"commandes_permises": ["ls"]}
+    atelier = atelier_simule(tmp_path, profil=profil, controles=controles)
+    atelier._proposer_outils({"commandes_permises": ["make"], "commandes": ["make test"]})
+    demande = atelier.moteur.chantier.demandes[0]
+    if ecriture_refusee:
+        remplacer = modele_module.os.replace
+
+        def refuser_le_profil(source, cible):
+            if pathlib.Path(cible) == chemin:
+                raise PermissionError("écriture refusée")
+            return remplacer(source, cible)
+
+        monkeypatch.setattr(modele_module.os, "replace", refuser_le_profil)
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert chemin.read_text("utf-8") == contenu
+    assert atelier.moteur.profil == {"commandes_permises": ["ls"]}
+    assert controles.reglages == []
+    textes = [e["texte"] for e in atelier.moteur.chantier.evenements]
+    assert f"Réglage des outils non appliqué : {raison}" in textes
+    assert not any(t.startswith("Outils réglés.") for t in textes)
 
 
 def test_le_verrou_de_l_activite_protege_les_lectures_pendant_les_ecritures():
@@ -1528,7 +1593,7 @@ class FausseMiseAJour:
 
     def verifier(self):
         self.verifications.append(threading.current_thread())
-        return Etat(self.disponible, "Une mise à jour d'Atelier est disponible.", True)
+        return Etat(self.disponible, "Une mise à jour d'Atelier est disponible.")
 
     def mettre_a_jour(self, agent_au_travail):
         self.mises_a_jour.append(agent_au_travail)
@@ -1601,7 +1666,7 @@ def test_la_vue_porte_la_mise_a_jour_lue_dans_l_etat_garde(maj_servie):
         "disponible": True,
         "phrase": "Une mise à jour d'Atelier est disponible.",
     }
-    suivi.etat = Etat(False, "Atelier est à jour.", True)
+    suivi.etat = Etat(False, "Atelier est à jour.")
     assert tableau.etat()["mise_a_jour"] == {"disponible": False, "phrase": "Atelier est à jour."}
 
 
@@ -2107,7 +2172,7 @@ def test_creer_un_projet_et_lire_l_accueil_par_le_tableau(tmp_path):
 
         tableau.serveur.RequestHandlerClass.projets._creer = creer
         code, vue = tableau.appeler("/api/projets/creer", {"nom": "Deuxième"})
-        assert code == 200 and vue["projet_cree"] == "deuxieme" and vue["projet"] == "Deuxième"
+        assert code == 200 and vue["projet"] == "Deuxième"
         code, vue = tableau.appeler("/api/accueil")
         assert code == 200 and {p["id"] for p in vue["accueil"]} == {"premier", "deuxieme"}
         code, vue = tableau.appeler("/api/projets/nouvelle-session", {"id": "premier"})
@@ -2186,3 +2251,1020 @@ def test_un_etat_d_avant_se_relit_sans_regles_de_chantier(tmp_path):
     donnees = chantier([]).en_dict()
     del donnees["autorisations_chantier"]
     assert Chantier.depuis_dict(donnees).autorisations_chantier == []
+
+
+# --- le profil écrit d'un seul geste, le réglage d'outils qu'on peut réessayer ---------------
+
+PROFIL_D_AVANT = '{"nom": "Café", "commandes_permises": ["ls"], "autorisations": ["Read"]}'
+REESSAYER = "La demande reste ouverte : accepte-la à nouveau une fois le profil corrigé."
+
+
+def ecrire_sans_lever(ecriture):
+    """Lance une écriture du profil ; une erreur levée ne compte pas, seul le fichier compte."""
+    try:
+        ecriture()
+    except (ValueError, OSError):
+        pass
+
+
+def par_les_outils(atelier, texte):
+    atelier._proposer_outils({"commandes_permises": [texte]})
+    atelier.decider(atelier.moteur.chantier.demandes[-1]["id"], ACCEPTER_OUTILS)
+
+
+ECRITURES_DU_PROFIL = {
+    "_regler_outils": par_les_outils,
+    "_inscrire_regle": lambda atelier, texte: atelier._inscrire_regle(f"Bash({texte}:*)"),
+    "_ecrire_au_profil": lambda atelier, texte: atelier._ecrire_au_profil("mode_ouvriers", texte),
+}
+
+
+@pytest.mark.parametrize("ecriture", sorted(ECRITURES_DU_PROFIL))
+@pytest.mark.parametrize("coupure", ["en_ecrivant", "en_mettant_en_place"])
+def test_une_ecriture_du_profil_interrompue_laisse_le_profil_d_avant_intact(
+    tmp_path, monkeypatch, ecriture, coupure
+):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text(PROFIL_D_AVANT, "utf-8")
+    atelier = atelier_simule(tmp_path, profil={"commandes_permises": ["ls"]})
+    texte = "make"
+    if coupure == "en_ecrivant":
+        texte = "make \udcff"  # un caractère impossible à écrire : l'écriture s'arrête en route
+    else:
+        remplacer = modele_module.os.replace
+
+        def arret_de_la_machine(source, cible):
+            if pathlib.Path(cible) == chemin:
+                raise OSError("arrêt de la machine")
+            return remplacer(source, cible)
+
+        monkeypatch.setattr(modele_module.os, "replace", arret_de_la_machine)
+
+    ecrire_sans_lever(lambda: ECRITURES_DU_PROFIL[ecriture](atelier, texte))
+
+    assert chemin.read_bytes() == PROFIL_D_AVANT.encode("utf-8")
+    assert [f.name for f in chemin.parent.iterdir() if f.name.startswith("profil")] == [
+        "profil.json"
+    ]
+
+
+def reglage_propose(depot, contenu, **outils):
+    """Un profil écrit tel quel, un réglage d'outils proposé : rend ce qu'il faut pour le régler."""
+    chemin = depot / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(contenu, "utf-8")
+    controles = ControlesQuiNotent()
+    atelier = atelier_simule(depot, profil={"commandes_permises": ["ls"]}, controles=controles)
+    atelier._proposer_outils({"commandes_permises": ["make"], **outils})
+    return atelier, chemin, controles, atelier.moteur.chantier.demandes[0]
+
+
+def demande_montree(vue, demande):
+    (montree,) = [d for d in vue["demandes"] if d["id"] == demande["id"]]
+    return montree
+
+
+def deux_lignes_dans_l_ordre(textes, raison):
+    rang = textes.index(f"Réglage des outils non appliqué : {raison}")
+    return textes[rang + 1] == REESSAYER
+
+
+@pytest.mark.parametrize("contenu", ["[1, 2]", "pas du json"])
+def test_un_reglage_non_applique_redevient_en_attente_et_s_applique_au_second_clic(
+    tableau, tmp_path, contenu
+):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, contenu, commandes=["make t"])
+    serveur = tableau(atelier)
+    decision = {"id": demande["id"], "choix": ACCEPTER_OUTILS}
+
+    _, vue = serveur.appeler("/api/decision", decision)
+
+    montree = demande_montree(vue, demande)
+    assert montree["reponse"] is None
+    assert montree["options"] == [ACCEPTER_OUTILS, REFUSER_OUTILS]
+    assert deux_lignes_dans_l_ordre([e["texte"] for e in vue["evenements"]], ILLISIBLE)
+    assert chemin.read_text("utf-8") == contenu and controles.reglages == []
+
+    chemin.write_text('{"nom": "Café"}', "utf-8")  # la personne responsable corrige le profil
+    _, vue = serveur.appeler("/api/decision", decision)
+
+    assert demande_montree(vue, demande)["reponse"] == ACCEPTER_OUTILS
+    attendu = {"nom": "Café", "commandes_permises": ["ls", "make"], "commandes": ["make t"]}
+    assert json.loads(chemin.read_text("utf-8")) == attendu
+    assert controles.reglages == [attendu]
+    assert atelier.moteur.profil == {"commandes_permises": ["ls", "make"], "commandes": ["make t"]}
+    textes = [e["texte"] for e in vue["evenements"]]
+    assert sum(t.startswith("Outils réglés.") for t in textes) == 1
+
+
+def test_un_reglage_non_ecrit_redevient_en_attente_et_s_applique_au_second_clic(
+    tmp_path, monkeypatch
+):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, '{"nom": "Café"}')
+    remplacer, pannes = modele_module.os.replace, [OSError("disque plein")]
+
+    def disque_plein(source, cible):
+        if pathlib.Path(cible) == chemin and pannes:
+            raise pannes.pop()
+        return remplacer(source, cible)
+
+    monkeypatch.setattr(modele_module.os, "replace", disque_plein)
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert demande["reponse"] is None
+    assert deux_lignes_dans_l_ordre(textes_du_fil(atelier), NON_ECRIT)
+    assert chemin.read_text("utf-8") == '{"nom": "Café"}' and controles.reglages == []
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert demande["reponse"] == ACCEPTER_OUTILS
+    assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["ls", "make"]
+    assert len(controles.reglages) == 1
+
+
+def test_un_reglage_ecarte_reste_repondu(tmp_path):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, '{"nom": "Café"}')
+    atelier.decider(demande["id"], REFUSER_OUTILS)
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+    assert demande["reponse"] == REFUSER_OUTILS
+    assert chemin.read_text("utf-8") == '{"nom": "Café"}' and controles.reglages == []
+    assert REESSAYER not in textes_du_fil(atelier)
+
+
+def test_deux_clics_en_meme_temps_n_appliquent_le_reglage_qu_une_fois(tmp_path):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, '{"nom": "Café"}')
+    depart = threading.Barrier(2)
+
+    def cliquer():
+        depart.wait()
+        atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    fils = [threading.Thread(target=cliquer) for _ in range(2)]
+    for fil in fils:
+        fil.start()
+    for fil in fils:
+        fil.join(5)
+    assert len(controles.reglages) == 1
+    assert sum(t.startswith("Outils réglés.") for t in textes_du_fil(atelier)) == 1
+
+
+@pytest.mark.parametrize(
+    "contenu",
+    [
+        '{"commandes_permises": "make"}',
+        '{"commandes_permises": 5}',
+        '{"commandes_permises": null}',
+        '{"commandes_permises": ["ls", 3]}',
+        '{"commandes": "make test"}',
+        '{"commandes": [1]}',
+        '{"commandes": {"a": "b"}}',
+    ],
+)
+def test_une_liste_de_commandes_mal_formee_rend_le_profil_illisible(tmp_path, contenu):
+    atelier, chemin, controles, demande = reglage_propose(tmp_path, contenu)
+
+    atelier.decider(demande["id"], ACCEPTER_OUTILS)
+
+    assert chemin.read_text("utf-8") == contenu
+    assert atelier.moteur.profil == {"commandes_permises": ["ls"]}
+    assert controles.reglages == []
+    assert demande["reponse"] is None
+    assert deux_lignes_dans_l_ordre(textes_du_fil(atelier), ILLISIBLE)
+    assert not any(t.startswith("Outils réglés.") for t in textes_du_fil(atelier))
+
+
+def test_une_regle_deja_au_profil_ne_le_reecrit_pas(tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    contenu = '{"autorisations": ["Bash(npm install:*)"]}'
+    chemin.write_text(contenu, "utf-8")
+    atelier_simule(tmp_path)._inscrire_regle(REGLE_SIMULEE)
+    assert chemin.read_text("utf-8") == contenu
+
+
+def test_une_regle_deja_au_profil_vaut_quand_meme_a_chaud(tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text('{"autorisations": ["Bash(npm install:*)"]}', "utf-8")
+    profil = {"autorisations": ["Read"]}
+    agent = AgentSimule()
+    agent.profil = profil
+    atelier = atelier_simule(tmp_path, agent=agent, profil=profil)
+    atelier._inscrire_regle(REGLE_SIMULEE)
+    assert atelier.moteur.profil["autorisations"] == [REGLE_SIMULEE]
+
+
+def test_le_profil_est_ecrit_en_deux_espaces_avec_les_accents_en_clair(tmp_path):
+    chemin = tmp_path / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True)
+    chemin.write_text('{"nom": "Café"}', "utf-8")
+    atelier = atelier_simule(tmp_path)
+    atelier._ecrire_au_profil("mode_ouvriers", "auto")
+    attendu = '{\n  "nom": "Café",\n  "mode_ouvriers": "auto"\n}\n'
+    assert chemin.read_bytes() == attendu.encode("utf-8")
+    atelier._inscrire_regle("Bash(échafaud:*)")
+    attendu = (
+        '{\n  "nom": "Café",\n  "mode_ouvriers": "auto",\n'
+        '  "autorisations": [\n    "Bash(échafaud:*)"\n  ]\n}\n'
+    )
+    assert chemin.read_bytes() == attendu.encode("utf-8")
+
+
+def test_le_dossier_chantier_est_cree_quand_il_manque(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    shutil.rmtree(tmp_path / "chantier", ignore_errors=True)
+    atelier._inscrire_regle(REGLE_SIMULEE)
+    chemin = tmp_path / "chantier" / "profil.json"
+    assert json.loads(chemin.read_text("utf-8")) == {"autorisations": [REGLE_SIMULEE]}
+
+
+@pytest.mark.parametrize("valeur", ["make", 5, None, ["ls", 3]])
+def test_une_valeur_mal_formee_en_memoire_compte_comme_absente_au_second_clic(
+    tableau, tmp_path, valeur
+):
+    from atelier.projets import creer_depot, ouvrir_depot
+
+    depot = tmp_path / "projet"
+    creer_depot(depot, "Projet")
+    chemin = depot / "chantier" / "profil.json"
+    chemin.write_text(json.dumps({"nom": "Projet", "commandes_permises": valeur}), "utf-8")
+    atelier = ouvrir_depot(depot)  # le profil en mémoire porte la valeur mal formée
+    serveur = tableau(atelier)
+    atelier._proposer_outils({"commandes_permises": ["pytest"]})
+    decision = {"id": atelier.moteur.chantier.demandes[-1]["id"], "choix": ACCEPTER_OUTILS}
+
+    statut, vue = serveur.appeler("/api/decision", decision)
+    assert statut == 200
+    assert deux_lignes_dans_l_ordre([e["texte"] for e in vue["evenements"]], ILLISIBLE)
+
+    chemin.write_text('{"nom": "Projet"}', "utf-8")  # la personne retire la clé du fichier
+    statut, vue = serveur.appeler("/api/decision", decision)
+
+    assert statut == 200
+    assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["pytest"]
+    assert atelier.moteur.profil["commandes_permises"] == ["pytest"]
+    textes = [e["texte"] for e in vue["evenements"]]
+    assert sum(t.startswith("Outils réglés.") for t in textes) == 1
+
+
+# --- le blocage : l'orchestrateur en cherche la cause, un clic relance la tâche --------------
+
+
+@dataclass
+class OrchestrateurQuiCherche(AgentSimule):
+    """Un faux orchestrateur : garde chaque message reçu et rend, dans l'ordre, les réponses
+    prévues (un texte, ou un `Resultat` rendu tel quel ; au-delà, un simple mot).
+
+    Tant que `porte` est fermée, chaque réponse attend, comme une réponse qui s'écrit ; un arrêt
+    demandé par l'atelier la coupe. Les ouvriers et vérificateurs restent ceux d'`AgentSimule`.
+    """
+
+    reponses: list = field(default_factory=list)
+    messages: list = field(default_factory=list)
+    porte: object = None
+
+    def converser(self, message, session, reprise, dossier, sur_texte=None, sur_outil=None,
+                  contexte=None):  # fmt: skip
+        self.messages.append(message)
+        prevue = self.reponses.pop(0) if self.reponses else "C'est noté."
+        with self._postes.occuper(None, "orchestrateur") as marche:
+            if sur_texte:
+                sur_texte("Je cherche la cause. ")
+            while self.porte is not None and not self.porte.is_set():
+                if marche.arret.wait(0.01):
+                    break
+            arrete = marche.arret.is_set()
+        if arrete:
+            return Resultat(ok=False, erreur=ARRETE, cout_usd=0.1, tokens=100)
+        if isinstance(prevue, Resultat):
+            return prevue
+        return Resultat(ok=True, texte=prevue, cout_usd=0.5, tokens=1000)
+
+
+DIAGNOSTIC_UV = (
+    "La commande uv est refusée aux agents : c'est elle qui bloque la tâche B.\n\n"
+    "```atelier-outils\n"
+    '{"commandes_permises": ["uv"], "pourquoi": "Les tests se lancent avec uv."}\n'
+    "```"
+)
+PREUVES = ["tentative 1, ne_sait_pas : uv: commande refusée"] * 2
+EMPECHEMENTS = ["uv sync — permission refusée"]
+BLOCAGE_OUVERT = "sa demande reste ouverte, avec ses options."
+
+
+def atelier_bloquable(depot, taches=None, profil=None, controles=None, **orchestrateur):
+    """Un atelier dont l'orchestrateur est faux : A est vérifiée, B (et C) peuvent se bloquer."""
+    taches = taches or [tache("A", etat="verifie"), tache("B"), tache("C")]
+    perimetres = {t.id: t.perimetre for t in taches}
+    agent = OrchestrateurQuiCherche(perimetres=perimetres, **orchestrateur)
+    return atelier_simule(depot, taches, profil=profil, agent=agent, controles=controles)
+
+
+def bloquer(atelier, identifiant="B", preuves=PREUVES, empechements=EMPECHEMENTS):
+    """Fait ce que fera le moteur : rend la tâche avec une demande de blocage, sous son verrou,
+    puis appelle son rappel `sur_blocage` hors du verrou. Rend la demande."""
+    moteur = atelier.moteur
+    with moteur.verrou:
+        bloquee = moteur.chantier.tache(identifiant)
+        bloquee.etat = "revenu"
+        demande = {
+            "id": f"{identifiant}-{len(moteur.chantier.demandes) + 1}",
+            "tache": identifiant,
+            "nature": "blocage",
+            "question": f"Tâche {identifiant}, « {bloquee.titre} » : la même erreur revient.",
+            "options": list(OUTILS_DE_LA_DECISION),
+            "reponse": None,
+            "preuves": list(preuves),
+            "empechements": list(empechements),
+        }
+        moteur.chantier.demandes.append(demande)
+    moteur.sur_blocage(demande)
+    return demande
+
+
+def reglages_d_outils(atelier):
+    return [d for d in atelier.moteur.chantier.demandes if d.get("nature") == "outils"]
+
+
+def diagnostic_rendu(atelier, nombre=1):
+    """Attend que la conversation soit libre et que `nombre` messages soient partis."""
+    agent = atelier.moteur.agent
+    return attendre(lambda: len(agent.messages) == nombre and not atelier.occupe)
+
+
+def tete(message):
+    """La première ligne du message lui-même, après l'état du chantier."""
+    return message.split("[Message]\n", 1)[1].splitlines()[0]
+
+
+def test_le_serveur_branche_son_rappel_de_blocage_sur_chaque_moteur(tmp_path):
+    atelier = atelier_bloquable(tmp_path)
+    assert atelier.moteur.sur_blocage == atelier._sur_blocage
+
+    # Après un nouveau chantier, le même moteur garde le rappel, et un blocage y est diagnostiqué.
+    atelier.message("Premier objectif")
+    assert diagnostic_rendu(atelier)
+    assert atelier.nouveau_chantier()["fait"] is True
+    assert atelier.moteur.sur_blocage == atelier._sur_blocage
+    atelier.moteur.chantier.taches = [tache("B")]
+    bloquer(atelier, "B")
+    assert diagnostic_rendu(atelier, 2)
+    assert MARQUE_BLOCAGE in atelier.moteur.agent.messages[-1]
+
+    # Un moteur adopté reçoit le rappel lui aussi.
+    autre = Moteur(chantier([tache("D")]), atelier.moteur.agent, ControlesSimules())
+    atelier.moteur = autre
+    assert autre.sur_blocage == atelier._sur_blocage
+
+
+def test_un_blocage_fait_chercher_la_cause_une_seule_fois_sans_attendre_la_personne(tmp_path):
+    atelier = atelier_bloquable(tmp_path)
+    agent = atelier.moteur.agent
+    demande = bloquer(atelier, "B")
+
+    assert diagnostic_rendu(atelier)
+    (message,) = agent.messages
+    attendu = message_de_diagnostic(atelier.moteur.chantier.tache("B"), PREUVES, EMPECHEMENTS)
+    assert message.startswith("[État du chantier, fourni par l'atelier]\n")
+    assert message.endswith(f"[Message]\n{attendu}")
+    assert "Commandes permises aux agents : aucune" in message  # l'état dit ce qui est permis
+    # Le même blocage signalé de nouveau, même par une copie de la demande : rien ne repart.
+    atelier.moteur.sur_blocage(demande)
+    atelier.moteur.sur_blocage(dict(demande))
+    assert not attendre(lambda: len(agent.messages) > 1 or atelier.occupe, 0.3)
+    fil = atelier.moteur.chantier.evenements
+    phrase = (
+        "La tâche B est bloquée : je demande à l'orchestrateur d'en chercher la cause, "
+        "sans t'attendre."
+    )
+    assert [e["texte"] for e in fil].count(phrase) == 1
+    assert not any(e["auteur"] == "toi" for e in fil)  # le message ne vient pas de la personne
+    assert MARQUE_BLOCAGE not in json.dumps(fil, ensure_ascii=False)
+
+
+def test_le_rappel_rend_la_main_tout_de_suite_au_fil_du_moteur(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte)
+    rendu = threading.Event()
+
+    def fil_du_moteur():
+        bloquer(atelier, "B")
+        rendu.set()
+
+    threading.Thread(target=fil_du_moteur, daemon=True).start()
+    assert rendu.wait(1.0)  # la réponse de l'orchestrateur, elle, attend toujours
+    assert attendre(lambda: atelier.moteur.agent.messages) and atelier.occupe
+    porte.set()
+    assert diagnostic_rendu(atelier)
+
+
+def test_conversation_occupee_le_diagnostic_part_a_la_fin_de_la_reponse(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte)
+    agent = atelier.moteur.agent
+    atelier.message("Où en est-on ?")
+    assert attendre(lambda: agent.messages)
+
+    bloquer(atelier, "B")
+    assert not attendre(lambda: len(agent.messages) > 1, 0.3)  # la réponse en cours d'abord
+
+    porte.set()
+    assert diagnostic_rendu(atelier, 2)
+    assert agent.messages[0].endswith("[Message]\nOù en est-on ?")
+    assert MARQUE_BLOCAGE in agent.messages[1]
+
+
+def test_une_reponse_de_la_personne_avant_le_diagnostic_l_annule(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte)
+    atelier.message("Où en est-on ?")
+    assert attendre(lambda: atelier.moteur.agent.messages)
+    demande = bloquer(atelier, "B")
+    atelier.decider(demande["id"], ABANDONNER)  # la personne tranche avant la fin de la réponse
+    porte.set()
+    assert diagnostic_rendu(atelier, 1)
+    assert not attendre(lambda: len(atelier.moteur.agent.messages) > 1, 0.3)
+    assert demande["diagnostic"] == "sans_objet"
+
+
+def test_deux_blocages_font_deux_messages_dans_l_ordre(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte)
+    agent = atelier.moteur.agent
+    for identifiant in ("B", "C"):  # deux fils du moteur, l'un après l'autre
+        fil = threading.Thread(target=bloquer, args=(atelier, identifiant), daemon=True)
+        fil.start()
+        fil.join(1)
+    assert attendre(lambda: agent.messages)
+    assert not attendre(lambda: len(agent.messages) > 1, 0.3)  # jamais deux à la fois
+    porte.set()
+    assert diagnostic_rendu(atelier, 2)
+    assert [tete(m) for m in agent.messages] == [
+        f"{MARQUE_BLOCAGE} : tâche B]",
+        f"{MARQUE_BLOCAGE} : tâche C]",
+    ]
+
+
+def test_deux_blocages_au_meme_instant_ont_chacun_un_message(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte)
+    agent = atelier.moteur.agent
+    depart = threading.Barrier(2)
+
+    def fil_du_moteur(identifiant):
+        depart.wait()
+        bloquer(atelier, identifiant)
+
+    fils = [threading.Thread(target=fil_du_moteur, args=(i,), daemon=True) for i in "BC"]
+    for fil in fils:
+        fil.start()
+    for fil in fils:
+        fil.join(2)
+    assert attendre(lambda: agent.messages)
+    assert not attendre(lambda: len(agent.messages) > 1, 0.3)
+    porte.set()
+    assert diagnostic_rendu(atelier, 2)
+    assert sorted(tete(m) for m in agent.messages) == [
+        f"{MARQUE_BLOCAGE} : tâche B]",
+        f"{MARQUE_BLOCAGE} : tâche C]",
+    ]
+
+
+def test_un_bloc_d_outils_du_diagnostic_devient_une_demande_liee_au_blocage(tableau, tmp_path):
+    atelier = atelier_bloquable(tmp_path, reponses=[DIAGNOSTIC_UV])
+    serveur = tableau(atelier)
+    demande = bloquer(atelier, "B")
+    assert diagnostic_rendu(atelier)
+
+    etat = serveur.etat()
+    (reglage,) = [d for d in etat["demandes"] if d["nature"] == "outils"]
+    assert reglage["pour_blocage"] == demande["id"] and reglage["tache"] is None
+    assert reglage["options"] == [ACCEPTER_OUTILS, REFUSER_OUTILS] and reglage["reponse"] is None
+    assert reglage["outils"] == {"commandes_permises": ["uv"], "commandes": None}
+    assert reglage["question"] == (
+        "L'orchestrateur propose de régler les outils du projet. Commandes permises aux agents : "
+        "uv. Pourquoi : Les tests se lancent avec uv. Ce réglage débloque la tâche B : si tu "
+        "l'acceptes, je la relance seul, au même niveau."
+    )
+    (montree,) = [d for d in etat["demandes"] if d["id"] == demande["id"]]
+    assert montree["reponse"] is None and montree["options"] == OUTILS_DE_LA_DECISION
+    textes = [e["texte"] for e in etat["evenements"]]
+    assert "La commande uv est refusée aux agents : c'est elle qui bloque la tâche B." in textes
+    assert not any("atelier-outils" in t for t in textes)
+    assert etat["point_d_etape"].endswith("J'ai besoin de toi pour 2 décisions.")
+
+
+def bloque_avec_reglage(depot, profil_ecrit):
+    """B bloquée, l'orchestrateur a proposé de permettre uv : rend ce qu'il faut pour décider."""
+    chemin = depot / "chantier" / "profil.json"
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    chemin.write_text(profil_ecrit, "utf-8")
+    controles = ControlesQuiNotent()
+    taches = [tache("A", etat="verifie"), tache("B")]
+    atelier = atelier_bloquable(
+        depot, taches, {"commandes_permises": ["python3"]}, controles, reponses=[DIAGNOSTIC_UV]
+    )
+    demande = bloquer(atelier, "B")
+    assert diagnostic_rendu(atelier)
+    (reglage,) = reglages_d_outils(atelier)
+    return atelier, chemin, controles, demande, reglage
+
+
+def test_accepter_le_reglage_l_applique_puis_relance_seul_la_tache(tableau, tmp_path):
+    atelier, chemin, controles, demande, reglage = bloque_avec_reglage(
+        tmp_path, '{"nom": "Café", "commandes_permises": ["python3"]}'
+    )
+    serveur = tableau(atelier)
+    b = atelier.moteur.chantier.tache("B")
+    niveau = (b.modele, b.effort)
+
+    statut, _ = serveur.appeler("/api/decision", {"id": reglage["id"], "choix": ACCEPTER_OUTILS})
+
+    assert statut == 200
+    attendu = {"nom": "Café", "commandes_permises": ["python3", "uv"]}
+    assert json.loads(chemin.read_text("utf-8")) == attendu  # le réglage, comme aujourd'hui
+    assert controles.reglages == [attendu]
+    assert atelier.moteur.profil["commandes_permises"] == ["python3", "uv"]
+    assert reglage["reponse"] == ACCEPTER_OUTILS and demande["reponse"] == RELANCER_TEL
+    assert attendre(lambda: b.etat == "verifie" and not atelier.en_marche())  # sans second clic
+    assert (b.modele, b.effort) == niveau
+    textes = textes_du_fil(atelier)
+    rang = textes.index(
+        "Outils réglés. Commandes permises aux agents : python3, uv. Je relance seul la tâche B, "
+        "au même niveau."
+    )
+    assert textes[rang + 1] == "Décision reçue : relancer au même niveau."
+    ouvriers = [a for a in atelier.moteur.agent.appels if a.get("role") == "ouvrier"]
+    assert [a["tache"] for a in ouvriers] == ["B"]
+
+
+def test_un_profil_illisible_au_moment_d_accepter_ne_relance_pas_la_tache(tmp_path):
+    atelier, chemin, controles, demande, reglage = bloque_avec_reglage(tmp_path, "pas du json")
+
+    atelier.decider(reglage["id"], ACCEPTER_OUTILS)
+
+    assert reglage["reponse"] is None  # rouverte, comme aujourd'hui
+    assert deux_lignes_dans_l_ordre(textes_du_fil(atelier), ILLISIBLE)
+    assert demande["reponse"] is None and atelier.moteur.chantier.tache("B").etat == "revenu"
+    assert not atelier.en_marche() and controles.reglages == []
+
+    chemin.write_text('{"nom": "Café"}', "utf-8")  # la personne corrige le profil
+    atelier.decider(reglage["id"], ACCEPTER_OUTILS)
+    assert demande["reponse"] == RELANCER_TEL
+    assert attendre(lambda: atelier.moteur.chantier.tache("B").etat == "verifie")
+
+
+def test_refuser_le_reglage_laisse_le_blocage_ouvert_avec_ses_options(tmp_path):
+    atelier, chemin, controles, demande, reglage = bloque_avec_reglage(tmp_path, '{"nom": "Café"}')
+
+    atelier.decider(reglage["id"], REFUSER_OUTILS)
+
+    assert reglage["reponse"] == REFUSER_OUTILS
+    assert demande["reponse"] is None and demande["options"] == OUTILS_DE_LA_DECISION
+    assert atelier.moteur.chantier.tache("B").etat == "revenu" and not atelier.en_marche()
+    assert chemin.read_text("utf-8") == '{"nom": "Café"}' and controles.reglages == []
+    assert textes_du_fil(atelier)[-1] == (
+        f"Réglage des outils écarté : rien n'a changé. La tâche B reste bloquée : {BLOCAGE_OUVERT}"
+    )
+    # Le blocage se décide toujours par ses propres options.
+    atelier.decider(demande["id"], RELANCER_TEL)
+    assert attendre(lambda: atelier.moteur.chantier.tache("B").etat == "verifie")
+
+
+def test_un_reglage_accepte_apres_une_reponse_au_blocage_ne_relance_rien(tmp_path):
+    atelier, chemin, controles, demande, reglage = bloque_avec_reglage(tmp_path, '{"nom": "Café"}')
+    atelier.decider(demande["id"], ABANDONNER)
+
+    atelier.decider(reglage["id"], ACCEPTER_OUTILS)
+
+    assert demande["reponse"] == ABANDONNER
+    assert atelier.moteur.chantier.tache("B").etat == "abandonnee"
+    assert json.loads(chemin.read_text("utf-8"))["commandes_permises"] == ["python3", "uv"]
+    assert textes_du_fil(atelier)[-1] == (
+        "Outils réglés. Commandes permises aux agents : python3, uv. Je ne relance rien : le "
+        "blocage n'attend plus ta réponse."
+    )
+
+
+@pytest.mark.parametrize(
+    ("reponse", "phrase", "issue"),
+    [
+        (
+            Resultat(ok=False, erreur="Claude Code ne répond pas."),
+            "Le diagnostic du blocage de la tâche B a échoué, faute de joindre Claude Code "
+            f"(Claude Code ne répond pas.) : {BLOCAGE_OUVERT}",
+            "echec",
+        ),
+        (
+            "Je ne vois aucune commande en cause : le critère 2 se contredit avec le périmètre.",
+            "Le diagnostic du blocage de la tâche B ne propose aucun réglage d'outils "
+            f"utilisable : {BLOCAGE_OUVERT}",
+            "sans_proposition",
+        ),
+        (
+            'Voici.\n\n```atelier-outils\n{"autre": ["uv"]}\n```',
+            "Le diagnostic du blocage de la tâche B ne propose aucun réglage d'outils "
+            f"utilisable : {BLOCAGE_OUVERT}",
+            "sans_proposition",
+        ),
+    ],
+)
+def test_un_diagnostic_qui_echoue_ou_ne_propose_rien_laisse_le_blocage_ouvert(
+    tmp_path, reponse, phrase, issue
+):
+    atelier = atelier_bloquable(tmp_path, reponses=[reponse])
+    demande = bloquer(atelier, "B")
+
+    assert diagnostic_rendu(atelier)
+
+    assert reglages_d_outils(atelier) == []
+    assert demande["reponse"] is None and demande["options"] == OUTILS_DE_LA_DECISION
+    assert demande["diagnostic"] == issue
+    assert textes_du_fil(atelier).count(phrase) == 1
+    assert textes_du_fil(atelier)[-1] == phrase
+    assert atelier.moteur.chantier.tache("B").etat == "revenu"
+
+
+def test_arreter_la_conversation_pendant_un_diagnostic_garde_le_blocage_ouvert(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte, reponses=[DIAGNOSTIC_UV])
+    demande = bloquer(atelier, "B")
+    assert attendre(lambda: atelier.moteur.agent.messages)
+
+    assert attendre(lambda: atelier.arreter()["fait"])
+
+    assert attendre(lambda: not atelier.occupe)
+    textes = textes_du_fil(atelier)
+    assert textes[-3:] == [
+        "Je cherche la cause.",  # ce qui était écrit n'est pas perdu
+        "(Réponse arrêtée par toi. Tu peux écrire la suite.)",
+        f"Diagnostic du blocage de la tâche B arrêté : {BLOCAGE_OUVERT}",
+    ]
+    assert reglages_d_outils(atelier) == []
+    assert demande["reponse"] is None and demande["options"] == OUTILS_DE_LA_DECISION
+    porte.set()
+
+
+INTERROMPU = (
+    "Le diagnostic du blocage de la tâche B n'avait pas abouti quand l'Atelier s'est arrêté, et "
+    "je ne le relance pas seul : sa demande reste ouverte, avec ses options. Écris-moi si tu "
+    "veux que l'orchestrateur en cherche la cause."
+)
+
+
+def test_le_diagnostic_en_cours_est_garde_dans_l_etat_sauve(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte)
+    bloquer(atelier, "B")
+    assert attendre(lambda: atelier.moteur.agent.messages)
+    relu = Chantier.charger(tmp_path / ".atelier" / "etat.json")
+    assert relu.demandes[-1]["diagnostic"] == "en_cours"
+    porte.set()
+    assert diagnostic_rendu(atelier)
+
+
+@pytest.mark.parametrize("etat_du_diagnostic", ["en_attente", "en_cours", None])
+def test_apres_un_redemarrage_un_diagnostic_sans_reponse_n_est_pas_relance(
+    tmp_path, etat_du_diagnostic
+):
+    avant = atelier_bloquable(tmp_path / "avant")
+    with avant.moteur.verrou:  # un blocage noté, comme le moteur le laisse, sans son rappel
+        avant.moteur.chantier.tache("B").etat = "revenu"
+        demande = {"id": "B-1", "tache": "B", "nature": "blocage", "question": "Bloquée.",
+                   "options": list(OUTILS_DE_LA_DECISION), "reponse": None,
+                   "preuves": PREUVES, "empechements": EMPECHEMENTS}  # fmt: skip
+        if etat_du_diagnostic:
+            demande["diagnostic"] = etat_du_diagnostic
+        avant.moteur.chantier.demandes.append(demande)
+    avant._sauver()
+    etat = tmp_path / "avant" / ".atelier" / "etat.json"
+
+    agent = OrchestrateurQuiCherche()
+    relu = Atelier(tmp_path / "apres", Chantier.charger(etat), agent, ControlesSimules(), {})
+
+    assert not attendre(lambda: agent.messages or relu.occupe, 0.3)
+    assert textes_du_fil(relu).count(INTERROMPU) == 1
+    (relue,) = relu.moteur.chantier.demandes
+    assert relue["reponse"] is None and relue["options"] == OUTILS_DE_LA_DECISION
+    # Un second redémarrage ne le redit pas.
+    sauve = tmp_path / "apres" / ".atelier" / "etat.json"
+    encore = Atelier(tmp_path / "apres", Chantier.charger(sauve), agent, ControlesSimules(), {})
+    assert textes_du_fil(encore).count(INTERROMPU) == 1 and agent.messages == []
+
+
+def test_apres_un_redemarrage_un_reglage_propose_reste_seul_a_decider(tmp_path):
+    atelier, chemin, controles, demande, reglage = bloque_avec_reglage(tmp_path, '{"nom": "Café"}')
+    etat = tmp_path / ".atelier" / "etat.json"
+    agent = OrchestrateurQuiCherche(perimetres={"B": ["b.py"]})
+    relu = Atelier(tmp_path, Chantier.charger(etat), agent, ControlesSimules(), {})
+    assert INTERROMPU not in textes_du_fil(relu)
+    (relu_reglage,) = reglages_d_outils(relu)
+    relu.decider(relu_reglage["id"], ACCEPTER_OUTILS)  # le lien survit : un clic relance encore
+    assert relu.moteur.chantier.demandes[0]["reponse"] == RELANCER_TEL
+    assert attendre(lambda: relu.moteur.chantier.tache("B").etat == "verifie")
+
+
+QUESTION_UV = (
+    "Les contrôles que l'atelier rejoue après chaque livrable lancent des commandes que les "
+    "agents n'ont pas le droit de lancer : « uv run pytest -q ». Sans elles, un ouvrier ne peut "
+    "pas vérifier lui-même son travail, et sa tâche risque d'être refusée pour rien. Je te "
+    "propose de permettre aux agents : uv. Le chantier démarre quand même."
+)
+
+
+def test_a_la_validation_une_commande_de_controle_non_permise_pose_la_question(tmp_path):
+    profil = {
+        "commandes": ["uv run pytest -q", "python3 -m ruff check .", "make test"],
+        "commandes_permises": ["python3"],
+    }
+    atelier = atelier_simule(tmp_path, [tache("A")], profil=profil, valide=False)
+    au_lancement = []
+    lancer = atelier.lancer
+    atelier.lancer = lambda: (au_lancement.append(list(atelier.moteur.chantier.demandes)), lancer())
+
+    atelier.valider_contrat()
+
+    (avant,) = au_lancement  # la demande existe avant le premier lancement du moteur
+    (reglage,) = avant
+    assert reglage["nature"] == "outils" and reglage["question"] == QUESTION_UV
+    assert reglage["outils"] == {"commandes_permises": ["uv"], "commandes": None}
+    assert reglage["options"] == [ACCEPTER_OUTILS, REFUSER_OUTILS] and "pour_blocage" not in reglage
+    # Le moteur démarre quand même, et la demande reste visible.
+    assert attendre(lambda: atelier.moteur.chantier.tache("A").etat == "verifie")
+    assert attendre(lambda: not atelier.en_marche())
+    assert atelier.vue()["demandes"][0]["reponse"] is None
+    # Une seconde validation ne repose pas la question.
+    atelier.valider_contrat()
+    assert len(reglages_d_outils(atelier)) == 1
+    # L'accepter permet uv, sans toucher aux contrôles.
+    atelier.decider(reglage["id"], ACCEPTER_OUTILS)
+    chemin = tmp_path / "chantier" / "profil.json"
+    assert json.loads(chemin.read_text("utf-8")) == {"commandes_permises": ["python3", "uv"]}
+    assert atelier.moteur.profil["commandes"] == profil["commandes"]
+
+
+def test_a_la_validation_des_controles_permis_ne_changent_rien(tmp_path):
+    profil = {"commandes": ["python3 -m pytest -q", "make lint"], "commandes_permises": ["python3"]}
+    atelier = atelier_simule(tmp_path, [tache("A")], profil=profil, valide=False)
+    avant = textes_du_fil(atelier)
+    atelier.lancer = lambda: None
+    atelier.valider_contrat()
+    assert atelier.moteur.chantier.demandes == []
+    assert textes_du_fil(atelier) == [*avant, "Contrat validé. Je lance le chantier."]
+
+
+def test_a_la_validation_un_lanceur_general_n_est_jamais_propose(tmp_path):
+    profil = {"commandes": ["bash scripts/verifier.sh", "FOO=1 pytest", "uv run pytest"]}
+    atelier = atelier_simule(tmp_path, [tache("A")], profil=profil, valide=False)
+    atelier.lancer = lambda: None
+    atelier.valider_contrat()
+    (reglage,) = reglages_d_outils(atelier)
+    assert reglage["outils"]["commandes_permises"] == ["uv"]
+    assert (
+        "Pour « bash scripts/verifier.sh » ; « FOO=1 pytest », je ne sais pas proposer de "
+        "réglage sûr : demande à l'orchestrateur de s'en occuper."
+    ) in reglage["question"]
+
+    # Sans rien à proposer d'un clic, aucune demande : le fil le dit.
+    profil = {"commandes": ["sudo make install"]}
+    atelier = atelier_simule(tmp_path / "b", [tache("A")], profil=profil, valide=False)
+    atelier.lancer = lambda: None
+    atelier.valider_contrat()
+    assert atelier.moteur.chantier.demandes == []
+    assert textes_du_fil(atelier)[-1].startswith("Les contrôles que l'atelier rejoue")
+    assert textes_du_fil(atelier)[-1].endswith(
+        "Pour « sudo make install », je ne sais pas proposer de réglage sûr : demande à "
+        "l'orchestrateur de s'en occuper. Le chantier démarre quand même."
+    )
+
+
+def test_un_signal_mal_forme_ne_leve_pas_et_une_tache_inconnue_est_dite(tmp_path):
+    atelier = atelier_bloquable(tmp_path)
+    reglage = atelier._proposer_outils({"commandes_permises": ["make"]})
+    for signal in (None, "B-1", {"id": "inconnue"}, reglage):  # rien de tout cela ne part
+        atelier.moteur.sur_blocage(signal)
+    assert not attendre(lambda: atelier.moteur.agent.messages or atelier.occupe, 0.3)
+
+    with atelier.moteur.verrou:  # une demande de blocage dont la tâche n'existe pas
+        demande = {"id": "Z-9", "tache": "Z", "nature": "blocage", "question": "Bloquée.",
+                   "options": list(OUTILS_DE_LA_DECISION), "reponse": None}  # fmt: skip
+        atelier.moteur.chantier.demandes.append(demande)
+    atelier.moteur.sur_blocage(demande)
+    assert attendre(lambda: demande.get("diagnostic") == "echec" and not atelier.occupe)
+    assert atelier.moteur.agent.messages == [] and demande["reponse"] is None
+    assert textes_du_fil(atelier)[-1].startswith(
+        "Le diagnostic du blocage de la tâche Z a échoué sur une erreur de l'Atelier ("
+    )
+    assert textes_du_fil(atelier)[-1].endswith(f") : {BLOCAGE_OUVERT}")
+
+
+# --- seconde passe : les lanceurs généraux, et la demande liée qui survit à un nouveau plan ----
+
+# La liste des lanceurs à écarter, écrite en dur : un test paramétré sur `LANCEURS_GENERAUX`
+# lui-même ne verrait jamais un nom qu'on en retire.
+LANCEURS = [
+    "sh", "bash", "zsh", "dash", "ksh", "mksh", "ash", "fish", "csh", "tcsh", "pwsh",
+    "powershell", "cmd", "env", "eval", "exec", "command", "builtin", "xargs", "time",
+    "nohup", "nice", "timeout", "setsid", "stdbuf", "busybox", "parallel", "watch",
+    "script", "sudo", "doas", "su", "npx", "pnpx", "bunx", "uvx",
+    "pkexec", "runuser", "chroot", "rbash", "nu", "xonsh", "expect", "strace", "toybox",
+    "ssh", "wsl", "awk",
+]  # fmt: skip
+SANS_LANCEUR_COMMUN = ["ksh93", "zsh-5.9", "bash5", "sh4.4", "dash-0.5"]  # shells versionnés
+
+
+def test_la_liste_en_dur_est_couverte_par_la_constante():
+    assert set(LANCEURS) <= LANCEURS_GENERAUX
+
+
+def test_retirer_un_nom_de_la_constante_fait_echouer_la_liste_en_dur(monkeypatch):
+    import atelier.serveur as serveur
+
+    monkeypatch.setattr(serveur, "LANCEURS_GENERAUX", LANCEURS_GENERAUX - {"pkexec"})
+    assert not serveur.lanceur_general("pkexec")
+    assert not set(LANCEURS) <= serveur.LANCEURS_GENERAUX
+
+
+@pytest.mark.parametrize("nom", SANS_LANCEUR_COMMUN)
+@pytest.mark.parametrize("forme", ["{}", "/usr/bin/{}"])
+def test_un_shell_a_suffixe_de_version_est_un_lanceur(nom, forme):
+    assert lanceur_general(forme.format(nom))
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["py -c", "pythonw -c", "R -e", "/usr/bin/R -e", "julia -e", "find . -name x -exec rm {} ;",
+     "find . -execdir sh ;", "yarn dlx cowsay", "bun x cowsay", "uv tool run ruff",
+     "pipx run black", "/usr/bin/awk", "gawk"],
+)  # fmt: skip
+def test_les_autres_lanceurs_de_code_ou_de_paquets_sont_ecartes(commande):
+    assert lanceur_general(commande)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["yarn", "yarn install", "bun", "bun install", "uv tool install ruff", "pipx install black",
+     "find . -name x", "py", "R", "julia", "npm", "npm test", "git", "git status",
+     "python3 -m pytest", "pytest -q", "make test", "cargo test", "uv run pytest", "ruff check ."],
+)  # fmt: skip
+def test_les_outils_ordinaires_employes_normalement_ne_sont_pas_ecartes(commande):
+    assert not lanceur_general(commande)
+SOUS_SON_NOM_OU_SON_CHEMIN = ["{}", "/usr/bin/{}"]
+
+
+@pytest.mark.parametrize("forme", SOUS_SON_NOM_OU_SON_CHEMIN)
+@pytest.mark.parametrize("lanceur", LANCEURS)
+def test_chaque_lanceur_est_reconnu_sous_son_nom_et_sous_un_chemin(lanceur, forme):
+    assert lanceur_general(forme.format(lanceur))
+    assert lanceur_general(forme.format(lanceur).upper() + ".exe")
+    assert lanceur_general(f"uv run {forme.format(lanceur)}")  # caché derrière un autre mot
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["python3 -c", "/usr/bin/python3.12 -c", "node -e", "node --eval", "perl -pe", "php -r",
+     "uv run python -c", "/opt/bin/ruby -e", "npm exec", "'/bin/bash'"],
+)  # fmt: skip
+def test_un_interprete_qui_execute_du_code_est_un_lanceur(commande):
+    assert lanceur_general(commande)
+
+
+@pytest.mark.parametrize(
+    "commande",
+    ["uv", "uv run", "python3", "/usr/bin/python3", "python3 -m pytest -q", "node", "make",
+     "cargo", "pytest", "/usr/local/bin/uv", "ruff"],
+)  # fmt: skip
+def test_une_commande_ordinaire_n_est_pas_un_lanceur(commande):
+    assert not lanceur_general(commande)
+
+
+@pytest.mark.parametrize("forme", SOUS_SON_NOM_OU_SON_CHEMIN)
+@pytest.mark.parametrize("lanceur", LANCEURS)
+def test_a_la_validation_aucun_lanceur_n_est_propose(tmp_path, lanceur, forme):
+    commande = f"{forme.format(lanceur)} -c x"
+    profil = {"commandes": [commande, "uv run pytest"]}
+    atelier = atelier_simule(tmp_path, [tache("A")], profil=profil, valide=False)
+    atelier.lancer = lambda: None
+    atelier.valider_contrat()
+    (reglage,) = reglages_d_outils(atelier)
+    assert reglage["outils"]["commandes_permises"] == ["uv"]
+    assert f"Pour « {commande} », je ne sais pas proposer de réglage sûr" in reglage["question"]
+
+
+@pytest.mark.parametrize("forme", SOUS_SON_NOM_OU_SON_CHEMIN)
+@pytest.mark.parametrize("lanceur", LANCEURS)
+def test_un_diagnostic_qui_propose_un_lanceur_n_offre_rien_d_un_clic(tmp_path, lanceur, forme):
+    propose = forme.format(lanceur)
+    bloc = json.dumps({"commandes_permises": ["uv", propose]})
+    atelier = atelier_bloquable(tmp_path, reponses=[f"Voici.\n\n```atelier-outils\n{bloc}\n```"])
+    demande = bloquer(atelier, "B")
+
+    assert diagnostic_rendu(atelier)
+
+    assert reglages_d_outils(atelier) == []
+    assert demande["reponse"] is None and demande["options"] == OUTILS_DE_LA_DECISION
+    assert demande["diagnostic"] == "lanceur" and "reglage" not in demande
+    assert textes_du_fil(atelier)[-1] == (
+        f"Le diagnostic du blocage de la tâche B propose de permettre aux agents « {propose} », "
+        "ce qui leur permettrait de tout lancer : je ne te le propose pas d'un clic, et "
+        f"{BLOCAGE_OUVERT}"
+    )
+    assert atelier.moteur.chantier.tache("B").etat == "revenu"
+
+
+def test_une_demande_d_outils_ordinaire_n_est_pas_filtree(tmp_path):
+    atelier = atelier_simule(tmp_path)
+    reglage = atelier._proposer_outils({"commandes_permises": ["bash"]})
+    assert reglage["outils"] == {"commandes_permises": ["bash"], "commandes": None}
+    assert reglage["question"] == (
+        "L'orchestrateur propose de régler les outils du projet. Commandes permises aux agents : "
+        "bash."
+    )
+
+
+def test_un_reglage_lie_garde_par_un_nouveau_plan_ne_relance_pas_le_nouveau_blocage(tmp_path):
+    taches = [tache("A", etat="verifie"), tache("B")]
+    atelier = atelier_bloquable(tmp_path, taches, reponses=[DIAGNOSTIC_UV, DIAGNOSTIC_UV])
+    with atelier.moteur.verrou:  # deux décisions déjà prises : le blocage de B sera « B-3 »
+        for rang in (1, 2):
+            atelier.moteur.chantier.demandes.append(
+                {"id": f"A-{rang}", "tache": "A", "question": "?", "reponse": RELANCER_TEL,
+                 "options": list(OUTILS_DE_LA_DECISION)}
+            )  # fmt: skip
+    ancien = bloquer(atelier, "B")
+    assert ancien["id"] == "B-3" and diagnostic_rendu(atelier)
+    (vieux,) = reglages_d_outils(atelier)
+    atelier.decider(ancien["id"], ABANDONNER)  # B abandonnée, le réglage laissé sans réponse
+    with atelier.moteur.verrou:
+        atelier.moteur.chantier.termine = True  # A vérifiée, B abandonnée : chantier terminé
+
+    nouveau_plan = {"objectif": "Suite", "taches": [{"id": "B", "titre": "Encore B",
+                                                      "perimetre": ["b.py"]}]}  # fmt: skip
+    atelier._adopter(nouveau_plan, "Suite")
+
+    assert atelier.moteur.chantier.demandes == [vieux]  # gardé, mais délié
+    assert "pour_blocage" not in vieux and DEBLOQUE not in vieux["question"]
+    assert vieux["question"] == (
+        "L'orchestrateur propose de régler les outils du projet. Commandes permises aux agents : "
+        "uv. Pourquoi : Les tests se lancent avec uv."
+    )
+    # Le réglage des contrôles à la validation, puis un nouveau blocage qui reprend « B-3 ».
+    atelier._proposer_outils({"commandes_permises": ["make"]})
+    with atelier.moteur.verrou:
+        atelier.moteur.chantier.contrat.valide = True
+    nouveau = bloquer(atelier, "B")
+    assert nouveau["id"] == ancien["id"] == "B-3"
+    assert diagnostic_rendu(atelier, 2)
+    (lie,) = [d for d in reglages_d_outils(atelier) if d.get("pour_blocage")]
+    assert lie["id"] not in {vieux["id"], "outils-2"}  # deux demandes ne se confondent pas
+
+    atelier.decider(vieux["id"], ACCEPTER_OUTILS)  # l'ancienne demande ne relance rien
+
+    assert vieux["reponse"] == ACCEPTER_OUTILS and nouveau["reponse"] is None
+    assert atelier.moteur.chantier.tache("B").etat == "revenu" and not atelier.en_marche()
+    assert textes_du_fil(atelier)[-1].endswith(
+        "Une tâche revenue vers toi peut maintenant être relancée."
+    )
+
+    atelier.decider(lie["id"], ACCEPTER_OUTILS)  # celle du nouveau blocage, si
+    assert nouveau["reponse"] == RELANCER_TEL
+    assert attendre(lambda: atelier.moteur.chantier.tache("B").etat == "verifie")
+
+
+@pytest.mark.parametrize(
+    "alteration",
+    [
+        {"reglage": "outils-99"},  # le blocage désigne une autre demande d'outils
+        {"diagnostic": "sans_proposition"},  # son diagnostic n'a rien proposé
+        {"diagnostic": "interrompu"},
+    ],
+)
+def test_une_demande_d_outils_ne_relance_que_le_blocage_qui_l_a_fait_naitre(tmp_path, alteration):
+    atelier, chemin, controles, demande, reglage = bloque_avec_reglage(tmp_path, '{"nom": "Café"}')
+    with atelier.moteur.verrou:  # même identifiant, mais ce blocage n'a pas fait naître le réglage
+        demande.update(alteration)
+
+    atelier.decider(reglage["id"], ACCEPTER_OUTILS)
+
+    assert demande["reponse"] is None and atelier.moteur.chantier.tache("B").etat == "revenu"
+    assert not atelier.en_marche()
+    assert textes_du_fil(atelier)[-1] == (
+        "Outils réglés. Commandes permises aux agents : python3, uv. Je ne relance rien : le "
+        "blocage n'attend plus ta réponse."
+    )
+
+
+def test_un_blocage_deja_repondu_pendant_le_diagnostic_ne_promet_pas_de_relancer(tmp_path):
+    porte = threading.Event()
+    atelier = atelier_bloquable(tmp_path, porte=porte, reponses=[DIAGNOSTIC_UV])
+    demande = bloquer(atelier, "B")
+    assert attendre(lambda: atelier.moteur.agent.messages)
+    atelier.decider(demande["id"], ABANDONNER)  # la personne tranche avant la fin du diagnostic
+    porte.set()
+    assert diagnostic_rendu(atelier)
+
+    (reglage,) = reglages_d_outils(atelier)
+    assert DEBLOQUE not in reglage["question"] and "relance" not in reglage["question"]
+    assert "pour_blocage" not in reglage
+    assert reglage["question"].endswith("Pourquoi : Les tests se lancent avec uv.")

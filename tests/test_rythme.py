@@ -1,6 +1,6 @@
 """Le rythme des agents : les colonnes de 15 secondes que le tableau de bord dessine en points."""
 
-from atelier.rythme import COLONNES, TRANCHE_S, Rythmes, resumer
+from atelier.rythme import COLONNES, TRANCHE_S, Rythmes, poste, resumer
 from atelier.serveur import Activite
 
 
@@ -97,3 +97,15 @@ def test_en_demonstration_les_agents_simules_jouent_des_gestes_en_patientant():
         "consigne", "sonnet", "medium", None, contexte={"tache": "A", "role": "ouvrier"}
     )
     assert [e["type"] for e in sans] == ["outil", "fin"]  # sans gestes_s : rien de plus qu'avant
+
+
+def test_poste_coupe_le_nom_en_tache_et_role():
+    assert poste("B-ouvrier-1") == ("B", "ouvrier")
+    assert poste("B.1-ouvrier-2") == ("B.1", "ouvrier")
+    assert poste("REPARATION-1-ouvrier-1") == ("REPARATION-1", "ouvrier")
+
+
+def test_poste_sans_tache_pour_un_nom_court_ou_vide():
+    assert poste("chef-1") == ("", "chef-1")
+    assert poste("chef") == ("", "chef")
+    assert poste("") == ("", "")

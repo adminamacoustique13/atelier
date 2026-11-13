@@ -24,6 +24,27 @@ Le mode réel : Claude Code le donne au départ (message `init`) et quand il cha
 `status`) ; le pont le garde dans `mode_applique` et émet un événement « mode » quand il n'est
 pas celui demandé. Les refus de l'arbitre du mode auto se lisent dans les résultats d'outil en
 erreur, puis dans `permission_denials` en fin de tour ; chacun est annoncé une seule fois.
+
+Les limites de l'abonnement : le SDK émet un `RateLimitEvent` quand l'état d'une limite change.
+Une alerte (`allowed_warning`) ou un refus (`rejected`) donne un événement « limite » ; rien ne
+s'arrête pour autant. C'est à la fin du tour qu'on juge : un tour en échec après un refus, ou
+signalé comme tel par Claude Code (message en erreur « rate_limit », statut HTTP 429), rend
+`LIMITE_ATTEINTE`, avec la limite et l'heure où elle se lève. Un tour réussi reste réussi.
+Un `rejected` pendant que le dépassement payant prend le relais n'est pas un refus.
+
+La surcharge : Claude Code marque aussi « rate_limit » un serveur qui limite les requêtes sans que
+la limite de l'abonnement soit atteinte ; son texte le dit (« not your usage limit », « is
+experiencing high load »). Un tour en échec sur ce signe rend `SURCHARGE`, sauf si un vrai refus
+de limite a été vu dans le même tour : la limite l'emporte.
+
+Les outils refusés : chaque résultat de tour porte dans `refuses` la forme courte des outils
+refusés pendant le tour, d'où que vienne le refus : le guichet ou le pont (sans guichet, réponse
+« non », guichet en panne ; jamais un refus pour arrêt), l'arbitre du mode auto, et en fin de tour
+`permission_denials`, quel que soit le mode. Un même appel n'est compté qu'une fois.
+
+La reprise exigée (`reprise_exigee`) : la session demandée doit être celle qui répond. Si Claude
+Code part dans une autre, ou si le tour échoue avant que la session ait répondu (connexion
+refusée, fin en erreur, aucune réponse), le tour rend `REPRISE_IMPOSSIBLE`.
 """
 
 from __future__ import annotations
@@ -36,7 +57,19 @@ import warnings
 from contextlib import suppress
 from pathlib import Path
 
-from atelier.agents import Resultat, decrire_outil, mode_valide
+from atelier.agents import (
+    LIMITE_ATTEINTE,
+    LIMITE_INCONNUE,
+    REFUSES_MAX,
+    REPRISE_IMPOSSIBLE,
+    SURCHARGE,
+    Resultat,
+    decrire_limite,
+    decrire_outil,
+    forme_courte,
+    mode_valide,
+)
+from atelier.guichet import ARRETE
 
 # Le SDK avertit, à chaque agent, que le guichet n'est pas consulté pour les outils permis
 # d'avance (lecture, modifications dans la copie de travail). C'est voulu (voir DECISIONS.md,
@@ -44,8 +77,7 @@ from atelier.agents import Resultat, decrire_outil, mode_valide
 # qu'encombrer le journal de l'Atelier.
 warnings.filterwarnings("ignore", message="can_use_tool will not be invoked")
 
-ARRET = "Arrêté par la personne responsable."
-SANS_REPONSE = "Claude Code s'est arrêté sans répondre."
+CLAUDE_SANS_REPONSE = "Claude Code s'est arrêté sans répondre."
 SANS_GUICHET = "Aucun guichet n'est branché : l'autorisation est refusée."
 REFUS = "La personne responsable a refusé cet outil."
 INCOMPRIS = "Le guichet a rendu une réponse incomprise : l'outil est refusé."
@@ -61,6 +93,18 @@ REGLE_ARBITRE = re.compile(r"Reason:\s*\[([^\]\n]{1,80})\]")
 SANS_RAISON = "raison non précisée"
 INDISPONIBLE = "le mode auto n'est pas disponible pour son modèle"
 MEMOIRE_MAX = 256  # appels et refus retenus par session : au-delà, les plus anciens sont oubliés
+# Les états de limite du SDK (`RateLimitStatus`) qui donnent un événement, et leur nom ici.
+STATUTS_LIMITE = {"allowed_warning": "alerte", "rejected": "atteinte"}
+DEPASSEMENT_PERMIS = ("allowed", "allowed_warning")  # le dépassement payant prend le relais
+STATUT_HTTP_LIMITE = 429  # « trop de requêtes » : la limite atteinte, vue par l'API
+# Ce que dit Claude Code (2.1.308) d'une surcharge qu'il marque pourtant « rate_limit » :
+# « Server is temporarily limiting requests (not your usage limit) », pour un 429 sans en-tête
+# de limite de l'abonnement, et « Opus is experiencing high load… » (de même pour Fable).
+SURCHARGES = ("not your usage limit", "is experiencing high load")
+
+
+class _RepriseRefusee(Exception):
+    """Claude Code est parti dans une autre session que celle qu'il fallait reprendre."""
 
 
 def lire_source(api_key_source) -> str:
@@ -73,7 +117,7 @@ def lire_source(api_key_source) -> str:
 def lire_resultat(final, morceaux: list[str]) -> Resultat:
     """Traduit le message de fin du SDK en résultat : texte, coût et tokens, ou échec."""
     if final is None:
-        return Resultat(ok=False, erreur=SANS_REPONSE)
+        return Resultat(ok=False, erreur=CLAUDE_SANS_REPONSE)
     usage = getattr(final, "usage", None) or {}
     tokens = int(usage.get("input_tokens") or 0) + int(usage.get("output_tokens") or 0)
     texte = str(getattr(final, "result", None) or "")
@@ -95,6 +139,54 @@ def lire_refus(texte) -> str:
     if trouve:
         return f"règle {trouve[1].strip()}"
     return " ".join(texte.split())[:120]
+
+
+def lire_limite(info) -> dict | None:
+    """Traduit un `RateLimitInfo` du SDK : statut, limite, heure de remise à zéro, consommation.
+
+    Rend None pour un état sans alerte ni refus (`allowed`) ou illisible. L'heure est en secondes
+    Unix ; une valeur qui ne peut être qu'en millisecondes est ramenée en secondes.
+    """
+    statut = STATUTS_LIMITE.get(getattr(info, "status", None))
+    if statut is None:
+        return None
+    limite = getattr(info, "rate_limit_type", None)
+    fin = getattr(info, "resets_at", None)
+    if not isinstance(fin, (int, float)) or isinstance(fin, bool) or fin <= 0:
+        fin = None
+    elif fin > 1e11:  # au-delà de l'an 5000 en secondes : ce sont des millisecondes
+        fin = fin / 1000
+    part = getattr(info, "utilization", None)
+    part = part if isinstance(part, (int, float)) and not isinstance(part, bool) else None
+    limite = limite if isinstance(limite, str) and limite else LIMITE_INCONNUE
+    return {"statut": statut, "limite": limite, "fin": fin, "utilisation": part}
+
+
+def depassement_en_service(info) -> bool:
+    """Dit si le dépassement payant a pris le relais d'une limite atteinte.
+
+    Claude Code (2.1.308) calcule `isUsingOverage` ainsi : statut `rejected` et dépassement
+    `allowed` ou `allowed_warning`. Le SDK donne ce champ dans `raw` et le dépassement dans
+    `overage_status` : l'un ou l'autre suffit. Les requêtes passent alors normalement.
+    """
+    brut = getattr(info, "raw", None)
+    if isinstance(brut, dict) and brut.get("isUsingOverage") is True:
+        return True
+    depassement = getattr(info, "overage_status", None)
+    return getattr(info, "status", None) == "rejected" and depassement in DEPASSEMENT_PERMIS
+
+
+def est_surcharge(texte) -> bool:
+    """Dit si le texte d'une erreur « rate_limit » est celui d'une surcharge du serveur, et non
+    d'une limite de l'abonnement atteinte."""
+    return isinstance(texte, str) and any(signe in texte.lower() for signe in SURCHARGES)
+
+
+def _bloc_refuse(entree: dict) -> dict:
+    """L'outil d'une entrée de `permission_denials` (`tool_name`, `tool_input`), comme un bloc."""
+    entree_outil = entree.get("tool_input")
+    return {"name": str(entree.get("tool_name") or "Outil"),
+            "input": entree_outil if isinstance(entree_outil, dict) else {}}  # fmt: skip
 
 
 def texte_du_resultat(contenu) -> str:
@@ -227,6 +319,7 @@ class SessionSDK:
         session: str | None = None,
         reprise: bool = False,
         fabrique_client=None,
+        reprise_exigee: bool = False,
     ):
         if not mode_valide(mode_permission):  # jamais bypassPermissions, ni un mode inconnu
             raise ValueError(f"Mode de permission refusé : {mode_permission!r}.")
@@ -237,6 +330,16 @@ class SessionSDK:
         self.guichet, self.sur_evenement, self.delai_max_s = guichet, sur_evenement, delai_max_s
         self.session, self.reprise = session, reprise
         self.fabrique_client = fabrique_client
+        # La session qu'il faut reprendre, et non une autre ; vue : elle a répondu.
+        self._a_reprendre = session if reprise and reprise_exigee else None
+        self._session_vue = False
+        # Les limites du tour : la dernière annoncée (alerte ou refus), et le refus.
+        self._limite: dict | None = None
+        self._limite_refusee = False
+        self._surcharge = False  # un signe de surcharge du serveur, pendant le tour
+        # Les outils refusés du tour (formes courtes), et les appels déjà comptés ou écartés.
+        self._refuses: list[str] = []
+        self._refuses_vus = _Memoire()
         self.source_connexion = ""
         self._client = None
         self._coupure: _Arret | None = None  # le drapeau du client ouvert, posé à sa coupure
@@ -254,6 +357,7 @@ class SessionSDK:
         self._verrou_client = asyncio.Lock()  # connexion et changements, l'un après l'autre
         self._changements: set[asyncio.Task] = set()
         self._appels = _Memoire()  # identifiant d'appel d'outil -> sa forme courte
+        self._formes = _Memoire()  # identifiant d'appel d'outil -> « Bash(uv sync) »
         self._refus = _Memoire()  # appels déjà annoncés comme refusés, ou passés par le guichet
         self._auto_vu = False  # le mode auto a-t-il valu pendant le tour ?
 
@@ -386,7 +490,17 @@ class SessionSDK:
     # --- Côté boucle asynchrone -----------------------------------------------------------
 
     async def _tour(self, consigne: str, arret: _Arret) -> Resultat:
-        """Fait travailler l'agent jusqu'à sa réponse, son arrêt ou la fin du délai."""
+        """Fait travailler l'agent jusqu'à sa réponse, son arrêt ou la fin du délai.
+
+        Quelle qu'en soit l'issue, le résultat porte les outils refusés pendant le tour.
+        """
+        self._limite, self._limite_refusee, self._surcharge = None, False, False
+        self._refuses, self._refuses_vus = [], _Memoire()
+        resultat = await self._derouler(consigne, arret)
+        resultat.refuses = list(self._refuses)
+        return resultat
+
+    async def _derouler(self, consigne: str, arret: _Arret) -> Resultat:
         travail = asyncio.ensure_future(self._travailler(consigne))
         attente = asyncio.ensure_future(arret.evenement.wait())
         try:
@@ -399,10 +513,26 @@ class SessionSDK:
             _oublier(travail)
             self._couper()
             if arret.pose.is_set():
-                return Resultat(ok=False, erreur=ARRET)
+                return Resultat(ok=False, erreur=ARRETE)
             delai = f"{self.delai_max_s} secondes"
             return Resultat(ok=False, erreur=f"L'agent n'a pas fini dans le délai de {delai}.")
-        return self._issue(travail)
+        return self._qualifier(self._issue(travail))
+
+    def _qualifier(self, resultat: Resultat) -> Resultat:
+        """Un échec dû à une limite, à une surcharge, ou à une session qu'on n'a pas pu
+        reprendre, le dit. La limite passe avant la surcharge."""
+        if resultat.ok:
+            return resultat
+        reste = {"cout_usd": resultat.cout_usd, "tokens": resultat.tokens}
+        if self._limite_refusee:
+            limite = self._limite or {"limite": LIMITE_INCONNUE, "fin": None}
+            return Resultat(ok=False, erreur=LIMITE_ATTEINTE, type_limite=limite["limite"],
+                            fin_limite=limite["fin"], **reste)  # fmt: skip
+        if self._surcharge:
+            return Resultat(ok=False, erreur=SURCHARGE, **reste)
+        if self._a_reprendre and not self._session_vue:
+            return Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE, **reste)
+        return resultat
 
     def _issue(self, travail: asyncio.Future) -> Resultat:
         """Lit l'issue d'un travail terminé ; en cas d'erreur, le client est coupé."""
@@ -466,28 +596,76 @@ class SessionSDK:
                 morceaux.append(delta["text"])
                 self._emettre("texte", delta["text"])
         elif isinstance(message, sdk.AssistantMessage):
-            for bloc in message.content:
-                if isinstance(bloc, sdk.ToolUseBlock):
-                    forme = decrire_outil({"name": bloc.name, "input": bloc.input}, self.dossier)
-                    self._appels.retenir(bloc.id, forme)
-                    self._emettre("outil", forme)
+            self._suivre_assistant(message)
         elif isinstance(message, sdk.UserMessage) and isinstance(message.content, list):
             resultats = [b for b in message.content if isinstance(b, sdk.ToolResultBlock)]
             for bloc in resultats:
                 self._lire_refus(bloc)
         elif isinstance(message, sdk.SystemMessage):
             self._suivre_systeme(message)
+        elif isinstance(message, sdk.RateLimitEvent):
+            self._suivre_limite(message.rate_limit_info)
         elif isinstance(message, sdk.ResultMessage):
-            self._retenir_session(message.session_id)
-            self._refus_du_tour(message.permission_denials)
+            self._suivre_fin(message)
             return message
         return None
+
+    def _suivre_fin(self, message) -> None:
+        """Le message de fin : la session, les refus du tour, et le signe d'une limite atteinte
+        (statut HTTP 429) ou d'une surcharge (son texte) dans un tour en échec."""
+        self._retenir_session(message.session_id)
+        self._refus_du_tour(message.permission_denials)
+        self._refuses_du_tour(message.permission_denials)
+        if not message.is_error:
+            return
+        if est_surcharge(message.result):
+            self._surcharge = True
+        elif getattr(message, "api_error_status", None) == STATUT_HTTP_LIMITE:
+            self._limite_refusee = True
+
+    def _suivre_assistant(self, message) -> None:
+        """Annonce les outils appelés ; une réponse en erreur « rate_limit » est un refus pour
+        limite, ou une surcharge si son texte le dit."""
+        import claude_agent_sdk as sdk
+
+        if getattr(message, "error", None) == "rate_limit":
+            lu = " ".join(b.text for b in message.content if isinstance(b, sdk.TextBlock))
+            if est_surcharge(lu):
+                self._surcharge = True
+            else:
+                self._limite_refusee = True
+        for bloc in message.content:
+            if isinstance(bloc, sdk.ToolUseBlock):
+                appel = {"name": bloc.name, "input": bloc.input}
+                forme = decrire_outil(appel, self.dossier)
+                self._appels.retenir(bloc.id, forme)
+                self._formes.retenir(bloc.id, forme_courte(appel, self.dossier))
+                self._emettre("outil", forme)
+
+    def _suivre_limite(self, info) -> None:
+        """Retient et annonce une alerte ou un refus de limite ; rien ne s'arrête ici.
+
+        Quand le dépassement payant a pris le relais, le `rejected` n'est pas un refus : rien
+        n'est annoncé, et un refus vu plus tôt dans le tour ne compte plus.
+        """
+        if depassement_en_service(info):
+            self._limite_refusee = False
+            return
+        limite = lire_limite(info)
+        if limite is None:
+            return
+        self._limite = limite
+        self._limite_refusee = self._limite_refusee or limite["statut"] == "atteinte"
+        texte = decrire_limite(limite["statut"], limite["limite"], limite["fin"],
+                               limite["utilisation"])  # fmt: skip
+        self._emettre("limite", texte, **limite)
 
     def _suivre_systeme(self, message) -> None:
         """Le départ (`init`) donne la source, la session et le mode ; `status`, un nouveau mode."""
         donnees = message.data if isinstance(message.data, dict) else {}
         if message.subtype == "init":
             self.source_connexion = lire_source(donnees.get("apiKeySource"))
+            self._verifier_reprise(donnees.get("session_id"))
             self._retenir_session(donnees.get("session_id"))
         mode = donnees.get("permissionMode")
         if message.subtype in ("init", "status") and isinstance(mode, str) and mode:
@@ -518,6 +696,8 @@ class SessionSDK:
         raison = lire_refus(texte_du_resultat(bloc.content)) if refus else ""
         if raison:
             self._annoncer_refus(bloc.tool_use_id, self._appels.get(bloc.tool_use_id, ""), raison)
+            if self._formes.get(bloc.tool_use_id):  # sinon, `permission_denials` le dira
+                self._noter_refuse(bloc.tool_use_id, self._formes[bloc.tool_use_id])
 
     def _refus_du_tour(self, refus) -> None:
         """En fin de tour, annonce les refus de `permission_denials` qui ne l'ont pas été.
@@ -530,10 +710,35 @@ class SessionSDK:
             return
         for entree in refus[:MEMOIRE_MAX]:
             if isinstance(entree, dict) and entree.get("tool_use_id"):
-                entree_outil = entree.get("tool_input")
-                bloc = {"name": str(entree.get("tool_name") or "Outil"),
-                        "input": entree_outil if isinstance(entree_outil, dict) else {}}
+                bloc = _bloc_refuse(entree)
                 self._annoncer_refus(entree["tool_use_id"], decrire_outil(bloc), SANS_RAISON)
+
+    def _refuses_du_tour(self, refus) -> None:
+        """En fin de tour, retient les outils de `permission_denials`, quel que soit le mode.
+
+        Claude Code y range chaque outil refusé pendant le tour, par une règle, le mode, l'arbitre
+        ou le guichet ; ceux déjà comptés (par leur identifiant) ne le sont pas deux fois.
+        """
+        if not isinstance(refus, list):
+            return
+        for entree in refus[:MEMOIRE_MAX]:
+            if isinstance(entree, dict):
+                identifiant = entree.get("tool_use_id")
+                identifiant = identifiant if isinstance(identifiant, str) else None
+                self._noter_refuse(identifiant, forme_courte(_bloc_refuse(entree), self.dossier))
+
+    def _noter_refuse(self, identifiant, forme: str) -> None:
+        """Retient un outil refusé pendant le tour : sa forme courte, une fois, REFUSES_MAX au plus.
+
+        Un appel déjà compté ne l'est pas deux fois (refusé au guichet, il revient dans
+        `permission_denials`). Une forme vide note seulement l'appel, qui ne comptera plus.
+        """
+        if identifiant:
+            if identifiant in self._refuses_vus:
+                return
+            self._refuses_vus.retenir(identifiant)
+        if forme and forme not in self._refuses and len(self._refuses) < REFUSES_MAX:
+            self._refuses.append(forme)
 
     def _annoncer_refus(self, identifiant, forme: str, raison: str) -> None:
         if not identifiant or identifiant in self._refus:
@@ -541,13 +746,35 @@ class SessionSDK:
         self._refus.retenir(identifiant)
         self._emettre("refus", f"{forme or 'Un outil'} ({raison})", outil=forme, raison=raison)
 
+    def _verifier_reprise(self, identifiant) -> None:
+        """Avec une reprise exigée, la session annoncée au départ doit être celle demandée."""
+        if not self._a_reprendre or not identifiant or self._session_vue:
+            return
+        if identifiant != self._a_reprendre:
+            raise _RepriseRefusee(f"Claude Code est parti dans la session {identifiant}.")
+        self._session_vue = True
+
     def _retenir_session(self, identifiant) -> None:
         """Garde l'identifiant de session : après une coupure, on reprendra cette session."""
         if identifiant:
             self.session, self.reprise = identifiant, True
 
     async def _autoriser(self, outil: str, entree: dict, contexte, coupure: _Arret):
-        """Rappel `can_use_tool` du SDK : pose la question au guichet, sans bloquer la boucle.
+        """Rappel `can_use_tool` du SDK : la décision de `_decider`, et l'outil refusé retenu.
+
+        Un refus pour arrêt (ARRETE) n'est pas un outil refusé : l'appel est seulement noté,
+        pour que `permission_denials` ne le compte pas non plus.
+        """
+        decision = await self._decider(outil, entree, contexte, coupure)
+        if getattr(decision, "behavior", None) == "deny":
+            pour_arret = getattr(decision, "message", "") == ARRETE
+            appel = {"name": outil, "input": entree}
+            forme = "" if pour_arret else forme_courte(appel, self.dossier)
+            self._noter_refuse(getattr(contexte, "tool_use_id", None), forme)
+        return decision
+
+    async def _decider(self, outil: str, entree: dict, contexte, coupure: _Arret):
+        """Pose la question au guichet, sans bloquer la boucle, et rend la décision du SDK.
 
         Hors d'un tour, après un arrêt, ou venue d'un client déjà coupé, la demande est refusée
         sans déranger le guichet. Un arrêt ou une coupure pendant l'attente refuse aussitôt,
@@ -558,13 +785,13 @@ class SessionSDK:
         # Une demande passée par ici n'est jamais un refus de l'arbitre, même refusée ensuite.
         self._refus.retenir(getattr(contexte, "tool_use_id", None) or id(contexte))
         if coupure.pose.is_set():  # l'ancien Claude Code, en train de s'interrompre
-            return PermissionResultDeny(message=ARRET, interrupt=True)
+            return PermissionResultDeny(message=ARRETE, interrupt=True)
         arret = self._arret
         self._emettre("attente", decrire_outil({"name": outil, "input": entree}, self.dossier))
         if self.guichet is None:
             return PermissionResultDeny(message=SANS_GUICHET)
         if arret is None or arret.pose.is_set():
-            return PermissionResultDeny(message=ARRET, interrupt=True)
+            return PermissionResultDeny(message=ARRETE, interrupt=True)
         demande = _dans_un_fil(self.guichet.demander, self.agent, outil, entree)
         veilles = {asyncio.ensure_future(a.evenement.wait()) for a in (arret, coupure)}
         try:
@@ -576,7 +803,7 @@ class SessionSDK:
                 demande.cancel()
         if arret.pose.is_set() or coupure.pose.is_set() or demande.cancelled():
             threading.Thread(target=self._annuler_au_guichet, daemon=True).start()
-            return PermissionResultDeny(message=ARRET, interrupt=True)
+            return PermissionResultDeny(message=ARRETE, interrupt=True)
         if demande.exception() is not None:
             return PermissionResultDeny(
                 message=f"Le guichet n'a pas pu répondre : {demande.exception()}"

@@ -1364,3 +1364,472 @@ def test_la_phrase_du_refus_au_milieu_d_une_sortie_ou_hors_du_mode_auto_n_est_pa
     )  # fmt: skip
     assert session.envoyer("Va.").ok
     assert refus_dits(evenements) == ["Lance curl https://example.com (règle Exfil Scouting)"]
+
+
+def test_l_arret_rendu_par_le_pont_est_celui_que_le_moteur_reconnait():
+    # Le moteur et le serveur reconnaissent un arrêt en comparant l'erreur à guichet.ARRETE :
+    # le pont doit en rendre la même constante, pas seulement un texte égal.
+    import atelier.sdk as pont
+    from atelier import guichet
+
+    assert pont.ARRETE is guichet.ARRETE
+
+
+# --- Tâche V5 : les limites de l'abonnement ----------------------------------------------
+
+from claude_agent_sdk import RateLimitEvent, RateLimitInfo  # noqa: E402
+
+from atelier.agents import LIMITE_ATTEINTE, REPRISE_IMPOSSIBLE  # noqa: E402
+from atelier.sdk import lire_limite  # noqa: E402
+
+FIN_LIMITE = 1_900_000_000  # une heure de remise à zéro, en secondes Unix
+AUTRE = "9f8e7d6c-5b4a-4321-8fed-cba987654321"
+
+
+def limite(statut, type_limite="five_hour", fin_limite=FIN_LIMITE, part=None):
+    """L'événement de limite tel que le SDK le rend (voir son `message_parser`)."""
+    info = RateLimitInfo(status=statut, resets_at=fin_limite, rate_limit_type=type_limite,
+                         utilization=part)  # fmt: skip
+    return RateLimitEvent(rate_limit_info=info, uuid="u", session_id=UUID)
+
+
+def limites_dites(evenements):
+    return [e for e in evenements if e["type"] == "limite"]
+
+
+def test_un_refus_pour_limite_rend_l_erreur_a_part_avec_le_type_et_l_heure(ouvrir):
+    session, _, evenements = ouvrir(
+        [init(), limite("rejected", "seven_day_opus"), fin(result="Limit reached", is_error=True)]
+    )
+    resultat = session.envoyer("Fais.")
+    assert (resultat.ok, resultat.erreur) == (False, LIMITE_ATTEINTE)
+    assert (resultat.type_limite, resultat.fin_limite) == ("seven_day_opus", FIN_LIMITE)
+    assert resultat.tokens == 120
+    dites = limites_dites(evenements)
+    assert [(e["statut"], e["limite"], e["fin"]) for e in dites] == [
+        ("atteinte", "seven_day_opus", FIN_LIMITE)
+    ]
+    assert dites[0]["contenu"].startswith("Limite de l'abonnement atteinte (fenêtre de 7 jours")
+    assert du_type(evenements, "fin") == [LIMITE_ATTEINTE]
+
+
+@pytest.mark.parametrize("suite", [[RuntimeError("exit code 1")], [], [BLOQUE]])
+def test_un_refus_suivi_d_une_panne_ou_d_aucune_reponse_reste_un_refus_pour_limite(ouvrir, suite):
+    session, fabrique, _ = ouvrir([limite("rejected"), *suite], delai_max_s=0.3)
+    resultat = session.envoyer("Fais.")
+    if suite and suite[0] is BLOQUE:  # le délai dépassé reste ce qu'il est, même après un refus
+        assert resultat.erreur == "L'agent n'a pas fini dans le délai de 0.3 secondes."
+        return
+    assert (resultat.erreur, resultat.type_limite, resultat.fin_limite) == (
+        LIMITE_ATTEINTE, "five_hour", FIN_LIMITE
+    )  # fmt: skip
+    if suite:
+        assert attendre(lambda: fabrique.clients[0].deconnecte)
+
+
+def fin_429():
+    message = fin(result="API Error: 429", is_error=True)
+    return dataclasses.replace(message, api_error_status=429)
+
+
+@pytest.mark.parametrize(
+    "signe",
+    [AssistantMessage(content=[], model="opus", error="rate_limit"), "429"],
+)
+def test_claude_code_qui_signale_la_limite_sans_evenement_rend_aussi_l_erreur(ouvrir, signe):
+    etapes = [fin_429()] if signe == "429" else [signe, fin(result="Limite.", is_error=True)]
+    session, _, evenements = ouvrir([init(), *etapes])
+    resultat = session.envoyer("Fais.")
+    assert (resultat.erreur, resultat.type_limite, resultat.fin_limite) == (
+        LIMITE_ATTEINTE, "inconnue", None
+    )  # fmt: skip
+    assert limites_dites(evenements) == []
+
+
+def test_une_alerte_passe_par_sur_evenement_et_le_travail_continue(ouvrir):
+    session, _, evenements = ouvrir(
+        [init(), limite("allowed_warning", "five_hour", part=0.82), texte("Je"), fin()]
+    )
+    resultat = session.envoyer("Fais.")
+    assert resultat.ok and (resultat.type_limite, resultat.fin_limite) == ("", None)
+    dites = limites_dites(evenements)
+    assert len(dites) == 1
+    attendu = {"agent": AGENT, "type": "limite", "statut": "alerte", "limite": "five_hour",
+               "fin": FIN_LIMITE, "utilisation": 0.82}  # fmt: skip
+    assert {k: v for k, v in dites[0].items() if k != "contenu"} == attendu
+    assert "fenêtre de 5 heures, 82 % consommés" in dites[0]["contenu"]
+    assert du_type(evenements, "texte") == ["Je"]
+    assert du_type(evenements, "fin") == ["L'agent a terminé."]
+
+
+def test_un_refus_suivi_d_un_tour_reussi_reste_reussi(ouvrir):
+    # Le dépassement payant peut prendre le relais : seul l'échec du tour fait le refus.
+    session, _, evenements = ouvrir([limite("rejected"), fin()])
+    assert session.envoyer("Fais.").ok
+    assert [e["statut"] for e in limites_dites(evenements)] == ["atteinte"]
+
+
+def test_un_echec_ordinaire_apres_une_alerte_n_est_pas_une_limite(ouvrir):
+    session, _, _ = ouvrir([limite("allowed_warning"), fin(result="Raté.", is_error=True)],
+                           [fin(result="Encore raté.", is_error=True)])  # fmt: skip
+    assert session.envoyer("Fais.").erreur == "Raté."
+
+
+def test_les_limites_ne_debordent_pas_sur_le_tour_suivant(ouvrir):
+    session, _, _ = ouvrir([limite("rejected"), RuntimeError("panne")],
+                           [fin(result="Raté.", is_error=True)])  # fmt: skip
+    assert session.envoyer("Un.").erreur == LIMITE_ATTEINTE
+    assert session.envoyer("Deux.").erreur == "Raté."
+
+
+def test_un_etat_permis_ou_illisible_ne_dit_rien(ouvrir):
+    illisible = RateLimitEvent(rate_limit_info=object(), uuid="u", session_id=UUID)
+    session, _, evenements = ouvrir([limite("allowed"), illisible, fin()])
+    assert session.envoyer("Fais.").ok
+    assert limites_dites(evenements) == []
+
+
+@pytest.mark.parametrize(
+    "statut, type_limite, fin_limite, part, attendu",
+    [
+        ("allowed", "five_hour", FIN_LIMITE, None, None),
+        ("inconnu", "five_hour", FIN_LIMITE, None, None),
+        ("allowed_warning", "seven_day", FIN_LIMITE, 0.9,
+         {"statut": "alerte", "limite": "seven_day", "fin": FIN_LIMITE, "utilisation": 0.9}),
+        ("rejected", None, None, None,
+         {"statut": "atteinte", "limite": "inconnue", "fin": None, "utilisation": None}),
+        ("rejected", "overage", FIN_LIMITE * 1000, True,
+         {"statut": "atteinte", "limite": "overage", "fin": FIN_LIMITE, "utilisation": None}),
+        ("rejected", "", "demain", "beaucoup",
+         {"statut": "atteinte", "limite": "inconnue", "fin": None, "utilisation": None}),
+    ],
+)  # fmt: skip
+def test_lire_limite(statut, type_limite, fin_limite, part, attendu):
+    info = RateLimitInfo(status=statut, resets_at=fin_limite, rate_limit_type=type_limite,
+                         utilization=part)  # fmt: skip
+    assert lire_limite(info) == attendu
+    assert lire_limite(None) is None
+
+
+# --- Tâche V5 : la reprise d'une session -----------------------------------------------
+
+
+def init_de(identifiant):
+    return SystemMessage(subtype="init", data={"apiKeySource": "none", "session_id": identifiant})
+
+
+def test_une_reprise_exigee_repart_dans_la_session_demandee_avec_le_message(ouvrir, tmp_path):
+    session, fabrique, _ = ouvrir([init(), fin()], session=UUID, reprise=True,
+                                  reprise_exigee=True, dossier=tmp_path)  # fmt: skip
+    resultat = session.envoyer("Le verdict complet.")
+    assert resultat.ok
+    client = fabrique.clients[0]
+    assert (client.options.session_id, client.options.resume) == (None, UUID)
+    assert client.options.cwd == tmp_path
+    assert client.consignes == ["Le verdict complet."]
+    assert session.session == UUID
+
+
+@pytest.mark.parametrize(
+    "scenario",
+    [
+        [fin(result="No conversation found with session ID", is_error=True)],
+        [RuntimeError("Claude Code returned an error result")],
+        [],
+    ],
+)
+def test_une_reprise_impossible_rend_son_erreur_a_part(ouvrir, scenario):
+    session, _, evenements = ouvrir(scenario, session=UUID, reprise=True, reprise_exigee=True)
+    resultat = session.envoyer("Le verdict.")
+    assert (resultat.ok, resultat.erreur) == (False, REPRISE_IMPOSSIBLE)
+    assert du_type(evenements, "fin") == [REPRISE_IMPOSSIBLE]
+
+
+def test_une_connexion_refusee_a_la_reprise_rend_son_erreur_a_part(ouvrir):
+    def refuser(options):
+        raise RuntimeError("Session introuvable")
+
+    session, _, _ = ouvrir(session=UUID, reprise=True, reprise_exigee=True,
+                           fabrique_client=refuser)  # fmt: skip
+    assert session.envoyer("Le verdict.").erreur == REPRISE_IMPOSSIBLE
+
+
+def test_une_autre_session_que_celle_demandee_coupe_aussitot_l_agent(ouvrir):
+    guichet = FauxGuichet(Reponse("une_fois"))
+    session, fabrique, _ = ouvrir(
+        [init_de(AUTRE), Permission("Bash", {"command": "ls"}), fin()],
+        session=UUID, reprise=True, reprise_exigee=True, guichet=guichet,
+    )  # fmt: skip
+    assert session.envoyer("Le verdict.").erreur == REPRISE_IMPOSSIBLE
+    assert guichet.demandes == []  # l'agent n'a rien fait dans une session qui n'est pas la sienne
+    assert attendre(lambda: fabrique.clients[0].deconnecte)
+    assert session.session == UUID
+
+
+def test_une_fois_la_session_reprise_un_echec_reste_ordinaire(ouvrir):
+    session, _, _ = ouvrir([init(), fin(result="Raté.", is_error=True)], session=UUID,
+                           reprise=True, reprise_exigee=True)  # fmt: skip
+    assert session.envoyer("Le verdict.").erreur == "Raté."
+
+
+def test_sans_reprise_exigee_rien_ne_change(ouvrir):
+    # La conversation de l'orchestrateur reprend sa session sans l'exiger : comme avant.
+    session, _, _ = ouvrir([init_de(AUTRE), fin(result="Raté.", is_error=True)], session=UUID,
+                           reprise=True)  # fmt: skip
+    assert session.envoyer("Suite.").erreur == "Raté."
+    neuve, fabrique, _ = ouvrir([fin(result="Raté.", is_error=True)])
+    assert neuve.envoyer("Fais.").erreur == "Raté."
+    assert (fabrique.clients[0].options.session_id, fabrique.clients[0].options.resume) == (
+        None, None
+    )  # fmt: skip
+
+
+def test_un_arret_pendant_une_reprise_reste_un_arret(ouvrir):
+    session, fabrique, _ = ouvrir([BLOQUE], session=UUID, reprise=True, reprise_exigee=True)
+    fil, rendus = en_fond(session)
+    assert commence(fabrique)
+    session.arreter()
+    fil.join(GARDE_S)
+    assert rendus[0].erreur == ARRETE
+
+
+# --- Tâche V5, seconde passe : le dépassement payant n'est pas un refus ------------------
+
+from atelier.sdk import depassement_en_service  # noqa: E402
+
+
+def depassement(type_limite="five_hour", par_raw=False):
+    """Le `rejected` que garde Claude Code 2.1.308 pendant que le dépassement payant travaille."""
+    brut = {"status": "rejected", "rateLimitType": type_limite, "resetsAt": FIN_LIMITE,
+            "overageStatus": "allowed", "isUsingOverage": True}  # fmt: skip
+    info = RateLimitInfo(status="rejected", resets_at=FIN_LIMITE, rate_limit_type=type_limite,
+                         overage_status=None if par_raw else "allowed", raw=brut)  # fmt: skip
+    return RateLimitEvent(rate_limit_info=info, uuid="u", session_id=UUID)
+
+
+@pytest.mark.parametrize("par_raw", [False, True])
+def test_en_depassement_payant_le_travail_normal_n_annonce_aucune_limite(ouvrir, par_raw):
+    session, _, evenements = ouvrir([init(), depassement(par_raw=par_raw), texte("Je"), fin()])
+    resultat = session.envoyer("Fais.")
+    assert resultat.ok and resultat.type_limite == ""
+    assert limites_dites(evenements) == []
+
+
+def test_en_depassement_payant_un_echec_garde_son_erreur_ordinaire(ouvrir):
+    session, _, evenements = ouvrir(
+        [init(), depassement("seven_day"), fin(result="Reached max turns", is_error=True)]
+    )
+    resultat = session.envoyer("Fais.")
+    assert (resultat.erreur, resultat.type_limite, resultat.fin_limite) == (
+        "Reached max turns", "", None
+    )  # fmt: skip
+    assert limites_dites(evenements) == []
+
+
+def test_le_depassement_qui_prend_le_relais_efface_un_refus_du_meme_tour(ouvrir):
+    session, _, _ = ouvrir([limite("rejected"), depassement(), RuntimeError("panne")])
+    assert session.envoyer("Fais.").erreur == "Le SDK de Claude a échoué : panne"
+
+
+@pytest.mark.parametrize(
+    "statut, depasse, brut, attendu",
+    [
+        ("rejected", "allowed", {}, True),
+        ("rejected", "allowed_warning", {}, True),
+        ("rejected", "rejected", {}, False),
+        ("rejected", None, {}, False),
+        ("rejected", None, {"isUsingOverage": True}, True),
+        ("rejected", None, {"isUsingOverage": "true"}, False),
+        ("allowed_warning", "allowed", {}, False),
+    ],
+)
+def test_depassement_en_service(statut, depasse, brut, attendu):
+    info = RateLimitInfo(status=statut, overage_status=depasse, raw=brut)
+    assert depassement_en_service(info) is attendu
+    assert depassement_en_service(None) is False
+
+
+# --- Tâche P1 : les outils refusés pendant le tour ---------------------------------------
+
+from claude_agent_sdk import TextBlock  # noqa: E402
+
+from atelier.agents import SURCHARGE, Resultat  # noqa: E402
+from atelier.sdk import est_surcharge  # noqa: E402
+
+UV_SYNC = {"command": "uv sync"}
+
+
+def refuse(nom, entree, identifiant):
+    """Une entrée de `permission_denials`, telle que Claude Code l'écrit en fin de tour."""
+    return {"tool_name": nom, "tool_use_id": identifiant, "tool_input": entree}
+
+
+def demande(nom, entree, identifiant):
+    """Étape : une demande d'autorisation qui porte son propre identifiant d'appel."""
+
+    async def demander(client):
+        contexte = ToolPermissionContext(tool_use_id=identifiant)
+        client.decisions.append(await client.options.can_use_tool(nom, entree, contexte))
+
+    return Geste(demander)
+
+
+def test_un_outil_refuse_au_guichet_et_un_refuse_par_le_sdk_sont_dans_refuses(ouvrir, tmp_path):
+    # Claude Code range aussi dans `permission_denials` l'outil que le guichet a refusé (t1) :
+    # il n'est compté qu'une fois. L'écriture (t2) a été refusée par Claude Code lui-même.
+    denials = [refuse("Bash", UV_SYNC, "t1"),
+               refuse("Write", {"file_path": f"{tmp_path}/b.py", "content": "x"}, "t2")]
+    session, _, _ = ouvrir([init(), Permission("Bash", UV_SYNC), fin(refus=denials)],
+                           guichet=FauxGuichet(Reponse("non")), dossier=tmp_path)  # fmt: skip
+    resultat = session.envoyer("Installe.")
+    assert resultat.ok
+    assert resultat.refuses == ["Bash(uv sync)", "Write(b.py)"]
+    assert resultat == Resultat(ok=True, texte="Fini.", cout_usd=0.12, tokens=120)
+
+
+@pytest.mark.parametrize("mode", ["default", "acceptEdits", "plan", "dontAsk", "auto"])
+def test_les_refus_de_fin_de_tour_comptent_quel_que_soit_le_mode(ouvrir, mode):
+    denials = [refuse("Bash", UV_SYNC, "t7"), refuse("WebFetch", {"url": "https://x.y"}, "t8")]
+    session, _, _ = ouvrir([init(mode=mode), fin(refus=denials)], mode_permission=mode)
+    assert session.envoyer("Va.").refuses == ["Bash(uv sync)", "WebFetch(https://x.y)"]
+
+
+def test_un_tour_sans_refus_rend_une_liste_vide(ouvrir):
+    session, _, _ = ouvrir([init(), Permission("Bash", {"command": "ls"}), fin(refus=[])],
+                           guichet=FauxGuichet(Reponse("une_fois")))  # fmt: skip
+    resultat = session.envoyer("Va.")
+    assert resultat.ok and resultat.refuses == []
+    assert Resultat(ok=True).refuses == []  # la valeur par défaut, pour tout autre résultat
+
+
+@pytest.mark.parametrize(
+    "guichet, attendu",
+    [
+        (None, ["Bash(uv sync)"]),  # sans guichet : refusé par le pont
+        (FauxGuichet(panne=RuntimeError("tombé")), ["Bash(uv sync)"]),
+        (FauxGuichet(Reponse("peut-être")), ["Bash(uv sync)"]),  # réponse incomprise
+        (FauxGuichet(Reponse("non", ARRETE)), []),  # un refus pour arrêt n'en est pas un
+    ],
+)
+def test_ce_que_le_pont_refuse_lui_meme_compte_sauf_un_arret(ouvrir, guichet, attendu):
+    session, fabrique, _ = ouvrir(
+        [init(), Permission("Bash", UV_SYNC), fin(refus=[refuse("Bash", UV_SYNC, "t1")])],
+        guichet=guichet,
+    )
+    resultat = session.envoyer("Installe.")
+    assert isinstance(fabrique.clients[0].decisions[0], PermissionResultDeny)
+    assert resultat.refuses == attendu
+
+
+def test_les_refus_sont_dans_l_ordre_sans_doublon_et_bornes_a_vingt(ouvrir):
+    guichet = FauxGuichet(Reponse("non"))
+    etapes = [demande("Bash", {"command": "uv run pytest"}, "g1"),
+              demande("Bash", UV_SYNC, "g2"), demande("Bash", UV_SYNC, "g3")]  # fmt: skip
+    denials = [refuse("Bash", UV_SYNC, f"d{n}") for n in range(3)]
+    denials += [refuse("Read", {"file_path": f"f{n}.py"}, f"r{n}") for n in range(40)]
+    session, _, _ = ouvrir([init(), *etapes, fin(refus=denials)], guichet=guichet)
+    refuses = session.envoyer("Va.").refuses
+    assert refuses[:3] == ["Bash(uv run pytest)", "Bash(uv sync)", "Read(f0.py)"]
+    assert len(refuses) == 20 and len(set(refuses)) == 20
+    assert refuses[-1] == "Read(f17.py)"  # deux commandes, puis f0 à f17
+
+
+def test_un_refus_de_l_arbitre_compte_meme_sans_message_de_fin(ouvrir):
+    session, _, _ = ouvrir(
+        [init(mode="auto"), outil("Bash", CURL, "t7"), resultat_outil("t7", TEXTE_REFUS),
+         RuntimeError("exit code 1")],
+        mode_permission="auto",
+    )  # fmt: skip
+    resultat = session.envoyer("Va.")
+    assert not resultat.ok and resultat.refuses == ["Bash(curl https://example.com)"]
+
+
+def test_les_refus_ne_debordent_pas_sur_le_tour_suivant_et_un_refus_mal_forme_ne_casse_rien(
+    ouvrir,
+):
+    denials = [refuse("Bash", UV_SYNC, "t1"), "illisible", None,
+               {"tool_name": None, "tool_use_id": ["x"], "tool_input": "pas un objet"}]
+    session, _, _ = ouvrir([init(), fin(refus=denials)])
+    assert session.envoyer("Un.").refuses == ["Bash(uv sync)", "Outil"]
+    # Un refus au guichet, puis une panne qui coupe le client ; le tour suivant n'en hérite pas.
+    session, _, _ = ouvrir([init(), Permission("Bash", UV_SYNC), RuntimeError("panne")], [fin()],
+                           guichet=FauxGuichet(Reponse("non")))  # fmt: skip
+    assert session.envoyer("Un.").refuses == ["Bash(uv sync)"]
+    assert session.envoyer("Deux.").refuses == []
+
+
+# --- Tâche P1 : une surcharge du serveur n'est pas une limite atteinte -------------------
+
+# Les textes exacts du Claude Code livré avec le SDK (2.1.308), lus dans son programme.
+SERVEUR_LIMITE = ("API Error: Server is temporarily limiting requests (not your usage limit) · "
+                  "Rate limited")  # fmt: skip
+OPUS_CHARGE = "Opus is experiencing high load. Switch to Sonnet."
+VRAIE_LIMITE = "You've hit your limit · resets 3pm (Europe/Paris)"
+
+
+def erreur_api(texte_lu):
+    """Le message par lequel Claude Code dit une erreur « rate_limit » de l'API."""
+    return AssistantMessage(content=[TextBlock(text=texte_lu)], model="opus", error="rate_limit")
+
+
+def fin_en_erreur(texte_lu, statut=None):
+    return dataclasses.replace(fin(result=texte_lu, is_error=True), api_error_status=statut)
+
+
+@pytest.mark.parametrize(
+    "etapes",
+    [
+        [erreur_api(SERVEUR_LIMITE), fin_en_erreur(SERVEUR_LIMITE, 429)],
+        [erreur_api(OPUS_CHARGE), fin_en_erreur(OPUS_CHARGE)],
+        [fin_en_erreur(SERVEUR_LIMITE, 429)],  # le seul message de fin suffit
+        [erreur_api("Fable is experiencing high load, please use /model to switch to Sonnet"),
+         RuntimeError("exit code 1")],  # sans message de fin
+    ],
+)  # fmt: skip
+def test_une_surcharge_rend_son_erreur_a_part_et_non_la_limite(ouvrir, etapes):
+    session, _, evenements = ouvrir([init(), *etapes])
+    resultat = session.envoyer("Fais.")
+    assert (resultat.ok, resultat.erreur) == (False, SURCHARGE)
+    assert (resultat.type_limite, resultat.fin_limite) == ("", None)
+    assert SURCHARGE != LIMITE_ATTEINTE
+    assert limites_dites(evenements) == [] and du_type(evenements, "fin") == [SURCHARGE]
+
+
+@pytest.mark.parametrize(
+    "etapes",
+    [
+        [erreur_api(VRAIE_LIMITE), fin_en_erreur(VRAIE_LIMITE, 429)],
+        [fin_en_erreur("API Error: 429", 429)],
+        # un vrai refus annoncé dans le même tour l'emporte sur le texte de la surcharge
+        [limite("rejected"), erreur_api(SERVEUR_LIMITE), fin_en_erreur(SERVEUR_LIMITE, 429)],
+    ],
+)
+def test_une_vraie_limite_rend_toujours_limite_atteinte(ouvrir, etapes):
+    session, _, _ = ouvrir([init(), *etapes])
+    assert session.envoyer("Fais.").erreur == LIMITE_ATTEINTE
+
+
+def test_une_surcharge_dans_un_tour_reussi_ou_sur_le_tour_d_avant_ne_change_rien(ouvrir):
+    session, _, _ = ouvrir([erreur_api(OPUS_CHARGE), fin()])
+    assert session.envoyer("Un.").ok  # seul l'échec du tour fait la surcharge
+    session, _, _ = ouvrir([erreur_api(OPUS_CHARGE), RuntimeError("panne")],
+                           [fin(result="Raté.", is_error=True)])  # fmt: skip
+    assert session.envoyer("Un.").erreur == SURCHARGE
+    assert session.envoyer("Deux.").erreur == "Raté."
+
+
+@pytest.mark.parametrize(
+    "texte_lu, attendu",
+    [
+        (SERVEUR_LIMITE, True),
+        (OPUS_CHARGE, True),
+        ("SERVER IS TEMPORARILY LIMITING REQUESTS (NOT YOUR USAGE LIMIT)", True),
+        (VRAIE_LIMITE, False),
+        ("API Error: Request rejected (429) · this may be a temporary capacity issue.", False),
+        ("", False),
+        (None, False),
+        (429, False),
+    ],
+)
+def test_est_surcharge(texte_lu, attendu):
+    assert est_surcharge(texte_lu) is attendu

@@ -2,6 +2,12 @@
 
 Règle de fond : on dose selon ce que coûterait une erreur passée inaperçue.
 On part bas pour le mécanique, au plus haut pour la physique et les formules de norme.
+Haiku n'est plus un point de départ : il reste dans l'échelle, sous Sonnet, pour un plafond
+ou un réglage de profil qui le demanderait.
+
+La vérification suit la même règle : complète pour ce qui est délicat, de norme ou de
+réparation ; bornée pour la fonctionnalité courante ; mécanique seule (sans vérificateur)
+pour le travail mécanique.
 """
 
 from __future__ import annotations
@@ -18,7 +24,7 @@ EFFORTS_FR = {
 }
 
 DEPART = {
-    "mecanique": ("haiku", "low"),
+    "mecanique": ("sonnet", "low"),
     "courante": ("sonnet", "medium"),
     "delicate": ("opus", "high"),
     "physique": ("fable", "max"),
@@ -32,6 +38,44 @@ TYPES_FR = {
     "physique": "Physique",
     "conception": "Conception",
 }
+
+
+# Les trois niveaux de vérification, du plus exigeant au plus léger.
+COMPLETE = "complete"
+BORNEE = "bornee"
+MECANIQUE = "mecanique"
+NIVEAUX = (COMPLETE, BORNEE, MECANIQUE)
+
+NIVEAUX_FR = {
+    COMPLETE: (
+        "Vérification complète : un vérificateur d'un modèle au-dessus éprouve les tests en "
+        "cassant le code, refait ses propres essais et cherche à mettre le livrable en défaut."
+    ),
+    BORNEE: (
+        "Vérification bornée : un vérificateur du même modèle contrôle les critères et ne "
+        "cherche que ce qui bloquerait ; les remarques mineures ne recalent pas."
+    ),
+    MECANIQUE: (
+        "Vérification mécanique seule : les contrôles du profil, le contrôle du périmètre et "
+        "la lecture du diff, sans vérificateur."
+    ),
+}
+
+# Le niveau de vérification de départ par type de tâche. « reparation » n'est pas un type
+# que l'orchestrateur choisit : c'est la tâche que le moteur ajoute seul quand la branche
+# principale est rouge (paramètre `reparation` de `niveau_verification`).
+REPARATION = "reparation"
+NIVEAU_DEPART = {
+    "mecanique": MECANIQUE,
+    "courante": BORNEE,
+    "delicate": COMPLETE,
+    "physique": COMPLETE,
+    "conception": COMPLETE,
+    REPARATION: COMPLETE,
+}
+
+# Les types que le profil ne peut pas faire descendre sous la vérification complète.
+PLANCHER_COMPLET = frozenset({"delicate", "physique", REPARATION})
 
 
 def depart(type_tache: str, table: dict | None = None) -> tuple[str, str]:
@@ -76,6 +120,54 @@ def verificateur(modele: str, effort: str) -> tuple[str, str]:
         plancher = max(EFFORTS.index(effort), EFFORTS.index("medium"))
         return MODELES[rang + 1], EFFORTS[plancher]
     return modele, "max"
+
+
+def niveau_verification(
+    type_tache: str, reglages: dict | None = None, reparation: bool = False
+) -> str:
+    """Rend le niveau de vérification d'une tâche : « complete », « bornee » ou « mecanique ».
+
+    `reglages` est la clé `verification` du profil, par exemple {"courante": "complete"}.
+    Une valeur inconnue, mal formée ou une clé qui n'est pas un dictionnaire est ignorée.
+    Les types délicat, physique et la réparation restent en vérification complète quoi que
+    dise le profil. Un type inconnu reçoit la vérification complète : dans le doute, on vérifie.
+    `reparation` dit que la tâche est une réparation de la branche principale, quel que soit
+    son type.
+    """
+    cle = REPARATION if reparation else type_tache
+    if cle in PLANCHER_COMPLET:
+        return COMPLETE
+    niveau = NIVEAU_DEPART.get(cle, COMPLETE)
+    if isinstance(reglages, dict):
+        demande = reglages.get(cle)
+        if isinstance(demande, str) and demande in NIVEAUX:
+            niveau = demande
+    return niveau
+
+
+def libelle_niveau(niveau: str) -> str:
+    """Écrit un niveau de vérification en une phrase, pour l'affichage.
+
+    Un niveau inconnu est lu comme la vérification complète, comme partout ailleurs.
+    """
+    return NIVEAUX_FR.get(niveau, NIVEAUX_FR[COMPLETE])
+
+
+def verificateur_selon_niveau(modele: str, effort: str, niveau: str) -> tuple[str, str] | None:
+    """Rend le dosage du vérificateur selon le niveau de vérification, ou None sans vérificateur.
+
+    - complète : un modèle au-dessus de l'ouvrier, exactement comme `verificateur` ;
+    - bornée : le même modèle que l'ouvrier, au même effort, sans descendre sous l'effort moyen ;
+    - mécanique seule : aucun vérificateur (None).
+    Un niveau inconnu est traité comme la vérification complète.
+    """
+    if niveau == MECANIQUE:
+        return None
+    if niveau == BORNEE:
+        MODELES.index(modele)  # un modèle hors de l'échelle lève, comme dans `verificateur`
+        plancher = max(EFFORTS.index(effort), EFFORTS.index("medium"))
+        return modele, EFFORTS[plancher]
+    return verificateur(modele, effort)
 
 
 def libelle(modele: str, effort: str) -> str:

@@ -14,7 +14,8 @@ from pathlib import Path
 from atelier import archives
 from atelier import carte as carte_du_code
 from atelier.agents import AgentClaude
-from atelier.controles import ControlesGit, expliquer_refus_git
+from atelier.controles import ControlesGit, expliquer_refus_git, fichiers_partages
+from atelier.git import IDENTITE_DE_REPLI, lancer_git
 from atelier.modele import Chantier, Contrat, ProjetImpossible
 from atelier.serveur import Atelier
 
@@ -102,24 +103,19 @@ def ouvrir_depot(depot: Path) -> Atelier:
     profil = lire_profil(depot)
     chantier = lire_etat(depot, profil.get("nom", depot.name))
     controles = ControlesGit(
-        depot, profil.get("commandes", []), delai_s=profil.get("delai_controles_s")
+        depot,
+        profil.get("commandes", []),
+        delai_s=profil.get("delai_controles_s"),
+        partages=fichiers_partages(profil),
     )
     return Atelier(depot, chantier, AgentClaude(profil), controles, profil)
 
 
 def _git(dossier: Path, *arguments: str, delai: int = 120) -> str:
-    # Pas de question posée par git : l'Atelier tourne sans terminal, il échouerait en silence.
-    env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+    # Tout échec de git devient un ProjetImpossible, que l'écran montre tel quel.
     try:
-        sortie = subprocess.run(
-            ["git", *arguments],
-            cwd=dossier,
-            capture_output=True,
-            text=True,
-            check=True,
-            env=env,
-            timeout=delai,
-        )
+        sortie = lancer_git(dossier, *arguments, delai=delai)
+        sortie.check_returncode()
     except subprocess.TimeoutExpired as erreur:
         raise ProjetImpossible("Git n'a pas répondu à temps.") from erreur
     except (OSError, subprocess.CalledProcessError) as erreur:
@@ -136,11 +132,9 @@ def creer_depot(dossier: Path, nom: str) -> Atelier:
     (dossier / "chantier" / "profil.json").write_text(profil + "\n", "utf-8")
     (dossier / ".gitignore").write_text(".atelier/\n", "utf-8")
     _git(dossier, "init", "-q", "-b", "main")
-    identite = []
-    if not subprocess.run(
-        ["git", "config", "user.email"], cwd=dossier, capture_output=True, text=True
-    ).stdout.strip():
-        identite = ["-c", "user.name=Atelier", "-c", "user.email=atelier@localhost"]
+    identite: tuple[str, ...] = ()
+    if not lancer_git(dossier, "config", "user.email").stdout.strip():
+        identite = IDENTITE_DE_REPLI
     _git(dossier, "add", "-A")
     _git(dossier, *identite, "commit", "-q", "-m", "Création du projet")
     return ouvrir_depot(dossier)
@@ -326,7 +320,7 @@ class Projets:
                 carte = carte_du_code.charger(dossier)
             moment = _activite(dossier)
             fiches.append({
-                "id": cle, "nom": nom, "courant": cle == self.courant, "ouvert": bool(atelier),
+                "id": cle, "nom": nom, "courant": cle == self.courant,
                 "chantier": resume, "archives": passes,
                 "fichiers": len(carte["fichiers"]) if carte else 0,
                 "en_ligne": depot_en_ligne(dossier),

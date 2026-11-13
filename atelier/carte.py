@@ -19,8 +19,10 @@ import threading
 from datetime import datetime
 from pathlib import Path
 
-from atelier.archives import date_fr
+from atelier.archives import cout_fr, date_fr
 from atelier.consignes import dernier_json
+from atelier.git import lancer_git
+from atelier.modele import ecrire_d_un_seul_geste
 
 FICHIER = Path(".atelier") / "carte.json"
 DOSSIERS_IGNORES = set(
@@ -79,15 +81,8 @@ def genre(chemin: str) -> str:
 
 
 def _git(depot: Path, *arguments: str) -> str:
-    environnement = {**os.environ, "GIT_TERMINAL_PROMPT": "0"}
-    resultat = subprocess.run(
-        ["git", "-C", str(depot), *arguments],
-        capture_output=True,
-        text=True,
-        timeout=60,
-        stdin=subprocess.DEVNULL,
-        env=environnement,
-    )
+    # Un code d'erreur de git devient une OSError, comme un git introuvable.
+    resultat = lancer_git(depot, *arguments, delai=60)
     if resultat.returncode != 0:
         raise OSError(resultat.stderr.strip() or "git a échoué")
     return resultat.stdout
@@ -387,11 +382,6 @@ def liens_et_noms(depot: Path, fiches: dict) -> tuple[list[list[str]], dict[str,
             if pris:
                 noms[chemin + SEP + cible] = pris[:12]
     return sorted([a, b] for a, b in paires), noms
-
-
-def liens(depot: Path, fiches: dict) -> list[list[str]]:
-    """Les liens « se sert de » entre fichiers du projet : [fichier, fichier dont il se sert]."""
-    return liens_et_noms(depot, fiches)[0]
 
 
 BROUILLON_MAX = 40  # fichiers lus au plus dans la copie de travail d'une tâche
@@ -709,11 +699,7 @@ def charger(depot: Path) -> dict | None:
 
 
 def sauver(depot: Path, carte: dict) -> None:
-    chemin = Path(depot) / FICHIER
-    chemin.parent.mkdir(parents=True, exist_ok=True)
-    provisoire = chemin.with_suffix(".tmp")
-    provisoire.write_text(json.dumps(carte, ensure_ascii=False), "utf-8")
-    provisoire.replace(chemin)
+    ecrire_d_un_seul_geste(Path(depot) / FICHIER, json.dumps(carte, ensure_ascii=False))
 
 
 # --- ce que voit le tableau de bord -----------------------------------------------------------
@@ -771,12 +757,9 @@ def vue(carte: dict, en_cours: dict[str, list[str]] | None = None, depot=None) -
         "liens": carte["liens"],
         "noms": carte.get("noms", {}),
         "portrait": synthese.get("portrait", "") if synthese else "",
-        "portrait_claude": bool(synthese.get("portrait")),
         "portrait_a_jour": a_jour_synthese,
         "lisezmoi": premier_paragraphe(depot, carte) if depot else "",
         "dossiers": synthese.get("dossiers", {}),
-        "supprimes": carte["changements"]["supprimes"],
-        "nouveaux_absents": sorted(c for c in en_cours if c not in carte["fichiers"]),
     }
 
 
@@ -899,19 +882,27 @@ class SuiviCarte:
     def _analyser(self) -> None:
         with self.verrou:
             self.travail, self.probleme = "analyse", ""
+        self._relever_puis_expliquer("L'analyse s'est arrêtée")
+        self.demarrer_veille()
+
+    def _relever_puis_expliquer(self, arret: str) -> None:
+        """Relève la carte, la sauve, puis explique ce qui reste à expliquer.
+
+        Une erreur ne remonte pas : elle est écrite dans `probleme`, précédée de `arret`. Dans
+        tous les cas, le travail en cours est remis à zéro à la fin.
+        """
         try:
             carte = relever(self.depot, self.carte)
             with self.verrou:
                 self.carte = carte
                 sauver(self.depot, carte)
             self._expliquer()
-        except Exception as erreur:  # noqa: BLE001 - l'analyse ne doit jamais tuer le serveur
+        except Exception as erreur:  # noqa: BLE001 - le travail de fond ne doit jamais tuer le serveur
             with self.verrou:
-                self.probleme = f"L'analyse s'est arrêtée : {erreur}"
+                self.probleme = f"{arret} : {erreur}"
         finally:
             with self.verrou:
                 self.travail, self.restants = "", 0
-        self.demarrer_veille()
 
     def _expliquer(self) -> None:
         with self.verrou:
@@ -972,18 +963,9 @@ class SuiviCarte:
         return True
 
     def _mettre_a_jour(self) -> None:
-        try:
-            carte = relever(self.depot, self.carte)
-            with self.verrou:
-                self.carte = carte
-                sauver(self.depot, carte)
-            self._expliquer()
-        except Exception as erreur:  # noqa: BLE001
-            with self.verrou:
-                self.probleme = f"La mise à jour de la carte s'est arrêtée : {erreur}"
-        finally:
-            with self.verrou:
-                self.travail, self.restants = "", 0
+        with self.verrou:
+            self.probleme = ""
+        self._relever_puis_expliquer("La mise à jour de la carte s'est arrêtée")
 
     def signaler(self) -> None:
         """Une nouvelle version vient peut-être d'arriver : la veille regarde tout de suite."""
@@ -1041,7 +1023,7 @@ class SuiviCarte:
                 "analyse_le": date_fr(carte.get("analyse_le", "")),
                 "maj_le": date_fr(carte.get("maj_le", "")),
                 "changements": bilan_changements(carte["changements"]),
-                "cout": f"{carte.get('cout_usd', 0.0):.2f}".replace(".", ",") + " $",
+                "cout": cout_fr(carte.get('cout_usd', 0.0)),
                 "en_cours": _liste_en_cours(en_cours),
                 "provisoire": prov or {"fichiers": [], "liens": []},
                 "auto": not self.explicateur.reel,

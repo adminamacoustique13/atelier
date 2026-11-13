@@ -13,6 +13,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from atelier.dosage import EFFORTS_FR
 from atelier.modele import ETATS_FR, Chantier, ecrire_cahier
 
 NOM_MAX = 80
@@ -21,8 +22,83 @@ MOIS = (
     "juillet", "août", "septembre", "octobre", "novembre", "décembre",
 )  # fmt: skip
 AUTEURS = {"toi": "Toi", "orchestrateur": "Orchestrateur", "moteur": "Atelier"}
-EFFORTS = {"low": "faible", "medium": "moyen", "high": "élevé", "xhigh": "très élevé", "max": "max"}
 IDENTIFIANT = re.compile(r"^\d{4}-\d{2}-\d{2}-\d{6}(-\d+)?$")
+
+
+def cout_fr(montant: float) -> str:
+    """Un coût en dollars, écrit à la française : deux décimales, virgule, puis « $ »."""
+    return f"{montant:.2f}".replace(".", ",") + " $"
+
+
+# Ce que le journal dit du temps : chaque groupe rassemble des clés de durées du moteur
+# (`moteur.ATTENTE` et les clés de `moteur.PHASES`). Une clé inconnue compte dans « autre ».
+GROUPES = (
+    ("attendre", "Temps passé à attendre", ("attente", "place", "jeton", "pause")),
+    ("ecrire", "Temps passé à écrire (préparation de la copie comprise)",
+     ("preparation", "ouvrier", "reprise")),
+    ("controler", "Temps passé à contrôler", ("perimetre", "controles")),
+    ("verifier", "Temps passé à vérifier", ("verificateur",)),
+    ("enregistrer", "Temps passé à enregistrer", ("enregistrement",)),
+    ("autre", "Temps passé ailleurs", ()),
+)  # fmt: skip
+VERBES = {
+    "attendre": "attendre", "ecrire": "écrire", "controler": "contrôler",
+    "verifier": "vérifier", "enregistrer": "enregistrer", "autre": "autre",
+}  # fmt: skip
+
+
+def duree_fr(secondes: float) -> str:
+    """Une durée lisible : « 45 s », « 3 min 20 s » sous dix minutes, « 12 min », « 1 h 05 min »."""
+    total = max(0, round(secondes))
+    if total < 60:
+        return f"{total} s"
+    minutes, reste = divmod(total, 60)
+    if total < 600:
+        return f"{minutes} min {reste} s" if reste else f"{minutes} min"
+    minutes = round(total / 60)
+    if minutes < 60:
+        return f"{minutes} min"
+    heures, minutes = divmod(minutes, 60)
+    return f"{heures} h {minutes:02d} min"
+
+
+def temps_par_groupe(tache) -> dict[str, float] | None:
+    """Les secondes d'une tâche par groupe de `GROUPES`, toutes tentatives comprises.
+
+    None si aucune entrée de son historique ne porte de durées (état d'avant les mesures).
+    """
+    mesurees = [h["durees"] for h in tache.historique if isinstance(h.get("durees"), dict)]
+    if not mesurees:
+        return None
+    groupe_de = {cle: nom for nom, _, cles in GROUPES for cle in cles}
+    temps = {nom: 0.0 for nom, _, _ in GROUPES}
+    for durees in mesurees:
+        for cle, secondes in durees.items():
+            if isinstance(secondes, (int, float)):
+                temps[groupe_de.get(cle, "autre")] += secondes
+    return temps
+
+
+def _temps(chantier: Chantier) -> tuple[list[list[str]], list[dict]]:
+    """Les lignes de temps du chantier pour « chiffres », et le temps de chaque tâche."""
+    taches, totaux = [], {nom: 0.0 for nom, _, _ in GROUPES}
+    for tache in chantier.taches:
+        temps = temps_par_groupe(tache)
+        if temps is None:
+            continue
+        for nom, secondes in temps.items():
+            totaux[nom] += secondes
+        phases = {nom: duree_fr(s) for nom, s in temps.items() if nom != "autre" or s}
+        morceaux = ", ".join(f"{VERBES[nom]} {texte}" for nom, texte in phases.items())
+        pluriel = "s" if tache.tentatives > 1 else ""
+        texte = f"{tache.tentatives} tentative{pluriel} : {morceaux}."
+        taches.append({"id": tache.id, "titre": tache.titre, "tentatives": tache.tentatives,
+                       "phases": phases, "texte": texte})  # fmt: skip
+    if not taches:
+        return [], []
+    lignes = [[libelle, duree_fr(totaux[nom])] for nom, libelle, _ in GROUPES
+              if nom != "autre" or totaux[nom]]  # fmt: skip
+    return lignes, taches
 
 
 def date_fr(iso: str) -> str:
@@ -56,7 +132,7 @@ def nom_propose(chantier: Chantier) -> str:
 def _livree(tache) -> dict:
     derniere = tache.historique[-1] if tache.historique else {}
     modele = str(derniere.get("modele") or tache.modele).capitalize()
-    effort = EFFORTS.get(derniere.get("effort") or tache.effort, tache.effort)
+    effort = EFFORTS_FR.get(derniere.get("effort") or tache.effort, tache.effort)
     tentative = derniere.get("tentative") or tache.tentatives or 1
     detail = f"Vérifiée à la tentative {tentative}"
     if modele:
@@ -116,7 +192,8 @@ def journal(chantier: Chantier, ident: str, nom: str, archive_le: str, contexte:
     """
     livrees = [_livree(t) for t in chantier.taches if t.etat == "verifie"]
     inachevees = [_inachevee(chantier, t) for t in chantier.taches if t.etat != "verifie"]
-    cout = f"{chantier.cout_usd:.2f}".replace(".", ",") + " $"
+    cout = cout_fr(chantier.cout_usd)
+    lignes_de_temps, temps = _temps(chantier)
     return {
         "id": ident,
         "nom": nettoyer_nom(nom) or nom_propose(chantier),
@@ -129,7 +206,9 @@ def journal(chantier: Chantier, ident: str, nom: str, archive_le: str, contexte:
             ["Agents lancés", str(chantier.agents_lances)],
             ["Montées en gamme", str(chantier.montees)],
             ["Coût équivalent", cout],
+            *lignes_de_temps,
         ],
+        "temps": temps,
         "en_ligne": _en_ligne(
             contexte.get("mode", ""), contexte.get("distant", ""),
             contexte.get("probleme", ""), len(livrees),
@@ -163,6 +242,9 @@ def journal_md(j: dict) -> str:
     decisions = [f"- {d['question']} → {d['reponse']}" for d in j["decisions"]]
     lignes += decisions or ["Aucune."]
     lignes += ["", "## Les chiffres", ""] + [f"- {nom} : {valeur}" for nom, valeur in j["chiffres"]]
+    if j.get("temps"):  # un journal d'avant les mesures n'a pas cette partie
+        lignes += ["", "## Le temps de chaque tâche", ""]
+        lignes += [f"- {t['id']} — {t['titre']} : {t['texte']}" for t in j["temps"]]
     lignes += ["", "## Le fil complet", ""]
     lignes += [f"- {e['heure']} · {e['auteur']} : {e['texte']}" for e in j["fil"]]
     return "\n".join(lignes) + "\n"

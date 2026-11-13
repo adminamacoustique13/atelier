@@ -13,7 +13,8 @@
 <link rel="manifest" href="/manifest.webmanifest">
 <style>
 /* Atelier : noir, bleu nuit, ambre, gris clair, blanc.
-   Ambre = ce qui t'attend, et rien d'autre. Blanc = vérifié. Bleu acier (le bleu nuit éclairci) = en cours.
+   Ambre = ce qui t'attend, et ce qui demande ton attention : une alerte, un dépôt en ligne en échec,
+   un bouton qui confirme, un mode refusé ou appliqué autrement que choisi. Blanc = vérifié. Bleu acier (le bleu nuit éclairci) = en cours.
    Un refus se dit par des points creux, jamais par une couleur de plus.
    Trois polices livrées avec l'Atelier : Geist pour lire, Geist Mono pour les étiquettes et les chiffres,
    Doto (des points lumineux) pour le nom ATELIER et les grands nombres. */
@@ -22,13 +23,11 @@
 @font-face { font-family: "Doto"; src: url("/polices/doto.woff") format("woff"); font-weight: 900; font-display: swap; }
 :root {
   color-scheme: dark;
-  --noir: #000000; --nuit: #141a2c; --ambre: #e8953a; --gris: #dcdcdc; --blanc: #ffffff;
+  --noir: #000000; --ambre: #e8953a; --gris: #dcdcdc; --blanc: #ffffff;
   --fond: var(--noir); --surface: #0e1220; --surface-haut: #151b2d; --creux: rgba(0, 0, 0, 0.32);
   --bord: rgba(220, 220, 220, 0.09); --bord-fort: rgba(220, 220, 220, 0.17); --trait: rgba(220, 220, 220, 0.08);
   --texte: var(--blanc); --discret: rgba(220, 220, 220, 0.74); --faible: rgba(220, 220, 220, 0.52); --eteint: rgba(220, 220, 220, 0.12);
   --attend: var(--ambre); --verifie: var(--blanc); --en-cours: #8297c4;
-  /* Les anciens noms, gardés pour les morceaux qui les lisent encore */
-  --reussite: var(--verifie); --refus: var(--attend); --change: var(--gris); --fragile: var(--blanc); --plein: var(--blanc); --sur-plein: var(--noir);
   --ombre: inset 0 1px 0 rgba(255, 255, 255, 0.06), 0 1px 0 rgba(0, 0, 0, 0.6), 0 24px 40px -24px rgba(0, 0, 0, 0.85);
   --rayon: 18px;
   --sans: "Geist", -apple-system, "SF Pro Text", system-ui, "Segoe UI", sans-serif;
@@ -210,7 +209,7 @@ textarea::placeholder { color: var(--faible); }
 .pages { width: 100%; max-width: 1440px; margin: 0 auto; padding: 0 0 6px; display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 12px; height: max-content; }
 .pages > * { grid-column: 1 / -1; }
 .pages .m4 { grid-column: span 4; } .pages .m5 { grid-column: span 5; } .pages .m3 { grid-column: span 3; }
-.pages .m7 { grid-column: span 7; } .pages .m8 { grid-column: span 8; } .pages .m9 { grid-column: span 9; }
+.pages .m7 { grid-column: span 7; } .pages .m9 { grid-column: span 9; }
 .carte { border-radius: var(--rayon); padding: 16px 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
 .carte.attend { background: linear-gradient(180deg, #221a14, #121624); }
 .carte.attend h2 .note { color: var(--attend); }
@@ -331,7 +330,6 @@ td.droite, th.droite { text-align: right; }
 .noeud.choisie { outline: 1.5px solid var(--gris); outline-offset: 3px; }
 .noeud.fixe { cursor: default; }
 .noeud .port { position: absolute; top: 29px; width: 7px; height: 7px; border-radius: 50%; background: var(--fond); border: 1.5px solid rgba(220, 220, 220, 0.35); }
-.noeud .port.g { left: -4px; } .noeud .port.d { right: -4px; }
 .noeud .port.h, .noeud .port.b { left: calc(50% - 3.5px); } .noeud .port.h { top: -4px; } .noeud .port.b { top: auto; bottom: -4px; }
 .etage-titre.vertical { width: 84px; line-height: 1.5; white-space: normal; }
 .etat-mot.verifie { color: var(--verifie); } .etat-mot.attend { color: var(--attend); } .etat-mot.en_cours, .etat-mot.en_verification { color: var(--en-cours); }
@@ -395,6 +393,8 @@ td.droite, th.droite { text-align: right; }
 button.discret { height: 26px; padding: 0 10px; font-size: 11.5px; color: var(--discret); }
 .maj-phrase { flex: none; margin: -6px 6px 0; color: var(--discret); font-size: 12px; overflow-wrap: anywhere; }
 .maj-phrase .page { display: block; color: var(--faible); }
+/* La phrase de panne, sous l'en-tête comme celle de la mise à jour : un seul endroit, visible quel que soit l'onglet. */
+.panne { flex: none; margin: -6px 6px 0; color: var(--attend); font-size: 12px; overflow-wrap: anywhere; }
 #maj[disabled] { opacity: 0.6; cursor: default; }
 .nouveau-chantier, #form-nouveau-chantier { display: flex; flex-direction: column; gap: 8px; }
 .nouveau-chantier > .boutons { align-items: center; gap: 10px; }
@@ -678,18 +678,16 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
 /* ---------- Écrans étroits ---------- */
 @media (max-width: 1100px) {
   .pages .m3, .pages .m4, .pages .m5 { grid-column: span 6; }
-  .pages .m7, .pages .m8, .pages .m9 { grid-column: 1 / -1; }
+  .pages .m7, .pages .m9 { grid-column: 1 / -1; }
   .salle-attente { width: 320px; }
   .explorateur-cadre { flex-basis: 270px; }
 }
 @media (max-width: 900px) {
   .app { padding: 0 10px 10px; }
-  .pages > *, .pages .m3, .pages .m4, .pages .m5, .pages .m7, .pages .m8, .pages .m9 { grid-column: 1 / -1; }
+  .pages > *, .pages .m3, .pages .m4, .pages .m5, .pages .m7, .pages .m9 { grid-column: 1 / -1; }
   #vue-code.active { flex-direction: column; overflow-y: auto; }
   .explorateur-cadre { flex: none; height: 50vh; }
   .code-cadre { flex: none; min-height: 70vh; }
-  .voisins-toile { grid-template-columns: minmax(0, 1fr); gap: 18px; }
-  .voisins-toile svg.fleches { display: none; }
   .journal { padding-left: 0; }
   .agent-ligne { grid-template-columns: 40px minmax(0, 1fr); }
   .agent-ligne .role { display: none; }
@@ -730,9 +728,10 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
     </nav>
     <div class="pousse"></div>
     <button type="button" class="discret" id="maj" data-action="maj" hidden>Mettre à jour</button>
-    <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="pastille-cout"></span><span id="mode"></span></div>
+    <div class="pilule infos" id="infos"><span id="pastille-agents"></span><span id="mode"></span></div>
   </header>
   <p class="maj-phrase" id="maj-phrase" role="status" hidden></p>
+  <p class="panne" id="panne" role="alert" hidden></p>
 
   <section class="vue" id="vue-accueil" aria-label="Accueil">
     <div class="accueil-defile">
@@ -792,7 +791,7 @@ button.tuile-action[hidden], .hero-actions[hidden] { display: none; }
 
   <section class="vue defilante" id="vue-chantier" aria-label="Chantier">
     <div class="pages">
-      <article class="carte m4"><h2><span class="num">01</span>Orchestrateur<i class="note">Fable · élevé</i></h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="compteurs" id="compteurs"></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
+      <article class="carte m4"><h2><span class="num">01</span>Orchestrateur<i class="note" id="note-orchestrateur"></i></h2><div class="tete-orch"><div id="anneau"></div><div><p class="point" id="point">Chargement du chantier.</p><p class="calme" id="objectif"></p></div></div><div class="compteurs" id="compteurs"></div><div class="nouveau-chantier"><div class="boutons"><button type="button" class="discret" id="nouveau-chantier" data-action="nouveau-chantier" title="Archive ce chantier sous un nom et repart d'une page blanche dans ce projet. Le code du projet n'est pas touché.">Nouveau chantier</button><span class="petit" id="nouveau-chantier-phrase" role="status"></span></div><form id="form-nouveau-chantier" hidden><label class="etiquette" for="nom-chantier">Nom du chantier qui se termine</label><input id="nom-chantier" type="text" maxlength="80" autocomplete="off" spellcheck="true"><p class="petit">Il sera archivé avec un journal de ce qui a été livré, que tu pourras relire plus bas. Le projet repart ensuite d'une page blanche, et l'orchestrateur ne se souviendra de rien.</p><div class="boutons"><button class="principal" type="submit" id="archiver-chantier">Archiver et repartir</button><button type="button" data-action="nouveau-chantier-annuler">Annuler</button></div></form></div></article>
       <article class="carte m5" id="carte-attente"><h2><span class="num">02</span>Ce qui t'attend<i class="note" id="attente-note"></i></h2><div id="attente" style="display: flex; flex-direction: column; gap: 10px"></div></article>
       <article class="carte m3"><h2><span class="num">03</span>Enveloppe<i class="note">contrat</i></h2><div id="jauges" style="display: flex; flex-direction: column; gap: 14px; flex: 1"></div></article>
       <article class="carte" id="carte-mode" hidden><h2>Mode des ouvriers</h2><div class="modes-cadre"><div id="mode-ouvriers"></div><div id="mode-ouvriers-etat" aria-live="polite"></div></div></article>
@@ -892,12 +891,26 @@ const franchies = new Set();
 /* Ce que la page retient entre deux interrogations du serveur : cartes d'autorisation (champ de refus,
    envoi en cours, remarque), détails dépliés, journaux dépliés, arrêts armés ou demandés, avis passager. */
 const cartes = new Map(), details = new Set(), deroules = new Set(), arretes = new Set();
-let armee = "", armeeLe = 0, minuteArmee = null, avisTexte = "", minuteAvis = null;
+let armee = "", armeeLe = 0, minuteArmee = null, avisTexte = "";
 
 const propre = (texte) => String(texte ?? "").replace(/[&<>"']/g,
   (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const nombre = (n) => Number(n || 0).toLocaleString("fr-FR");
-const euros = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " $";
+/* Un coût sans son unité, toujours avec deux décimales : « 1 234,50 ». */
+const montant = (n) => Number(n || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const euros = (n) => montant(n) + " $";
+/* Un nombre de tokens en clair, rendu en deux morceaux, le nombre et son unité, que chaque endroit assemble à sa façon :
+   sous 1 000 le nombre entier ; jusqu'à 999 499 des milliers entiers (« k ») ; à partir de 999 500 des millions à une
+   décimale au plus (« M »), si bien qu'on ne lit jamais « 1000k ». Une valeur absente compte pour 0. */
+function tokensEnClair(n) {
+  const v = Math.max(0, Math.round(Number(n) || 0));
+  if (v < 1e3) return { nombre: nombre(v), unite: "" };
+  if (v < 999500) return { nombre: String(Math.round(v / 1e3)), unite: "k" };
+  return { nombre: (v / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }), unite: "M" };
+}
+/* Le dosage de l'orchestrateur, écrit ici seulement : la carte Orchestrateur, l'étiquette de la Salle et le poste de
+   l'orchestrateur sur le sol de la Salle le lisent. */
+const DOSAGE_ORCHESTRATEUR = "Fable · élevé";
 const DELAI_CONFIRMATION = 400; // ms : un clic de confirmation plus rapproché est pris pour un double-clic
 const dernierHtml = new Map();
 /* Ne touche au DOM que si le contenu change : une saisie en cours, le défilement et le focus restent en place. */
@@ -929,6 +942,10 @@ const agentsDe = (vue) => vue.agents || [];
 const ilFautRepondre = (vue) => contratEnAttente(vue) || ouvertes(vue).length > 0 || autorisationsDe(vue).length > 0;
 const arretee = (t) => t.etat === "revenu" && (t.historique || []).slice(-1)[0]?.issue === "arretee";
 const libelleEtat = (t) => (arretee(t) ? "Arrêtée par toi" : t.etat_fr);
+/* Une tâche active : un agent y travaille ou la vérifie. */
+const tacheActive = (t) => t.etat === "en_cours" || t.etat === "en_verification";
+/* Le nombre de tâches du chantier déjà vérifiées. */
+const nombreVerifiees = (vue) => vue.taches.filter((t) => t.etat === "verifie").length;
 /* Une durée en secondes, dite comme on la lit : « 12 s », « 2 min 05 », « 1 h 10 ». */
 const duree = (s) => {
   s = Math.max(0, Math.round(Number(s) || 0));
@@ -1094,7 +1111,8 @@ const doseCourte = (t) => `${String(t.modele || "").charAt(0).toUpperCase()}${St
 const motEtat = (t, etat) => (etat === "attend" ? "t'attend" : libelleEtat(t).toLowerCase());
 /* La courbe d'un poste : une colonne par tranche, sa hauteur dit combien l'agent a agi.
    En direct : bleu acier, et les dernières colonnes en ambre tant qu'une demande attend ta réponse.
-   Tâche finie : le résumé de toute la marche de son ouvrier, en blanc. */
+   Tâche finie : le résumé de toute la marche de son ouvrier, en blanc pour une tâche vérifiée,
+   en gris pour une tâche revenue. */
 function rythmeDe(vue, t) {
   const r = vue.rythmes || {}, direct = Object.values(r.en_direct || {}).filter((c) => c.tache === t.id && c.role === "ouvrier").pop();
   if (direct) return { colonnes: direct.colonnes, attente: direct.attente, vivant: true };
@@ -1169,7 +1187,7 @@ function afficherConversation(vue) {
   }
   const c = vue.contrat;
   document.getElementById("rail-point").textContent = vue.point_d_etape;
-  poser("rail-anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue), 74) : "");
+  poser("rail-anneau", vue.taches.length ? anneauPoints(nombreVerifiees(vue), vue.taches.length, ilFautRepondre(vue), 74) : "");
   poser("rail-jauges", vue.taches.length
     ? compte("Agents lancés", vue.agents_lances) + jauge("Montées en gamme", vue.montees, c.max_montees)
     : `<p class="calme">Pas encore de contrat.</p>`);
@@ -1191,25 +1209,35 @@ function afficherConversation(vue) {
   habillerArret(arret, "orchestrateur");
 }
 
-/* Le bouton « Arrêter » : un premier clic l'arme quelques secondes (« Confirmer l'arrêt »), le second agit. */
-function habillerArret(bouton, cle) {
+/* Ce que montre le bouton d'arrêt de la clé donnée : arrêt déjà demandé, armé ou au repos, son libellé et son titre. */
+function aspectArret(cle) {
   const demande = arretes.has(cle), arme = armee === cle;
-  bouton.textContent = demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter";
-  bouton.disabled = demande;
-  bouton.classList.toggle("confirme", arme && !demande);
-  bouton.title = arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.";
+  return {
+    demande,
+    confirme: arme && !demande,
+    libelle: demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter",
+    titre: arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu.",
+  };
+}
+/* Habille un bouton d'arrêt déjà dans la page (celui de l'orchestrateur, sous la saisie) selon aspectArret(). */
+function habillerArret(bouton, cle) {
+  const aspect = aspectArret(cle);
+  bouton.textContent = aspect.libelle;
+  bouton.disabled = aspect.demande;
+  bouton.classList.toggle("confirme", aspect.confirme);
+  bouton.title = aspect.titre;
 }
 function boutonArret(cle, tache) {
-  const demande = arretes.has(cle), arme = armee === cle;
-  return `<button class="discret${arme && !demande ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${demande ? " disabled" : ""}
-    title="${arme ? "Clique encore pour arrêter, sinon l'arrêt est annulé." : "Arrête cet agent : son travail en cours est perdu."}">${demande ? "Arrêt demandé" : arme ? "Confirmer l'arrêt" : "Arrêter"}</button>`;
+  const aspect = aspectArret(cle);
+  return `<button class="discret${aspect.confirme ? " confirme" : ""}" data-action="arreter" data-cle="${propre(cle)}" data-tache="${propre(tache)}"${aspect.demande ? " disabled" : ""}
+    title="${aspect.titre}">${aspect.libelle}</button>`;
 }
 
 /* ---------- Chantier ---------- */
 function attenteHtml(vue) {
-  if (contratEnAttente(vue)) return `${contratHtml(vue)}<div class="boutons">${boutonValider}</div>`;
-  const liste = ouvertes(vue), autos = autorisationsDe(vue);
   const avis = avisTexte ? `<p class="petit" role="status">${propre(avisTexte)}</p>` : "";
+  if (contratEnAttente(vue)) return `${avis}${contratHtml(vue)}<div class="boutons">${boutonValider}</div>`;
+  const liste = ouvertes(vue), autos = autorisationsDe(vue);
   if (!liste.length && !autos.length) return `${avis}<p class="calme">Rien pour l'instant. Je te préviens si je sors du contrat.</p>`;
   return avis + autos.map((a) => `<div class="demande">${autorisationHtml(a)}</div>`).join("")
     + liste.map((d) => `<div class="demande">${demandeHtml(d)}</div>`).join("");
@@ -1219,7 +1247,7 @@ function attenteHtml(vue) {
    déroule son journal, juste dessous. */
 const POSTE = { l: 180, h: 196, ecart: 10, parRang: 6 };
 function poste(t, x, y, agent, rythme, etat) {
-  const actif = t.etat === "en_cours" || t.etat === "en_verification", controle = t.etat === "en_verification";
+  const actif = tacheActive(t), controle = t.etat === "en_verification";
   const couleur = etat === "attend" ? COULEURS.attend : actif ? COULEURS.en_cours : etat === "verifie" ? COULEURS.verifie : "rgba(220,220,220,0.52)";
   const sous = actif && agent && agent.etape ? `Étape ${agent.etape}`
     : actif && t.phase ? `${t.phase.texte} · ${duree(t.phase.depuis_s)}`
@@ -1245,7 +1273,7 @@ function salle(vue) {
   }
   const attend = attendDe(vue), rangs = Math.ceil(vue.taches.length / POSTE.parRang);
   const hauteur = rangs * POSTE.h + (rangs - 1) * POSTE.ecart;
-  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
+  const actifs = vue.taches.filter(tacheActive).length;
   const postes = vue.taches.map((t, i) => {
     const x = (i % POSTE.parRang) * (POSTE.l + POSTE.ecart), y = Math.floor(i / POSTE.parRang) * (POSTE.h + POSTE.ecart);
     return poste(t, x, y, agentsDe(vue).filter((a) => a.tache === t.id).pop(), rythmeDe(vue, t), etatVu(t, attend));
@@ -1283,7 +1311,7 @@ function aFaire(vue) {
 /* Sous la salle : un agent par ligne, sa dernière activité, un clic pour dérouler ses 30 dernières lignes, et son bouton d'arrêt. */
 const ROLES = { ouvrier: "ouvrier", verificateur: "vérificateur", orchestrateur: "orchestrateur" };
 function agentsHtml(vue) {
-  const enMarche = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification");
+  const enMarche = vue.taches.filter(tacheActive);
   const actives = new Set(enMarche.map((t) => t.id)), avecAgent = new Set(agentsDe(vue).map((a) => a.tache));
   // Une tâche active sans agent en marche : l'atelier prépare sa copie, lance les contrôles ou fusionne.
   const sansAgent = enMarche.filter((t) => !avecAgent.has(t.id) && t.phase).map((t) => `<div class="agent"><div class="agent-tete">
@@ -1349,7 +1377,7 @@ async function choisirMode(mode) {
   modeEnvoi = mode; modePhrase = null;
   rafraichir();
   let donnees = null;
-  try { donnees = await envoyer("/api/mode", { mode }); } catch (erreur) { donnees = null; }
+  try { donnees = await envoyer("/api/mode", { mode }); } catch (erreur) { donnees = null; direPanne(); }
   modeEnvoi = "";
   const retour = donnees && donnees.changement_mode;
   if (retour && typeof retour.phrase === "string") modePhrase = { texte: retour.phrase, fait: retour.fait === true };
@@ -1361,7 +1389,7 @@ async function choisirMode(mode) {
 
 function afficherChantier(vue) {
   const c = vue.contrat;
-  poser("anneau", vue.taches.length ? anneauPoints(vue.taches.filter((t) => t.etat === "verifie").length, vue.taches.length, ilFautRepondre(vue)) : "");
+  poser("anneau", vue.taches.length ? anneauPoints(nombreVerifiees(vue), vue.taches.length, ilFautRepondre(vue)) : "");
   poser("compteurs", vue.taches.length ? compteursHtml(vue) : "");
   poser("salle", salle(vue));
   document.getElementById("salle-note").textContent = agentsTexte(auTravail(vue));
@@ -1369,16 +1397,18 @@ function afficherChantier(vue) {
   document.getElementById("attente-note").textContent = noteAttente(vue);
   document.getElementById("lignes-note").textContent = vue.taches.length ? `${vue.taches.length} au contrat` : "";
   poser("agents", agentsHtml(vue));
+  document.getElementById("note-orchestrateur").textContent = DOSAGE_ORCHESTRATEUR;
   document.getElementById("point").textContent = vue.point_d_etape;
   document.getElementById("objectif").textContent = c.objectif;
   poser("attente", attenteHtml(vue));
   afficherMode(vue);
   afficherArchives(vue);
   poser("tuiles", dosageHtml(vue));
+  const tokens = tokensEnClair(vue.tokens);
   poser("jauges", compte("Agents lancés", vue.agents_lances)
     + jauge("Montées en gamme", vue.montees, c.max_montees)
-    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${euros(vue.cout_usd).replace(" $", "$")}</b></div>
-       <div><span>Tokens</span><b>${vue.tokens >= 1e6 ? (vue.tokens / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 1 }) + "M" : vue.tokens >= 1e3 ? Math.round(vue.tokens / 1e3) + "k" : nombre(vue.tokens)}</b></div></div>`);
+    + `<div class="chiffres" style="margin-top: auto"><div><span>Coût équivalent</span><b>${montant(vue.cout_usd)}$</b></div>
+       <div><span>Tokens</span><b>${tokens.nombre}${tokens.unite}</b></div></div>`);
   poser("lignes", vue.taches.map((t) => `<tr>
     <td><span class="puce">${propre(t.id)}</span></td>
     <td>${propre(t.titre)}${t.ajoutee ? `<span class="badge">Ajoutée</span>` : ""}${t.montees ? `<span class="badge">Montée d'un cran</span>` : ""}${arretee(t) ? `<span class="badge">Arrêtée par toi</span>` : ""}</td>
@@ -1394,7 +1424,7 @@ function afficherChantier(vue) {
 }
 
 /* ---------- Plan : le câblage des tâches ----------
-   À gauche l'orchestrateur, puis une colonne par étape (ce qui peut partir ensemble), à droite la livraison.
+   Le Plan se lit de haut en bas : l'orchestrateur en tête, puis les étapes (ce qui peut partir ensemble) rangée après rangée, et la livraison au bout.
    La couleur d'un fil dit l'état de ce qui le parcourt : blanc vérifié, bleu acier en cours, ambre t'attend,
    pointillé à venir. Une tâche qui t'attend tire un fil ambre jusqu'au nœud « Toi ». */
 function disposer(taches) {
@@ -1421,7 +1451,8 @@ function disposer(taches) {
   });
   return { couches: rangees, parents };
 }
-/* Un fil orthogonal, aux coins arrondis, qui passe par les points donnés. */
+/* Le chemin SVG d'un fil du Plan, orthogonal et aux coins arrondis, qui passe par les points donnés : les points répétés
+   sont écartés et les coordonnées écrites telles quelles (arrondi(), le même dessin pour la carte du code, les écrit au dixième). */
 function trace(points, rayon = 10) {
   const net = points.filter((p, i) => !i || p[0] !== points[i - 1][0] || p[1] !== points[i - 1][1]);
   let d = `M${net[0][0]},${net[0][1]}`;
@@ -1499,7 +1530,7 @@ function graphe(vue) {
       <div class="d"><span>${propre(doseCourte(t))}</span><span class="etat-mot ${etat}">${propre(motEtat(t, etat))}</span></div></div>
       <i class="port h"></i><i class="port b"></i></div>`;
   }).join("");
-  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  const verifiees = nombreVerifiees(vue);
   const fixe = (classe, x, y, icone, titre, detail, couleur, ports) => `<div class="noeud fixe ${classe}" style="left: ${x}px; top: ${y}px">
     <span class="ic">${icone}</span><div><div class="t">${titre}</div><div class="d"><span class="etat-mot ${couleur}">${detail}</span></div></div>${ports}</div>`;
   const tete = fixe("racine", racine.x, racine.y, vue.contrat.valide ? ICONES.en_cours : ICONES.a_lancer, "Orchestrateur", vue.contrat.valide ? "Contrat validé" : "Contrat à valider", vue.contrat.valide ? "en_cours" : contratEnAttente(vue) ? "attend" : "", '<i class="port b"></i>');
@@ -1566,7 +1597,8 @@ function etatEtape(taches, attend) {
   if (etats.some((e) => e === "en_cours" || e === "en_verification")) return "en_cours";
   return etats.length && etats.every((e) => e === "verifie") ? "verifie" : "a_venir";
 }
-/* Arrondit les coins d'un tracé du sol (segments parallèles aux axes) en quarts de cercle. */
+/* Arrondit les coins d'un tracé du sol (segments parallèles aux axes) en quarts de cercle : à la différence de trace() et
+   d'arrondi(), qui rendent un chemin SVG, elle rend une liste de points où chaque coin est échantillonné en sept points. */
 function arrondir(points, rayon) {
   const sortie = [points[0]];
   for (let i = 1; i < points.length - 1; i++) {
@@ -1600,13 +1632,13 @@ function stationsDe(vue) {
     return { u, v, x, y, rangee: r };
   };
   const stations = [], embranchements = [];
-  const actifs = vue.taches.filter((t) => t.etat === "en_cours" || t.etat === "en_verification").length;
-  const verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  const actifs = vue.taches.filter(tacheActive).length;
+  const verifiees = nombreVerifiees(vue);
   arrets.forEach((a, k) => {
     const l = lieu(k);
     if (a.etape < 0) {
       stations.push({ cle: "@orchestrateur", x: l.x, y: l.y, etat: vue.occupe || actifs ? "en_cours" : "repos", h: 1.1, cote: "g",
-        titre: "Orchestrateur", detail: "Fable · élevé", mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
+        titre: "Orchestrateur", detail: DOSAGE_ORCHESTRATEUR, mot: vue.occupe ? "répond" : actifs ? `suit ${pluriel(actifs, "agent")}` : "au repos" });
       return;
     }
     if (!a.tache) {
@@ -1641,10 +1673,10 @@ function solHtml(vue, largeur, hauteur) {
   // L'échelle : tout le chantier tient dans la zone libre, entre les panneaux, étiquettes comprises.
   const us = stations.map((s) => s.x - s.y), vs = stations.map((s) => s.x + s.y), hMax = Math.max(...stations.map((s) => s.h));
   // À droite, le panneau « Ce qui t'attend » prend sa place quand il est ouvert.
-  // Sous les panneaux du haut ; un peu à gauche quand « Ce qui t'attend » est ouvert à droite.
   const panneau = ilFautRepondre(vue) && largeur > 900 ? 380 : 0;
   // Sur un petit écran, les panneaux passent dessous : le sol a toute sa boîte.
   const large = largeur > 900;
+  // Sous les panneaux du haut ; un peu à gauche quand « Ce qui t'attend » est ouvert à droite.
   const zone = large ? { x: 40, y: largeur > 1100 ? 230 : 150, l: largeur - 80 - panneau, h: hauteur - (largeur > 1100 ? 300 : 210) }
     : { x: 10, y: 40, l: largeur - 20, h: hauteur - 80 };
   const etendueU = Math.max(...us) - Math.min(...us), etendueV = Math.max(...vs) - Math.min(...vs);
@@ -1712,15 +1744,15 @@ function solHtml(vue, largeur, hauteur) {
 }
 function afficherSalle(vue) {
   if (location.hash !== "#salle" || !vue || vue.aucun_projet) return;
-  const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length, attendue = ilFautRepondre(vue);
-  poser("salle-orch", `<div class="rail-tete">${anneauPoints(verifiees, vue.taches.length, attendue, 64)}<div><span class="etiquette">Orchestrateur · Fable élevé</span><p>${propre(vue.point_d_etape)}</p></div></div>
+  const c = vue.contrat, verifiees = nombreVerifiees(vue), attendue = ilFautRepondre(vue);
+  poser("salle-orch", `<div class="rail-tete">${anneauPoints(verifiees, vue.taches.length, attendue, 64)}<div><span class="etiquette">Orchestrateur · ${DOSAGE_ORCHESTRATEUR}</span><p>${propre(vue.point_d_etape)}</p></div></div>
     ${c.objectif ? `<p class="calme">${propre(c.objectif)}</p>` : ""}
     <div class="boutons"><button type="button" data-action="vers-conversation">Écrire à l'orchestrateur</button><button type="button" data-action="voir-plan">Plan</button></div>`);
-  const millions = (n) => (n >= 1e6 ? `${(n / 1e6).toLocaleString("fr-FR", { maximumFractionDigits: 2 })}<small> M</small>` : n >= 1e3 ? `${Math.round(n / 1e3)}<small> k</small>` : nombre(n));
+  const tokens = tokensEnClair(vue.tokens);
   poser("salle-compteurs", vue.taches.length ? `<div><span>Agents</span><b>${vue.agents_lances}</b></div>
     <div><span>Montées</span><b>${vue.montees}<small> / ${c.max_montees}</small></b></div>
-    <div><span>Coût équiv.</span><b>${Number(vue.cout_usd || 0).toLocaleString("fr-FR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small> $</small></b></div>
-    <div><span>Tokens</span><b>${millions(vue.tokens || 0)}</b></div>` : "");
+    <div><span>Coût équiv.</span><b>${montant(vue.cout_usd)}<small> $</small></b></div>
+    <div><span>Tokens</span><b>${tokens.nombre}${tokens.unite ? `<small> ${tokens.unite}</small>` : ""}</b></div>` : "");
   const attente = document.getElementById("salle-attente");
   attente.classList.toggle("attend", attendue);
   attente.hidden = !attendue && !avisTexte;
@@ -1742,7 +1774,7 @@ function afficherSalle(vue) {
 new ResizeObserver(() => { if (derniere && location.hash === "#salle") afficherSalle(derniere); }).observe(document.getElementById("vue-salle"));
 
 /* ---------- Ensemble ---------- */
-function afficherSansProjet(vue) {
+function afficherSansProjet() {
   const choix = document.getElementById("projet");
   choix.innerHTML = "<option>Aucun projet</option>";
   choix.dataset.empreinte = "";
@@ -1756,8 +1788,8 @@ function afficher(vue) {
   derniere = vue;
   afficherMaj(vue);
   document.querySelector(".app").classList.toggle("sans-projet", Boolean(vue.aucun_projet));
-  if (vue.aucun_projet) return afficherSansProjet(vue);
-  const c = vue.contrat, verifiees = vue.taches.filter((t) => t.etat === "verifie").length;
+  if (vue.aucun_projet) return afficherSansProjet();
+  const verifiees = nombreVerifiees(vue);
   const choix = document.getElementById("projet"), liste = vue.projets || [{ id: "", nom: vue.projet, courant: true }];
   const empreinte = liste.map((p) => `${p.id}/${p.nom}/${p.courant}`).join("|");
   if (choix.dataset.empreinte !== empreinte) {
@@ -1775,7 +1807,6 @@ function afficher(vue) {
   }
   document.getElementById("mode").textContent = rejoue ? "Démonstration rejouée" : vue.mode === "réel" ? "" : "Démonstration";
   document.getElementById("pastille-agents").textContent = agentsTexte(auTravail(vue));
-  document.getElementById("pastille-cout").textContent = "";
   const infos = document.getElementById("infos");
   infos.hidden = ![...infos.children].some((e) => e.textContent);
   document.getElementById("cpt-chantier").textContent = vue.taches.length ? `${verifiees}/${vue.taches.length}` : "";
@@ -1826,13 +1857,26 @@ function avancer() {
   if (attendue && !franchies.has(attendue)) { clearInterval(minuterie); minuterie = null; }
 }
 
-/* Un avis passager, sous la zone de saisie et en tête de « Ce qui t'attend ». */
-function dire(texte) {
-  avisTexte = texte;
-  clearTimeout(minuteAvis);
-  minuteAvis = setTimeout(() => { avisTexte = ""; rafraichir(); }, 9000);
-  rafraichir();
+/* Fabrique un message passager : la fonction rendue, appelée avec un texte et une durée en ms (sinon dureeParDefaut),
+   pose le texte, le montre, et l'efface au bout de cette durée (jamais si elle vaut 0, ni si le texte est vide).
+   Chaque message a sa propre minuterie : un nouveau texte annule l'effacement prévu du sien, jamais celui d'un autre. */
+function messagePassager(ecrire, montrer, dureeParDefaut) {
+  let effacement = null;
+  return (texte, duree = dureeParDefaut) => {
+    ecrire(texte);
+    clearTimeout(effacement);
+    if (texte && duree) effacement = setTimeout(() => { ecrire(""); montrer(); }, duree);
+    montrer();
+  };
 }
+/* Un avis passager, sous la zone de saisie et en tête de « Ce qui t'attend ». */
+const dire = messagePassager((texte) => { avisTexte = texte; }, () => rafraichir(), 9000);
+/* Ce que la page dit quand un envoi n'a pas pu partir parce que le serveur ne répond pas (le fetch a levé : l'Atelier
+   a été arrêté, ou la machine dort). La phrase s'écrit sous l'en-tête, visible quel que soit l'onglet, et s'efface
+   au bout de son délai ou dès que le serveur répond de nouveau à un envoi (posterJson). */
+const PANNE = "L'Atelier ne répond pas : vérifie qu'il tourne encore, puis réessaie.";
+const avisPanne = messagePassager((texte) => { const p = document.getElementById("panne"); p.textContent = texte; p.hidden = !texte; }, () => {}, 9000);
+const direPanne = () => avisPanne(PANNE);
 function rafraichir() {
   if (!derniere || derniere.aucun_projet) return;
   afficherConversation(derniere);
@@ -1841,7 +1885,16 @@ function rafraichir() {
   afficherPlan(derniere);
 }
 
-/* Rend la vue du serveur, ou null si la réponse n'est pas bonne. */
+/* Le seul POST vers le serveur, dont le corps est l'objet donné, écrit en JSON. Rend la promesse de fetch, après avoir
+   effacé la phrase de panne si le serveur a répondu : ce que l'on fait de la réponse, d'une erreur ou d'une panne de
+   réseau revient aux trois fonctions qui s'en servent, envoyer(), envoyerSansAfficher() et demander(). */
+function posterJson(adresse, corps) {
+  return fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) })
+    .then((retour) => { if (!document.getElementById("panne").hidden) avisPanne(""); return retour; });
+}
+/* Envoie un geste qui change le chantier (un message, la validation du contrat, une décision, une autorisation, le mode
+   des ouvriers, un arrêt) et affiche la vue rendue (la rend aussi), null si la réponse est en erreur ; une panne de réseau
+   ou une réponse illisible lève, à l'appelant de la rattraper (direPanne()) ; en démonstration rejouée, n'envoie rien et avance. */
 async function envoyer(adresse, corps) {
   if (rejoue) {
     if (adresse === "/api/arreter") { dire("Démonstration rejouée : il n'y a pas d'agent derrière, rien n'est arrêté."); return null; }
@@ -1852,7 +1905,7 @@ async function envoyer(adresse, corps) {
     if (!minuterie) minuterie = setInterval(avancer, 900);
     return null;
   }
-  const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
+  const retour = await posterJson(adresse, corps || {});
   if (!retour.ok) return null;
   const donnees = await retour.json();
   afficher(donnees);
@@ -1866,7 +1919,7 @@ async function repondre(id, choix, message) {
   carte.envoi = true; carte.remarque = "";
   rafraichir();
   let donnees = null;
-  try { donnees = await envoyer("/api/autorisation", { id, choix, message: message || "" }); } catch (erreur) { donnees = null; }
+  try { donnees = await envoyer("/api/autorisation", { id, choix, message: message || "" }); } catch (erreur) { donnees = null; direPanne(); }
   carte.envoi = false;
   const retour = donnees && donnees.autorisation;
   if (rejoue) { cartes.delete(id); return rafraichir(); }
@@ -1876,7 +1929,7 @@ async function repondre(id, choix, message) {
   rafraichir();
 }
 
-/* Arrêter un agent : le premier clic arme le bouton cinq secondes, le second envoie l'arrêt. */
+/* Le bouton « Arrêter » : un premier clic l'arme cinq secondes (« Confirmer l'arrêt »), le second envoie l'arrêt de l'agent. */
 async function arreter(cle, tache) {
   if (arretes.has(cle)) return;
   if (armee === cle && performance.now() - armeeLe < DELAI_CONFIRMATION) return; // double-clic : pas une confirmation
@@ -1889,11 +1942,11 @@ async function arreter(cle, tache) {
   clearTimeout(minuteArmee); armee = "";
   arretes.add(cle);
   rafraichir();
-  let donnees = null;
-  try { donnees = await envoyer("/api/arreter", tache ? { tache } : {}); } catch (erreur) { donnees = null; }
+  let donnees = null, panne = false;
+  try { donnees = await envoyer("/api/arreter", tache ? { tache } : {}); } catch (erreur) { panne = true; }
   const retour = donnees && donnees.arret;
   if (!retour || !retour.fait) arretes.delete(cle);
-  if (retour) dire(retour.phrase); else if (!rejoue) dire("L'arrêt n'est pas parti. Réessaie dans un instant.");
+  if (retour) dire(retour.phrase); else if (panne) direPanne(); else if (!rejoue) dire("L'arrêt n'est pas parti. Réessaie dans un instant.");
 }
 
 
@@ -1901,7 +1954,7 @@ async function arreter(cle, tache) {
    clic arme le bouton cinq secondes (« Confirmer la mise à jour »), le second lance la mise à jour. Si elle a
    réussi, Atelier s'arrête et son agent de lancement le relance : la page attend son retour sans alarme. */
 const DELAI_RETOUR = 2500, PATIENCE_RETOUR = 120000; // ms : un retour plus rapide n'est pas encore un redémarrage
-let majArmee = false, majArmeeLe = 0, minuteMaj = null, majEnvoi = false, majPhrase = "", minutePhrase = null, majAttente = null;
+let majArmee = false, majArmeeLe = 0, minuteMaj = null, majEnvoi = false, majPhrase = "", majAttente = null;
 
 const majDisponible = (vue) => Boolean(vue && vue.mise_a_jour && vue.mise_a_jour.disponible === true);
 function afficherMaj(vue) {
@@ -1918,13 +1971,9 @@ function afficherMaj(vue) {
   zone.hidden = !lignes.length;
   zone.innerHTML = lignes.join("");
 }
-function direMaj(texte, duree = 15000) {
-  majPhrase = texte;
-  clearTimeout(minutePhrase);
-  if (texte && duree) minutePhrase = setTimeout(() => { majPhrase = ""; afficherMaj(derniere); }, duree);
-  afficherMaj(derniere);
-}
-/* Appelée à chaque réponse du serveur : Atelier est-il revenu après son redémarrage ? */
+/* La phrase sous le bouton « Mettre à jour ». */
+const direMaj = messagePassager((texte) => { majPhrase = texte; }, () => afficherMaj(derniere), 15000);
+/* Appelée à chaque réponse réussie de /api/etat, dans charger() : Atelier est-il revenu après son redémarrage ? */
 function majRetour() {
   if (!majAttente) return;
   const coupure = majAttente.coupure;
@@ -1958,11 +2007,7 @@ async function mettreAJour() {
   if (rejoue) return direMaj("Démonstration rejouée : il n'y a rien à mettre à jour.");
   majEnvoi = true;
   direMaj("");
-  let donnees = null;
-  try {
-    const retour = await fetch("/api/mise-a-jour", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (retour.ok) donnees = await retour.json();
-  } catch (erreur) { donnees = null; }
+  const donnees = await envoyerSansAfficher("/api/mise-a-jour", {});
   majEnvoi = false;
   const faite = donnees && donnees.mise_a_jour_faite;
   if (!faite || typeof faite.phrase !== "string") return direMaj("La demande n'est pas partie. Réessaie dans un instant.");
@@ -1974,20 +2019,15 @@ async function mettreAJour() {
 /* « Nouveau chantier » : un clic ouvre un petit formulaire où l'on nomme le chantier qui se termine (le nom
    proposé vient du serveur), puis « Archiver et repartir » l'envoie. Le serveur archive le chantier avec son
    journal et repart d'une page blanche. Le formulaire ouvert n'est jamais réécrit par les rafraîchissements. */
-let ncEnvoi = false, ncPhrase = "", minuteNcPhrase = null;
+let ncEnvoi = false, ncPhrase = "";
 function afficherNouveauChantier() {
   const zone = document.getElementById("nouveau-chantier-phrase"), bouton = document.getElementById("archiver-chantier");
-  if (!zone || !bouton) return;
   zone.textContent = ncPhrase;
   bouton.disabled = ncEnvoi;
   bouton.textContent = ncEnvoi ? "Archivage en cours" : "Archiver et repartir";
 }
-function direNouveauChantier(texte, duree = 20000) {
-  ncPhrase = texte;
-  clearTimeout(minuteNcPhrase);
-  if (texte && duree) minuteNcPhrase = setTimeout(() => { ncPhrase = ""; afficherNouveauChantier(); }, duree);
-  afficherNouveauChantier();
-}
+/* La phrase du formulaire « Nouveau chantier ». */
+const direNouveauChantier = messagePassager((texte) => { ncPhrase = texte; }, () => afficherNouveauChantier(), 20000);
 function ouvrirNouveauChantier(ouvrir) {
   const form = document.getElementById("form-nouveau-chantier"), champ = document.getElementById("nom-chantier");
   form.hidden = !ouvrir;
@@ -2010,12 +2050,8 @@ async function nouveauChantier() {
   if (rejoue) { ouvrirNouveauChantier(false); return direNouveauChantier("Démonstration rejouée : rien n'est archivé."); }
   ncEnvoi = true;
   afficherNouveauChantier();
-  let donnees = null;
-  try {
-    const nom = document.getElementById("nom-chantier").value.trim();
-    const retour = await fetch("/api/chantier/nouveau", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ nom }) });
-    if (retour.ok) donnees = await retour.json();
-  } catch (erreur) { donnees = null; }
+  const nom = document.getElementById("nom-chantier").value.trim();
+  const donnees = await envoyerSansAfficher("/api/chantier/nouveau", { nom });
   ncEnvoi = false;
   const fait = donnees && donnees.nouveau_chantier;
   if (!fait || typeof fait.phrase !== "string") return direNouveauChantier("La demande n'est pas partie. Réessaie dans un instant.");
@@ -2066,9 +2102,11 @@ async function lireArchive(id) {
   if (!fenetre.open) fenetre.showModal();
   fenetre.scrollTop = 0;
 }
+/* Envoie sans rien afficher et rend le JSON de la réponse, ou null pour tout échec (erreur, panne de réseau, réponse illisible) :
+   elle ne lève jamais. */
 async function envoyerSansAfficher(adresse, corps) {
   try {
-    const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps || {}) });
+    const retour = await posterJson(adresse, corps || {});
     return retour.ok ? await retour.json() : null;
   } catch (erreur) { return null; }
 }
@@ -2190,18 +2228,16 @@ function afficherCode(vue) {
   poser("explorateur", arbreHtml(arbreDe(m.fichiers), 0, enCours));
   poser("code-ariane", arianeHtml());
   poser("code-resultats", resultatsHtml());
-  poser("code-page", codeChemin && !codeChemin.endsWith("/") ? pageFichierHtml(codeChemin, enCours) : pageDossierHtml(codeChemin, enCours));
+  poser("code-page", pageCodeHtml(enCours));
 }
 function allerCode(chemin) {
   codeChemin = chemin || "";
   for (const d of ancetres(codeChemin)) dossiersOuverts.add(d);
   if (codeChemin.endsWith("/")) dossiersOuverts.add(codeChemin.slice(0, -1));
   codeRecherche = "";
-  const champ = document.getElementById("code-chercher");
-  if (champ) champ.value = "";
+  document.getElementById("code-chercher").value = "";
   afficherCode(derniere);
-  const page = document.getElementById("code-page");
-  if (page) page.scrollTop = 0;
+  document.getElementById("code-page").scrollTop = 0;
   const ligne = [...document.querySelectorAll("#explorateur .ligne-arbre")].find((b) => b.dataset.chemin === codeChemin.replace(/\/$/, ""));
   if (ligne) ligne.scrollIntoView({ block: "nearest" });
 }
@@ -2252,7 +2288,7 @@ function fichierHtml(f, profondeur, enCours) {
     <span class="marques">${badgesHtml(f, enCours)}</span><span class="taille-points" title="${f.lignes} lignes" aria-label="${f.lignes} lignes">${taillePoints(f.lignes)}</span></button>`;
 }
 
-/* La barre du haut : où l'on est, l'étage, et la recherche. */
+/* La barre du haut : où l'on est, et l'étage. */
 function arianeHtml() {
   const parties = codeChemin.replace(/\/$/, "").split("/").filter(Boolean);
   const nom = (derniere && derniere.projet) || "Projet";
@@ -2329,7 +2365,7 @@ function niveauCode(pref) {
 }
 /* Range les blocs reliés en rangées : en haut ce qui se sert des autres. Ceux dont presque tout le monde se sert
    forment le socle ; au-delà de douze blocs, les moins reliés restent dans l'explorateur. */
-function disposerCode(blocs, aretes, parRangee) {
+function disposerCode(blocs, aretes, parRangee, enCours = new Map()) {
   const entrant = new Map(), sortant = new Map(), relies = new Set();
   for (const { de, vers } of aretes.values()) {
     relies.add(de); relies.add(vers);
@@ -2339,7 +2375,8 @@ function disposerCode(blocs, aretes, parRangee) {
   const deg = (b, m) => (m.get(b) || new Set()).size, n = relies.size;
   const socle = [...relies].filter((b) => deg(b, entrant) >= Math.max(3, Math.ceil(0.3 * n)) && deg(b, sortant) <= 1).sort();
   let garde = [...relies].filter((b) => !socle.includes(b)).sort();
-  garde.sort((a, b) => (deg(b, entrant) + deg(b, sortant)) - (deg(a, entrant) + deg(a, sortant)) || a.localeCompare(b));
+  const vif = (b) => [...enCours.keys()].some((c) => (b.endsWith("/") ? c.startsWith(b) : c === b));
+  garde.sort((a, b) => vif(b) - vif(a) || (deg(b, entrant) + deg(b, sortant)) - (deg(a, entrant) + deg(a, sortant)) || a.localeCompare(b));
   const autres = garde.slice(12);
   garde = new Set(garde.slice(0, 12));
   const rang = new Map();
@@ -2393,6 +2430,8 @@ const etiquetteNoms = (noms) => {
   const montres = deux ? [noms[0], noms[1]] : [noms[0]];
   return montres.map(coupe).join(" · ") + (noms.length > montres.length ? ` +${noms.length - montres.length}` : "");
 };
+/* Le chemin SVG d'un fil de la carte du code : le même dessin que trace(), mais les deux n'écrivent pas les coordonnées de
+   la même façon (celle-ci au dixième, trace() telles quelles) et ses coins sont de 9 par défaut : elles restent séparées. */
 function arrondi(points, rayon = 9) {
   let d = `M${points[0][0].toFixed(1)},${points[0][1].toFixed(1)}`;
   for (let i = 1; i < points.length - 1; i++) {
@@ -2455,7 +2494,7 @@ function chaineHtml(rangs, socle, liens, blocs, enCours, options = {}) {
 const agentCourt = (nom) => String(nom).split("-")[0] || nom;
 function largeurChaine() {
   const page = document.getElementById("code-page");
-  return Math.max(500, Math.min(1080, (page ? page.clientWidth : 1000) - 56));
+  return Math.max(500, Math.min(1080, page.clientWidth - 56));
 }
 
 /* ---- La page d'un dossier, ou du projet ---- */
@@ -2476,6 +2515,10 @@ function dedansHtml(pref) {
   return `<div class="cd-sec">Ce qu'il y a dedans <i>${enfants.size}</i></div><div class="cd-dedans">${lignes}</div>`;
 }
 const next = (map) => map.keys().next().value;
+/* La page du chemin choisi : celle d'un fichier, ou celle d'un dossier (la racine du projet quand rien n'est choisi). */
+function pageCodeHtml(enCours) {
+  return codeChemin && !codeChemin.endsWith("/") ? pageFichierHtml(codeChemin, enCours) : pageDossierHtml(codeChemin, enCours);
+}
 function pageDossierHtml(pref, enCours) {
   const m = carteFusionnee(), dedans = m.fichiers.filter((f) => f.chemin.startsWith(pref));
   const lignes = dedans.reduce((s, f) => s + f.lignes, 0), vifs = dedans.filter((f) => enCours.has(f.chemin)).length;
@@ -2486,7 +2529,7 @@ function pageDossierHtml(pref, enCours) {
   } else if ((carteComplete.dossiers || {})[pref]) { portrait = carteComplete.dossiers[pref]; source = "Écrit par Claude d'après le code"; }
   const depart = niveauDepart(pref), { blocs, aretes } = niveauCode(depart);
   const largeur = largeurChaine(), parRangee = Math.max(2, Math.min(4, Math.floor((largeur + 26) / 240)));
-  const { rangs, socle, autres, isoles } = disposerCode(blocs, aretes, parRangee);
+  const { rangs, socle, autres, isoles } = disposerCode(blocs, aretes, parRangee, enCours);
   const garder = new Set(rangs.flat());
   const chaine = rangs.length
     ? chaineHtml(rangs, socle, liensDirects(aretes, garder), blocs, enCours, { largeur })
@@ -2497,7 +2540,7 @@ function pageDossierHtml(pref, enCours) {
     return `<p class="cd-note">On part de <code>${propre(depart)}</code> : c'est là que vit ${Math.round((100 * code(depart)) / Math.max(1, code(pref)))} % du code${pref ? " de ce dossier" : ""}.</p>`;
   })();
   const reste = [];
-  if (autres.length) reste.push(`${pluriel(autres.length, "autre élément")} moins relié${autres.length > 1 ? "s" : ""}, dans l'explorateur`);
+  if (autres.length) reste.push(`${autres.length > 1 ? `${autres.length} autres éléments` : "1 autre élément"} moins relié${autres.length > 1 ? "s" : ""}, dans l'explorateur`);
   if (isoles.length) reste.push(`${isoles.length > 1 ? `${isoles.length} éléments sans lien` : "1 élément sans lien"} avec les autres (${isoles.slice(0, 4).map((i) => propre(nomCourt(i))).join(", ")}${isoles.length > 4 ? "…" : ""})`);
   const titre = pref ? nomCourt(pref) : (derniere && derniere.projet) || "Projet";
   return `<h1 class="cd-titre">${propre(titre)}${pref ? "/" : ""}</h1>
@@ -2557,7 +2600,7 @@ function pageFichierHtml(c, enCours) {
     <div class="cd-prudence"><span class="g" aria-hidden="true">!</span><ul>${faits.join("")}${claude}</ul></div>
     ${publiques.length ? `<div class="cd-sec">Ses parties <i>${publiques.length}${internes ? ` · et ${pluriel(internes, "partie")} interne${internes > 1 ? "s" : ""}` : ""}</i></div><div class="cd-parties">${parties}</div>` : ""}`;
 }
-new ResizeObserver(() => { if (derniere && location.hash === "#code" && carteComplete) poser("code-page", codeChemin && !codeChemin.endsWith("/") ? pageFichierHtml(codeChemin, enCoursDe(derniere)) : pageDossierHtml(codeChemin, enCoursDe(derniere))); }).observe(document.getElementById("vue-code"));
+new ResizeObserver(() => { if (derniere && location.hash === "#code" && carteComplete) poser("code-page", pageCodeHtml(enCoursDe(derniere))); }).observe(document.getElementById("vue-code"));
 
 async function analyserCode() {
   if (rejoue) return;
@@ -2688,8 +2731,8 @@ setInterval(() => { if (location.hash === "#accueil" && !sessionOuverte && !docu
 
 function agir(cible) {
   const action = cible.dataset.action;
-  if (action === "valider") envoyer("/api/contrat/valider");
-  if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix });
+  if (action === "valider") envoyer("/api/contrat/valider").catch(direPanne);
+  if (action === "decider") envoyer("/api/decision", { id: cible.dataset.id, choix: cible.dataset.choix }).catch(direPanne);
   if (action === "autoriser") repondre(cible.dataset.id, cible.dataset.choix);
   if (action === "refuser") { etatCarte(cible.dataset.id).refus = true; rafraichir(); }
   if (action === "refus-retour") { etatCarte(cible.dataset.id).refus = false; rafraichir(); }
@@ -2725,7 +2768,6 @@ function agir(cible) {
   if (action === "annuler-analyse") { estimationCarte = null; afficherCode(derniere); }
   if (action === "arreter") arreter(cible.dataset.cle || "orchestrateur", cible.dataset.tache || "");
   if (action === "voir-plan") location.hash = "#plan";
-  if (action === "nouveau-projet") document.getElementById("nouveau").click();
   if (action === "choisir") { choisie = cible.dataset.id; afficherPlan(derniere); }
   if (action === "voir-tache") { choisie = cible.dataset.id; location.hash = "#plan"; if (derniere) afficherPlan(derniere); }
 }
@@ -2764,7 +2806,8 @@ document.getElementById("saisie").addEventListener("submit", (e) => {
   if (!texte || (derniere && derniere.occupe)) return;
   zone.value = ""; ajuster();
   signatureFil = "";
-  envoyer("/api/message", { texte });
+  // Le message n'est pas parti : il revient dans la zone de saisie, si rien n'y a été tapé depuis.
+  envoyer("/api/message", { texte }).catch(() => { if (!zone.value) { zone.value = texte; ajuster(); } direPanne(); });
 });
 
 async function charger() {
@@ -2786,15 +2829,24 @@ async function charger() {
     } else document.getElementById("rail-point").textContent = "Le moteur ne répond pas. Relance l'atelier.";
   }
 }
-/* Projets : passer de l'un à l'autre, en créer un nouveau. */
+/* ---------- Projets : passer de l'un à l'autre, en créer un nouveau ---------- */
+
+/* Envoie et rend { ok, donnees } avec le JSON lu même quand la réponse est en erreur, pour en montrer le champ « erreur ».
+   Une panne de réseau ne lève pas : elle est dite (direPanne()) et rendue comme une erreur dont le champ « erreur » est
+   cette même phrase, si bien que chaque appelant rend la main et la montre là où il montre ses erreurs. Une réponse
+   illisible lève. */
 async function demander(adresse, corps) {
-  const retour = await fetch(adresse, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(corps) });
+  let retour;
+  try { retour = await posterJson(adresse, corps); } catch (erreur) { direPanne(); return { ok: false, donnees: { erreur: PANNE } }; }
   return { ok: retour.ok, donnees: await retour.json() };
 }
 function changerDeProjet(vue) { signatureFil = ""; choisie = null; afficher(vue); if (location.hash === "#accueil") chargerAccueil(); }
 document.getElementById("projet").addEventListener("change", async (e) => {
   const { ok, donnees } = await demander("/api/projets/ouvrir", { id: e.target.value });
-  if (ok) changerDeProjet(donnees);
+  if (ok) return changerDeProjet(donnees);
+  // Panne : le menu revient sur le projet réellement ouvert.
+  const ouvert = donnees.erreur === PANNE && ((derniere && derniere.projets) || []).find((p) => p.courant);
+  if (ouvert) e.target.value = ouvert.id;
 });
 const dialogue = document.getElementById("creation"), champNom = document.getElementById("nom-nouveau"), alerte = document.getElementById("erreur-creation");
 document.getElementById("nouveau").addEventListener("click", () => {

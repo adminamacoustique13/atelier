@@ -2,7 +2,8 @@
 
 Les deux offrent la même interface au moteur et au serveur : `executer`, `converser`,
 `arreter(tache)`, `changer_mode(mode)`, `modes_appliques()`, et les attributs `guichet`,
-`sur_evenement`, `source_connexion` et `mode_ouvriers`.
+`sur_evenement` et `source_connexion`. La propriété `mode_ouvriers` existe aussi sur les deux, mais
+seuls les tests la lisent : le serveur garde son propre `mode_ouvriers`.
 
 Le mode des ouvriers (un mode de permission de Claude Code) ne touche que les ouvriers.
 L'orchestrateur reste en lecture seule, en mode « default », quoi qu'il arrive. Le vérificateur
@@ -21,7 +22,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from atelier.consignes import BALISE_PLAN, ROLE_ORCHESTRATEUR
-from atelier.guichet import ARRETE
+from atelier.guichet import ARRETE, CHAINE, SUBSTITUTION
 
 OUTILS_LECTURE = ["Read", "Glob", "Grep"]
 OUTILS_ECRITURE = ["Edit", "Write"]
@@ -88,6 +89,42 @@ RAISONS_SIMULEES = {
     "consigne": "Les critères ne suffisent pas à prouver le but.",
 }
 DEMANDE_SIMULEE = {"command": "npm install left-pad"}
+# Deux erreurs à part, que l'appelant reconnaît à leur texte exact (`resultat.erreur == ...`).
+LIMITE_ATTEINTE = "L'agent a été refusé : une limite de l'abonnement Claude est atteinte."
+REPRISE_IMPOSSIBLE = "La session de la tentative précédente ne peut pas être reprise."
+# Une troisième : le serveur de Claude limite les requêtes un moment, sans que la limite de
+# l'abonnement soit atteinte (Claude Code le marque pourtant « rate_limit »). Une courte pause.
+SURCHARGE = "L'agent a été refusé : Claude est surchargé pour un moment (pas une limite atteinte)."
+LIMITE_INCONNUE = "inconnue"  # le type d'une limite que le SDK ne nomme pas
+REFUSES_MAX = 20  # outils refusés retenus dans un résultat (`Resultat.refuses`)
+OBJET_MAX = 120  # longueur de l'objet d'un outil dans sa forme courte (« Bash(uv sync) »)
+# Ce que l'agent simulé joue, dans `limites`, en refusant aussitôt l'appel.
+REFUS_DE_LIMITE = ("refus", "surcharge")
+# Une forme courte : le nom de l'outil et son objet entre parenthèses.
+FORME_COURTE = re.compile(r"[^()]+\((.+)\)", re.DOTALL)
+ESPACES = re.compile(r"[ \t]+")  # Claude Code ramène ces suites à une espace pour comparer
+# Les commandes dont Claude Code (2.1.308, sa table `BP`) vérifie les chemins : un argument hors
+# du dossier de travail y fait demander, malgré une règle qui permet la commande.
+CHEMINS_VERIFIES = frozenset(
+    "cd ls find mkdir touch rm rmdir mv cp cat head tail sort uniq wc cut paste column tr file "
+    "stat diff awk gawk mawk nawk strings hexdump od base64 nl tac man rev fold expand unexpand "
+    "fmt comm cmp pr numfmt tsort grep egrep fgrep rg sed git jq sha256sum sha1sum md5sum tee"
+    .split()
+)
+# Une redirection : `2>`, `&>`, `>>`, `<`…, un `&` s'il vise un descripteur, puis sa cible.
+REDIRECTION_LUE = re.compile(r"(\d*|&)(>>|>|<)(&?)[ \t]*([^\s;&|<>]*)")
+DESCRIPTEUR = re.compile(r"\d+|-")
+SUR_DANS_LA_COPIE = re.compile(r"[\w.@+-][\w./@+-]*", re.ASCII)  # relatif, sans guillemet ni joker
+REMONTE = re.compile(r"(^|/)\.\.(/|$)")
+TILDE = re.compile(r"(^|[\s=:'\"])~")  # un `~` que le shell remplacerait par le dossier personnel
+# Les fenêtres de l'abonnement que nomme le SDK (`RateLimitType`), dites en clair.
+LIMITES_LUES = {
+    "five_hour": "fenêtre de 5 heures",
+    "seven_day": "fenêtre de 7 jours",
+    "seven_day_opus": "fenêtre de 7 jours d'Opus",
+    "seven_day_sonnet": "fenêtre de 7 jours de Sonnet",
+    "overage": "dépassement payant",
+}
 CHOIX_LUS = {
     "une_fois": "autorisé une fois",
     "toujours": "autorisé pour ce projet",
@@ -106,6 +143,32 @@ class Resultat:
     tokens: int = 0
     erreur: str = ""
     fichiers: list[str] | None = None
+    # Pour un refus pour limite (`erreur == LIMITE_ATTEINTE`) : la limite, comme le SDK la nomme
+    # (« five_hour »…, ou « inconnue »), et l'heure où elle se lève (secondes Unix), si connue.
+    type_limite: str = ""
+    fin_limite: float | None = None
+    # L'identifiant de la session Claude Code de l'agent, "" s'il est inconnu : de quoi la
+    # reprendre. Hors comparaison : deux résultats égaux le restent, quelle que soit la session.
+    session: str = field(default="", compare=False)
+    # Les outils refusés pendant le tour, sous leur forme courte (« Bash(uv sync) ») : sans
+    # doublon, dans l'ordre, REFUSES_MAX au plus. Hors comparaison, comme `session`.
+    refuses: list[str] = field(default_factory=list, compare=False)
+
+
+def decrire_limite(statut: str, type_limite: str, fin=None, utilisation=None) -> str:
+    """Dit en une phrase une limite de l'abonnement : proche (« alerte ») ou atteinte.
+
+    `fin` est l'heure de remise à zéro (secondes Unix), `utilisation` la part consommée (0 à 1).
+    """
+    nom = LIMITES_LUES.get(type_limite, f"limite {type_limite or LIMITE_INCONNUE}")
+    etat = "proche" if statut == "alerte" else "atteinte"
+    phrase = f"Limite de l'abonnement {etat} ({nom}"
+    if isinstance(utilisation, (int, float)) and not isinstance(utilisation, bool):
+        phrase += f", {round(utilisation * 100)} % consommés"
+    phrase += ")"
+    if isinstance(fin, (int, float)) and not isinstance(fin, bool):
+        phrase += " ; remise à zéro à " + time.strftime("%H:%M", time.localtime(fin))
+    return phrase + "."
 
 
 def mode_valide(mode) -> bool:
@@ -152,11 +215,110 @@ def _regles_simples(regles) -> list[str]:
     return [r for r in lues if REGLE_SIMPLE.fullmatch(r)]
 
 
+def _regles_d_avance(profil: dict, lecture_seule: bool) -> list[str]:
+    """Les outils permis d'avance à un agent : lecture, commandes du profil, socle, et l'écriture
+    si elle est permise. Les règles retenues (`autorisations`, chantier) n'y sont pas."""
+    commandes = [f"Bash({c}:*)" for c in profil.get("commandes_permises", [])]
+    outils = OUTILS_LECTURE + commandes + COMMANDES_DEV + GIT_LECTURE + LECTURE_SHELL
+    outils += WEB_LECTURE
+    return outils if lecture_seule else outils + OUTILS_ECRITURE
+
+
+def commande_permise(profil: dict, commande: str) -> bool:
+    """Dit si un ouvrier pourrait lancer cette commande sans rien demander.
+
+    Les règles sont celles qu'un ouvrier reçoit d'avance (`_regles_d_avance` : le socle et les
+    commandes permises du profil) et celles retenues dans le profil (`autorisations`) ; celles
+    du chantier en cours n'y sont pas, elles s'effacent avec lui. Elles sont lues comme Claude
+    Code les lit : `Bash(uv:*)` permet `uv` et `uv ...`, `Bash(uv sync)` cette seule commande,
+    `Bash` toute commande. Chaque commande d'une chaîne (&&, ||, ;, |, &) doit être permise.
+
+    Faux aussi pour ce que Claude Code fait demander malgré une règle : une variable (`$`), un
+    `~` en début de mot, une redirection hors de la copie (seules passent `/dev/null`, un
+    descripteur comme `2>&1`, une lecture `< fichier` dans la copie, et une écriture `> fichier`
+    dans la copie quand le mode des ouvriers du profil est « acceptEdits »), et, pour les
+    commandes dont il vérifie les chemins (`CHEMINS_VERIFIES` : cat, ls, grep, git…), un
+    argument absolu ou qui remonte par `..`. Faux enfin pour une commande vide ou mal formée,
+    une substitution, un caractère de contrôle, et tout ce que les règles ne couvrent pas (un
+    `cd`, une variable posée devant).
+    """
+    if not isinstance(commande, str) or not commande.strip() or SUBSTITUTION.search(commande):
+        return False
+    profil = profil if isinstance(profil, dict) else {}
+    ecrit = lire_mode(profil.get("mode_ouvriers")) == "acceptEdits"
+    sans_redirection = _sans_redirections(commande, ecrit)
+    if sans_redirection is None or "$" in commande or TILDE.search(commande):
+        return False
+    permises = profil.get("commandes_permises", [])
+    lisibles = isinstance(permises, (list, tuple))
+    permises = [c for c in permises if isinstance(c, str)] if lisibles else []
+    regles = _regles_d_avance({"commandes_permises": permises}, lecture_seule=False)
+    regles += _regles_simples(profil.get("autorisations"))
+    morceaux = [ESPACES.sub(" ", m).strip() for m in CHAINE.split(sans_redirection)]
+    return all(m and _dans_la_copie(m) and any(_couvre(r, m) for r in regles) for m in morceaux)
+
+
+def _sans_redirections(commande: str, ecrit: bool) -> str | None:
+    """La commande sans ses redirections, ou None si l'une d'elles ferait demander.
+
+    Passent : un descripteur vers un autre (`2>&1`, `>&2`), `/dev/null`, une lecture `< fichier`
+    dans la copie, et une écriture `> fichier` (ou `>>`, `&>`) dans la copie si `ecrit` (le mode
+    « acceptEdits ») ; tout le reste, dont `<<` et `<<<`, fait demander.
+    """
+    for trouve in REDIRECTION_LUE.finditer(commande):
+        _, sens, descripteur, cible = trouve.groups()
+        if descripteur:
+            permise = DESCRIPTEUR.fullmatch(cible) is not None
+        else:
+            dans_la_copie = (sens == "<" or ecrit) and _chemin_dans_la_copie(cible)
+            permise = cible == "/dev/null" or dans_la_copie
+        if not permise:
+            return None
+    return REDIRECTION_LUE.sub(" ", commande)
+
+
+def _chemin_dans_la_copie(chemin: str) -> bool:
+    """Un chemin relatif fait de caractères sûrs, qui ne remonte pas par `..`."""
+    return SUR_DANS_LA_COPIE.fullmatch(chemin) is not None and not REMONTE.search(chemin)
+
+
+def _dans_la_copie(morceau: str) -> bool:
+    """Pour une commande dont Claude Code vérifie les chemins, aucun argument n'en sort : ni
+    absolu ni remontant par `..`, même comme valeur d'option (`--x=/y`). Les autres passent."""
+    mots = morceau.split()
+    if not mots or mots[0].rsplit("/", 1)[-1] not in CHEMINS_VERIFIES:
+        return True
+    for mot in (m.strip("'\"") for m in mots[1:]):
+        valeur = mot.split("=", 1)[1] if mot.startswith("-") and "=" in mot else mot
+        if valeur.lstrip("'\"").startswith("/") or REMONTE.search(valeur):
+            return False
+    return True
+
+
+def _couvre(regle: str, commande: str) -> bool:
+    """Dit si une règle couvre une commande simple, comme Claude Code compare les règles Bash."""
+    nom, parenthese, reste = regle.partition("(")
+    if nom != "Bash":
+        return False
+    if not parenthese:
+        return True  # « Bash » seul permet toute commande
+    contenu = ESPACES.sub(" ", reste.removesuffix(")"))
+    if contenu.endswith(":*"):
+        prefixe = contenu.removesuffix(":*")
+        return bool(prefixe) and (commande == prefixe or commande.startswith(prefixe + " "))
+    return "*" not in contenu and commande == contenu
+
+
 class _Marche:
     """Un agent en marche : son nom, et le drapeau que pose une demande d'arrêt.
 
-    Pour un ouvrier : le mode choisi (`mode`), et sa session du pont (`session`) ou, pour l'agent
-    simulé, le mode qu'il joue (`applique`) et le drapeau que pose un changement (`change`).
+    Pour un ouvrier, `mode` est le mode choisi : posé à l'inscription, puis à chaque changement de
+    mode ; seul l'agent simulé le relit (la session du pont reçoit le mode par `changer_mode`).
+    `change` est le drapeau que pose chaque changement de mode ; seul l'agent simulé l'attend.
+    `session` est la session du pont de l'agent réel (None pour l'agent simulé) : `appliques` lui
+    demande le mode appliqué. Pour l'agent simulé seulement, `joue` est le dernier mode joué, afin
+    de ne jouer qu'une fois chaque changement, et `applique` le mode que `appliques` rend, qui
+    peut retomber à « default ».
     """
 
     def __init__(self, nom: str, couper=None, session=None, ouvrier: bool = False):
@@ -258,6 +420,35 @@ class _ModeDesOuvriers:
         return self._postes.appliques()
 
 
+def _sans_reprise(rappel, nom: str) -> Resultat:
+    """Une reprise demandée d'une session vide : l'erreur à part, sans lancer d'agent."""
+    resultat = Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE)
+    _emettre(rappel, nom, "fin", _fin(resultat))
+    return resultat
+
+
+def _empecher(resultat: Resultat, outils: tuple[str, ...]) -> Resultat:
+    """Le résultat d'un ouvrier simulé empêché : outils refusés, une ligne « EMPÊCHÉ » chacun.
+
+    Un arrêt reste un arrêt : il ne porte rien de plus.
+    """
+    if not outils or resultat.erreur == ARRETE:
+        return resultat
+    resultat.refuses = list(outils)
+    lignes = [
+        f"EMPÊCHÉ : {_objet_de_forme(o)} — l'outil a été refusé : je ne peux pas aller plus loin."
+        for o in outils
+    ]
+    resultat.texte = "\n".join([resultat.texte, *lignes] if resultat.texte else lignes)
+    return resultat
+
+
+def _objet_de_forme(forme: str) -> str:
+    """L'objet d'une forme courte (« uv sync » pour « Bash(uv sync) »), ou la forme entière."""
+    trouve = FORME_COURTE.fullmatch(forme)
+    return trouve[1] if trouve else forme
+
+
 def _arrete(marche: _Marche, resultat: Resultat) -> Resultat:
     """Un arrêt demandé pendant le travail l'emporte sur ce que l'agent a rendu."""
     if not marche.arret.is_set():
@@ -285,10 +476,7 @@ class AgentClaude(_ModeDesOuvriers):
 
     def _outils(self, lecture_seule: bool) -> list[str]:
         """Rend la liste des outils permis : lecture, commandes du projet, écriture si permise."""
-        commandes = [f"Bash({c}:*)" for c in self.profil.get("commandes_permises", [])]
-        outils = OUTILS_LECTURE + commandes + COMMANDES_DEV + GIT_LECTURE + LECTURE_SHELL
-        outils += WEB_LECTURE
-        return outils if lecture_seule else outils + OUTILS_ECRITURE
+        return _regles_d_avance(self.profil, lecture_seule)
 
     def _autorisations(self, lecture_seule: bool) -> list[str]:
         """Les règles simples retenues, du profil puis du chantier en cours, sans doublon.
@@ -316,6 +504,7 @@ class AgentClaude(_ModeDesOuvriers):
         lecture_seule: bool = False,
         contexte: dict | None = None,
         copie_jetable: bool = False,
+        reprendre: str | None = None,
     ) -> Resultat:
         """Exécute une consigne et rend le résultat de l'agent.
 
@@ -323,6 +512,13 @@ class AgentClaude(_ModeDesOuvriers):
         jette après son avis. Il peut y écrire sans carte (ses essais : un fichier modifié pour
         voir un test échouer, un script), puisque rien de ce qu'il y fait n'est enregistré ; il
         n'a toujours aucun accès en écriture à la copie de l'ouvrier, ni aux modes des ouvriers.
+
+        `reprendre` : l'identifiant d'une session rendue par un appel précédent (`session` du
+        résultat). L'agent repart dans cette session, et la consigne lui arrive comme un message
+        de plus ; `dossier` doit être celui de cette session. Si elle ne peut pas être reprise,
+        le résultat a pour erreur `REPRISE_IMPOSSIBLE`, et rien d'autre n'est tenté ; une
+        session vide ("") la rend aussi, sans lancer d'agent. Sans `reprendre` (None), la
+        session est neuve, comme toujours.
         """
         tache, nom = _poste(contexte)
         bac_a_sable = lecture_seule and copie_jetable
@@ -331,12 +527,17 @@ class AgentClaude(_ModeDesOuvriers):
             mode = "acceptEdits"
         else:  # le mode d'un ouvrier est relu sous le verrou des postes, à son inscription
             mode = "default" if lecture_seule else self._postes.mode
+        reprise = {}
+        if reprendre is not None:  # une session qu'on ne peut pas reprendre rend une erreur à part
+            if not isinstance(reprendre, str) or not reprendre.strip():  # session vide : rien
+                return _sans_reprise(self.sur_evenement, nom)  # n'est lancé à la place
+            reprise = {"session": reprendre, "reprise": True, "reprise_exigee": True}
         return self._travailler(
             tache, nom, consigne, ouvrier=not lecture_seule,
             modele=self._alias(modele), effort=effort, dossier=dossier,
             outils_permis=self._outils(not ecrit) + self._autorisations(not ecrit),
             outils_interdits=[] if ecrit else list(ECRITURE),
-            mode_permission=mode,
+            mode_permission=mode, **reprise,
         )  # fmt: skip
 
     def converser(
@@ -410,6 +611,8 @@ class AgentClaude(_ModeDesOuvriers):
                 fermer()
                 fermee.wait()  # la fermeture lancée par un arrêt est attendue elle aussi
         resultat = _arrete(marche, resultat)  # après le retrait du poste : aucune fenêtre
+        perdue = resultat.erreur == REPRISE_IMPOSSIBLE  # la session demandée n'est pas la sienne
+        resultat.session = "" if perdue else session.session or ""
         self.source_connexion = session.source_connexion or self.source_connexion
         if not marche.fin_emise:  # le pont n'a pas commencé de tour : arrêté avant
             _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
@@ -457,19 +660,45 @@ def decrire_outil(bloc: dict, racine=None) -> str:
     calcul.py » plutôt que tout le chemin. Une commande accompagnée de sa description (Claude
     Code en donne une, en clair) commence par elle.
     """
-    entree = bloc.get("input") or {}
-    entree = entree if isinstance(entree, dict) else {}
     verbe, cle = GESTES.get(bloc.get("name", ""), (bloc.get("name", "Outil"), ""))
-    objet = " ".join(str(entree.get(cle, "")).split()) if cle != "command" else ""
-    if cle in CHEMINS and racine and objet:
-        prefixe = str(racine).rstrip("/") + "/"
-        objet = objet[len(prefixe):] if objet.startswith(prefixe) else objet
+    objet = _objet(bloc, racine)
     if cle == "command":
-        objet = str(entree.get("command", "")).replace("\n", " ; ").strip()
-        description = " ".join(str(entree.get("description") or "").split())
+        description = " ".join(str(_entree(bloc).get("description") or "").split())
         if description:
             return f"{description} — {objet}".strip(" —")[:120]
     return f"{verbe} {objet}".strip()[:120]
+
+
+def forme_courte(bloc: dict, racine=None) -> str:
+    """Un outil appelé, sous la forme « Bash(uv sync) », « Edit(calcul.py) », ou son seul nom.
+
+    L'objet est celui que montre `decrire_outil` (la commande sur une ligne, sans sa
+    description ; un chemin à partir de `racine`), coupé au-delà de OBJET_MAX caractères.
+    """
+    nom = bloc.get("name")
+    nom = " ".join(nom.split()) if isinstance(nom, str) else ""
+    objet = _objet(bloc, racine)
+    if len(objet) > OBJET_MAX:
+        objet = objet[: OBJET_MAX - 1] + "…"
+    return f"{nom or 'Outil'}({objet})" if objet else nom or "Outil"
+
+
+def _entree(bloc: dict) -> dict:
+    entree = bloc.get("input") or {}
+    return entree if isinstance(entree, dict) else {}
+
+
+def _objet(bloc: dict, racine=None) -> str:
+    """Sur quoi porte un outil : sa commande sur une ligne, son chemin (à partir de `racine`)…"""
+    nom = bloc.get("name", "")
+    entree, cle = _entree(bloc), GESTES.get(nom, ("", ""))[1] if isinstance(nom, str) else ""
+    if cle == "command":
+        return str(entree.get("command", "")).replace("\n", " ; ").strip()
+    objet = " ".join(str(entree.get(cle, "")).split())
+    if cle in CHEMINS and racine and objet:
+        prefixe = str(racine).rstrip("/") + "/"
+        objet = objet[len(prefixe):] if objet.startswith(prefixe) else objet
+    return objet
 
 
 # Ce que les agents simulés font en patientant (démonstration), et l'écart entre deux gestes.
@@ -496,6 +725,25 @@ class AgentSimule(_ModeDesOuvriers):
 
     Avec `gestes_s` (la démonstration), un agent qui patiente joue un geste de travail toutes les
     `gestes_s` secondes environ, pour que la courbe d'activité du tableau de bord vive.
+
+    Les limites de l'abonnement, sur demande : `limites` donne, par tâche (« orchestrateur » pour
+    un appel sans tâche), ce que jouent ses appels successifs à `executer`, tous rôles confondus :
+    "refus" (refusé pour limite, aussitôt, sans rien écrire), "alerte" (un événement « limite »
+    d'alerte, puis le travail prévu), "surcharge" (refusé aussitôt, Claude étant surchargé :
+    l'erreur `SURCHARGE`, sans événement « limite », comme le pont), ou "" (rien de spécial).
+    Au-delà de la liste, rien. La limite jouée est `type_limite`, levée `delai_limite_s` secondes
+    plus tard (None : heure inconnue).
+
+    Les ouvriers empêchés, sur demande : `empeches` donne, par tâche, ce que jouent ses ouvriers
+    successifs (le vérificateur n'y touche pas) : un outil refusé sous sa forme courte (comme
+    « Bash(uv sync) »), une liste de tels outils, ou "" (rien). L'ouvrier empêché suit son
+    scénario, mais son résultat porte ces outils dans `refuses`, et son compte rendu une ligne
+    « EMPÊCHÉ : uv sync — ... » par outil. Au-delà de la liste, rien.
+
+    La reprise : chaque appel rend une session (`resultat.session`). `executer(...,
+    reprendre=session)` repart dans une session déjà rendue, la note dans `reprises` et rend la
+    même session ; une session inconnue, ou oubliée par `oublier_sessions`, rend
+    `REPRISE_IMPOSSIBLE`. Par défaut, rien de tout cela ne change ce qu'il joue.
     """
 
     scenario: dict[str, list[str]] = field(default_factory=dict)
@@ -509,10 +757,18 @@ class AgentSimule(_ModeDesOuvriers):
     retombee: bool = False
     pause_arbitre: bool = False
     gestes_s: float = 0.0
+    limites: dict[str, list[str]] = field(default_factory=dict)
+    type_limite: str = "five_hour"
+    delai_limite_s: float | None = 3600.0
+    reprises: list[dict] = field(default_factory=list)
+    empeches: dict[str, list] = field(default_factory=dict)
     _postes: _Postes = field(default_factory=_Postes, init=False, repr=False, compare=False)
     _demandes: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     _refus: list[str] = field(default_factory=list, init=False, repr=False, compare=False)
     _verrou: object = field(default_factory=threading.Lock, init=False, repr=False, compare=False)
+    _joues: dict = field(default_factory=dict, init=False, repr=False, compare=False)
+    _sessions: set = field(default_factory=set, init=False, repr=False, compare=False)
+    _ouvertes: int = field(default=0, init=False, repr=False, compare=False)
 
     def _issue(self, contexte: dict) -> str:
         issues = self.scenario.get(contexte.get("tache", ""), ["ok"])
@@ -544,23 +800,93 @@ class AgentSimule(_ModeDesOuvriers):
         lecture_seule: bool = False,
         contexte: dict | None = None,
         copie_jetable: bool = False,
+        reprendre: str | None = None,
     ) -> Resultat:
         """Rend le résultat prévu par le scénario pour cette tâche et cette tentative."""
         contexte = contexte or {}
-        self.appels.append({**contexte, "modele": modele, "effort": effort})
+        appel = {**contexte, "modele": modele, "effort": effort}
+        self.appels.append(appel if reprendre is None else {**appel, "reprise": reprendre})
         tache, nom = _poste(contexte)
+        jeu = self._jeu_de_limite(tache)
+        session = self._ouvrir_session(reprendre, consigne, contexte)
+        if session is None or jeu in REFUS_DE_LIMITE:
+            return self._refuser(nom, session, jeu)
         ouvrier = contexte.get("role") == "ouvrier"
+        empeche = self._empechement(tache) if ouvrier else ()
         with self._postes.occuper(tache, nom, lambda: self._annuler(nom), None, ouvrier) as marche:
             _emettre(self.sur_evenement, nom, "outil", "Lit la consigne")
+            if jeu == "alerte":
+                self._annoncer_limite(nom, "alerte")
             if ouvrier:
                 self._jouer_mode(marche)
             if ouvrier and self._premiere_demande(nom):
                 self._demander(marche)
             arrete = self._patienter(marche)
             prevu = Resultat(ok=False) if arrete else self._prevu(contexte, dossier, modele)
-        resultat = _arrete(marche, prevu)  # après le retrait du poste : aucune fenêtre
+        resultat = _empecher(_arrete(marche, prevu), empeche)  # après le retrait du poste
+        resultat.session = session
         _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
         return resultat
+
+    def oublier_sessions(self) -> None:
+        """Oublie les sessions rendues : les reprendre rendra désormais `REPRISE_IMPOSSIBLE`."""
+        with self._verrou:
+            self._sessions.clear()
+
+    def _jeu_de_limite(self, tache: str | None) -> str:
+        """Ce que `limites` fait jouer à cet appel : "refus", "surcharge", "alerte" ou ""."""
+        return self._suivant(self.limites, "limites", tache or "orchestrateur")
+
+    def _empechement(self, tache: str | None) -> tuple[str, ...]:
+        """Les outils que `empeches` fait refuser à cet ouvrier de la tâche ; () pour aucun."""
+        jeu = self._suivant(self.empeches, "empeches", tache or "")
+        outils = [jeu] if isinstance(jeu, str) else jeu if isinstance(jeu, (list, tuple)) else []
+        lus = (o.strip() for o in outils if isinstance(o, str) and o.strip())
+        return tuple(dict.fromkeys(lus))[:REFUSES_MAX]
+
+    def _suivant(self, jeux: dict, nom: str, cle: str):
+        """L'entrée suivante de `jeux[cle]`, consommée appel après appel ; "" au-delà."""
+        with self._verrou:
+            rang = self._joues.get((nom, cle), 0)
+            self._joues[(nom, cle)] = rang + 1
+        suite = jeux.get(cle, [])
+        return suite[rang] if rang < len(suite) else ""
+
+    def _ouvrir_session(self, reprendre: str | None, message: str, contexte: dict) -> str | None:
+        """La session de l'appel : neuve, ou celle à reprendre ; None si elle est inconnue."""
+        with self._verrou:
+            if reprendre is None:
+                self._ouvertes += 1  # jamais deux fois le même numéro, même après un oubli
+                session = f"session-simulee-{self._ouvertes}"
+                self._sessions.add(session)
+                return session
+            if reprendre not in self._sessions:
+                return None
+        reprise = {c: contexte.get(c) for c in ("tache", "role", "tentative")}
+        self.reprises.append({**reprise, "session": reprendre, "message": message})
+        return reprendre
+
+    def _refuser(self, nom: str, session: str | None, jeu: str) -> Resultat:
+        """Rend aussitôt une reprise impossible, une surcharge ou un refus pour limite."""
+        if session is None:
+            resultat = Resultat(ok=False, erreur=REPRISE_IMPOSSIBLE)
+        elif jeu == "surcharge":  # le pont n'annonce pas de limite : aucune n'est atteinte
+            resultat = Resultat(ok=False, erreur=SURCHARGE, session=session)
+        else:
+            fin = self._annoncer_limite(nom, "atteinte")
+            resultat = Resultat(ok=False, erreur=LIMITE_ATTEINTE, type_limite=self.type_limite,
+                                fin_limite=fin, session=session)  # fmt: skip
+        _emettre(self.sur_evenement, nom, "fin", _fin(resultat))
+        return resultat
+
+    def _annoncer_limite(self, nom: str, statut: str) -> float | None:
+        """Émet l'événement « limite » qu'émettrait le pont ; rend l'heure de remise à zéro."""
+        fin = None if self.delai_limite_s is None else time.time() + self.delai_limite_s
+        utilisation = 0.9 if statut == "alerte" else 1.0
+        texte = decrire_limite(statut, self.type_limite, fin, utilisation)
+        _emettre(self.sur_evenement, nom, "limite", texte, statut=statut,
+                 limite=self.type_limite, fin=fin, utilisation=utilisation)  # fmt: skip
+        return fin
 
     def _patienter(self, marche: _Marche) -> bool:
         """Attend le délai de l'agent ; rend True dès un arrêt. Rejoue un changement de mode."""

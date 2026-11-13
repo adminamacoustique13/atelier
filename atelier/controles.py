@@ -12,14 +12,20 @@ import shutil
 import signal
 import subprocess
 import threading
+from collections.abc import Iterable
 from contextlib import suppress
 from fnmatch import fnmatch
 from pathlib import Path
+
+from atelier.git import IDENTITE_DE_REPLI, lancer_git
+from atelier.modele import ecrire_d_un_seul_geste
 
 TOUJOURS_PERMIS = ("chantier/relais/*",)
 CAHIER = "chantier/CAHIER.md"
 # Combien de fois une tâche rejoue la branche principale qui a bougé pendant ses contrôles.
 ESSAIS_INTEGRATION = 3
+# Les fichiers partagés à fusionner en « union », lus par git pour les fusions de l'Atelier.
+FICHIER_UNIONS = Path(".atelier") / "unions.gitattributes"
 
 
 def expliquer_refus_git(message: str) -> str:
@@ -73,15 +79,74 @@ def _relier(source: Path, cible: Path) -> None:
         cible.symlink_to(source)
 
 
+def _correspond(chemin: str, motif: str) -> bool:
+    """Dit si le chemin est égal au motif, ou y correspond au sens de `fnmatch`.
+
+    L'égalité d'abord : `fnmatch` lit `[slug]` comme une classe de caractères, et un chemin
+    à crochets ne se reconnaîtrait pas lui-même.
+    """
+    return chemin == motif or fnmatch(chemin, motif)
+
+
 def hors_perimetre(fichiers: list[str], perimetre: list[str]) -> list[str]:
     """Rend les fichiers modifiés qui sortent du périmètre de la tâche."""
     motifs = list(perimetre) + list(TOUJOURS_PERMIS)
-    return sorted(f for f in fichiers if not any(fnmatch(f, m) for m in motifs))
+    return sorted(f for f in fichiers if not any(_correspond(f, m) for m in motifs))
 
 
-def se_chevauchent(a: list[str], b: list[str]) -> bool:
-    """Dit si deux périmètres peuvent toucher un même fichier."""
-    return any(fnmatch(x, y) or fnmatch(y, x) for x in a for y in b)
+def se_chevauchent(a: list[str], b: list[str], partages: Iterable[str] = ()) -> bool:
+    """Dit si deux périmètres peuvent toucher un même fichier qui n'est pas partagé.
+
+    `partages` : les motifs des fichiers partagés (`fichiers_partages`). Une entrée de périmètre
+    que l'un d'eux couvre ne retient personne : plusieurs tâches peuvent y travailler en même
+    temps, et leurs changements y sont fusionnés à l'entrée dans la branche principale.
+    """
+    motifs = list(partages)
+    a = [p for p in a if not motif_partage(p, motifs)]
+    b = [p for p in b if not motif_partage(p, motifs)]
+    return any(_correspond(x, y) or _correspond(y, x) for x in a for y in b)
+
+
+def motif_partage(chemin: str, motifs: Iterable[str]) -> str:
+    """Le premier motif de fichier partagé qui couvre ce chemin ou cette entrée de périmètre,
+    ou "" s'il n'est pas partagé."""
+    return next((motif for motif in motifs if _correspond(chemin, motif)), "")
+
+
+# Les deux façons de fusionner un fichier partagé : « union » garde les lignes des deux côtés,
+# sans jamais de conflit ; « git » fusionne comme d'habitude, et un conflit revient à l'ouvrier.
+FUSIONS = ("union", "git")
+
+
+def fichiers_partages(profil: dict) -> dict[str, str]:
+    """Les fichiers partagés que déclare le profil (clé `fichiers_partages`) : motif -> fusion.
+
+    Chaque entrée est un objet `{"motif": "<motif glob>", "fusion": "union" | "git"}`, `fusion`
+    absente valant « git ». Une entrée mal formée est ignorée : pas un objet, fusion inconnue,
+    motif vide, avec un espace, ou qui commence par « # » ou « ! » (ces trois-là casseraient la
+    ligne du fichier d'attributs, voir `ControlesGit._reglages`). Une clé absente ou qui n'est
+    pas une liste n'en déclare aucun.
+    """
+    entrees = profil.get("fichiers_partages") if isinstance(profil, dict) else None
+    partages: dict[str, str] = {}
+    for entree in entrees if isinstance(entrees, list) else []:
+        if not isinstance(entree, dict):
+            continue
+        motif, fusion = entree.get("motif"), entree.get("fusion", "git")
+        mots = motif.split() if isinstance(motif, str) else []
+        if len(mots) == 1 and not mots[0].startswith(("#", "!")) and fusion in FUSIONS:
+            partages[mots[0]] = fusion
+    return partages
+
+
+# Ce que `poser_conflits` dit de chaque fichier en conflit : deux versions réunies dans le fichier
+# par des marqueurs, ou un fichier supprimé d'un côté et modifié de l'autre (sans marqueurs).
+MARQUEURS = "marqueurs"
+SUPPRIME_SUR_LA_PRINCIPALE = "supprime_sur_la_principale"
+SUPPRIME_PAR_LA_TACHE = "supprime_par_la_tache"
+# Le début d'une ligne de marqueur de conflit laissée par git ; « ======= » seul n'en est pas
+# un sûr : c'est aussi un soulignement de titre en Markdown.
+DEBUTS_DE_MARQUEUR = ("<<<<<<< ", ">>>>>>> ")
 
 
 # Le temps laissé à chaque commande de contrôle du profil avant de l'arrêter : une suite de tests
@@ -145,37 +210,58 @@ class ControlesSimules:
 class ControlesGit:
     """Contrôles réels : un arbre de travail par tâche, commandes du profil, fusion après accord."""
 
-    def __init__(self, depot: Path, commandes: list[str] | None = None, delai_s=None):
+    def __init__(
+        self,
+        depot: Path,
+        commandes: list[str] | None = None,
+        delai_s=None,
+        partages: dict[str, str] | None = None,
+    ):
         self.depot = Path(depot)
         self.commandes = commandes or []
         self.delai_s = lire_delai(delai_s)
         self.verrou_fusion = threading.Lock()
         self.envoi = ""  # dernier problème d'envoi vers le dépôt en ligne, vide si tout va bien
         self._distant: str | None = None
-        self.identite: list[str] = []
+        self.identite: tuple[str, ...] = ()
         if not self._config("user.email"):
             # Sans nom git sur l'ordinateur, les enregistrements échoueraient : on signe Atelier.
-            self.identite = ["-c", "user.name=Atelier", "-c", "user.email=atelier@localhost"]
+            self.identite = IDENTITE_DE_REPLI
+        partages = partages or {}
+        self.unions = [motif for motif, fusion in partages.items() if fusion == "union"]
+        self._verrou_unions = threading.Lock()  # `FICHIER_UNIONS` s'écrit d'un seul geste
+        # Par tâche, les fichiers rendus à l'ouvrier avec des marqueurs (`poser_conflits`) : ils
+        # n'entrent pas tant qu'il en reste (`enregistrer`). Vidé à chaque copie neuve.
+        self._a_marqueurs: dict[str, list[str]] = {}
 
     def _config(self, cle: str) -> str:
-        resultat = subprocess.run(
-            ["git", "config", cle], cwd=self.depot, capture_output=True, text=True
-        )
-        return resultat.stdout.strip()
+        # Une clé absente (git rend un code d'erreur) donne une valeur vide.
+        return lancer_git(self.depot, "config", cle).stdout.strip()
+
+    def _reglages(self, commande: str) -> tuple[str, ...]:
+        """Les réglages mis devant une commande git : l'identité pour ce qui enregistre ou
+        fusionne ; pour une fusion, en plus, les fichiers partagés en « union ».
+
+        Ceux-ci sont écrits juste avant, dans `FICHIER_UNIONS`, que git lit comme ses attributs
+        (`core.attributesFile`) : dans ces fichiers, il garde les lignes des deux côtés au lieu
+        de s'arrêter sur un conflit. Rien n'est écrit dans `.git/` ni enregistré dans le projet.
+        Chaque motif est ancré à la racine (`/<motif>`), et git n'y fait pas traverser les
+        dossiers à `*` : il ne couvre jamais plus que le même motif lu par fnmatch.
+        """
+        if commande not in ("commit", "merge"):
+            return ()
+        if commande == "commit" or not self.unions:
+            return self.identite
+        chemin = self.depot / FICHIER_UNIONS
+        with self._verrou_unions:
+            ecrire_d_un_seul_geste(chemin, "".join(f"/{m} merge=union\n" for m in self.unions))
+        return (*self.identite, "-c", f"core.attributesFile={chemin}")
 
     def _git(self, *arguments: str, dossier: Path | None = None, delai: int = 120) -> str:
-        # Pas de question posée par git : l'Atelier tourne sans terminal.
-        env = dict(os.environ, GIT_TERMINAL_PROMPT="0")
+        # Un échec ou un délai dépassé devient une RuntimeError ; une OSError remonte.
         try:
-            signe = self.identite if arguments[0] in ("commit", "merge") else []
-            resultat = subprocess.run(
-                ["git", *signe, *arguments],
-                cwd=dossier or self.depot,
-                capture_output=True,
-                text=True,
-                env=env,
-                timeout=delai,
-            )
+            reglages = self._reglages(arguments[0])
+            resultat = lancer_git(dossier or self.depot, *reglages, *arguments, delai=delai)
         except subprocess.TimeoutExpired as erreur:
             raise RuntimeError(f"git {arguments[0]} : pas de réponse à temps") from erreur
         if resultat.returncode != 0:
@@ -187,6 +273,7 @@ class ControlesGit:
 
     def preparer(self, tache) -> Path:
         """Crée pour la tâche une copie de travail propre, partie de l'état vérifié."""
+        self._a_marqueurs.pop(tache.id, None)
         arbre = self._arbre(tache)
         if arbre.exists():
             with self.verrou_fusion:
@@ -268,8 +355,15 @@ class ControlesGit:
         Si la branche principale a avancé depuis la préparation (une autre tâche est entrée),
         elle est d'abord fusionnée dans la copie de la tâche, et les commandes du projet y sont
         relancées : on n'enregistre que ce qui a été contrôlé tel quel. Un conflit ou un contrôle
-        qui échoue rend le problème, et rien n'entre dans la branche principale.
+        qui échoue rend le problème, et rien n'entre dans la branche principale. Un fichier
+        rendu à l'ouvrier avec des marqueurs de conflit n'entre pas non plus s'il en reste.
         """
+        restants = self._marqueurs_restants(tache, dossier)
+        if restants:
+            return (
+                f"Des marqueurs de conflit restent dans : {', '.join(restants)}. Rien n'entre "
+                "dans la branche principale : la tentative suivante en repart."
+            )
         try:
             self._git("add", "-A", dossier=dossier)
             if self._git("status", "--porcelain", dossier=dossier).strip():
@@ -317,11 +411,68 @@ class ControlesGit:
 
     def _ancetre(self, base: str, dossier) -> bool:
         """Dit si `base` est déjà contenu dans la branche de la copie de travail."""
-        resultat = subprocess.run(
-            ["git", "merge-base", "--is-ancestor", base, "HEAD"],
-            cwd=dossier, capture_output=True, text=True,
-        )  # fmt: skip
+        resultat = lancer_git(dossier, "merge-base", "--is-ancestor", base, "HEAD")
         return resultat.returncode == 0
+
+    def poser_conflits(self, tache, dossier) -> dict[str, str]:
+        """Refait dans la copie de la tâche la fusion de la branche principale actuelle, et y
+        laisse les conflits pour l'ouvrier ; rend chaque fichier en conflit avec sa nature
+        (`MARQUEURS`, `SUPPRIME_SUR_LA_PRINCIPALE`, `SUPPRIME_PAR_LA_TACHE`).
+
+        La copie est alors posée sur la branche principale : le travail de la tâche, marqueurs
+        de conflit compris, y devient un changement non enregistré, comme pour une tâche partie
+        de là. Périmètre, contrôles, vérificateur et enregistrement le voient donc comme
+        d'habitude, et l'historique ne garde aucun état à marqueurs. Sans conflit (l'échec venait
+        d'ailleurs, ou la branche principale a changé depuis), ou si git échoue, la fusion est
+        défaite et rien n'est rendu : la tâche suit alors le chemin d'un refus ordinaire.
+        """
+        with suppress(RuntimeError):
+            base = self._git("rev-parse", "HEAD").strip()
+            try:
+                self._git("merge", "-q", "--no-commit", "--no-ff", base, dossier=dossier)
+            except RuntimeError:
+                conflits = self._conflits(dossier)
+                if conflits:
+                    self._git("reset", "-q", base, dossier=dossier)
+                    marques = [c for c, nature in conflits.items() if nature == MARQUEURS]
+                    self._a_marqueurs[tache.id] = marques
+                    return conflits
+        with suppress(RuntimeError):
+            self._git("merge", "--abort", dossier=dossier)
+        return {}
+
+    def _conflits(self, dossier) -> dict[str, str]:
+        """Les fichiers en conflit de la fusion en cours, avec leur nature.
+
+        Git garde, pour chacun, la version de la tâche (étape 2) et celle de la branche
+        principale (étape 3) ; celle qui manque est celle d'un côté qui a supprimé le fichier.
+        """
+        etapes: dict[str, set[str]] = {}
+        for entree in self._git("ls-files", "-u", "-z", dossier=dossier).split("\0"):
+            if "\t" in entree:
+                tete, chemin = entree.split("\t", 1)
+                etapes.setdefault(chemin, set()).add(tete.split()[-1])
+        natures = {}
+        for chemin, vues in etapes.items():
+            if "2" not in vues:
+                natures[chemin] = SUPPRIME_PAR_LA_TACHE
+            else:
+                natures[chemin] = MARQUEURS if "3" in vues else SUPPRIME_SUR_LA_PRINCIPALE
+        return natures
+
+    def _marqueurs_restants(self, tache, dossier) -> list[str]:
+        """Les fichiers rendus à l'ouvrier avec des marqueurs qui en ont encore une ligne.
+
+        Le contenu est lu, et non `git diff --check`, qui ignore les fichiers non suivis et
+        prend un soulignement Markdown pour un marqueur.
+        """
+        restants = []
+        for chemin in self._a_marqueurs.get(tache.id, []):
+            fichier = Path(dossier) / chemin
+            lignes = fichier.read_text("utf-8", "replace").splitlines() if fichier.is_file() else []
+            if any(ligne.startswith(DEBUTS_DE_MARQUEUR) for ligne in lignes):
+                restants.append(chemin)
+        return restants
 
     def controler_principale(self) -> tuple[bool, str]:
         """Lance les commandes du projet sur la branche principale, dans une copie propre.

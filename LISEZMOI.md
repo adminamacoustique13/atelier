@@ -49,6 +49,25 @@ Tu n'as pas à modifier ce fichier à la main. Quand un chantier demande un outi
 
 L'orchestrateur, en conversation, n'a jamais ces commandes : il lit le dépôt et son historique, rien de plus. Seuls les ouvriers et les vérificateurs les lancent, chacun dans sa propre copie du dépôt.
 - `dosage` (facultatif) : remplace la table de départ, par exemple `{"mecanique": ["sonnet", "low"]}`.
+- `fichiers_partages` (facultatif) : les fichiers que plusieurs tâches peuvent modifier en même temps, expliqués juste dessous.
+
+### Les fichiers partagés
+
+D'habitude, deux tâches qui peuvent toucher le même fichier ne travaillent jamais en même temps : la seconde attend que la première soit vérifiée et enregistrée. Pour un fichier que toutes les tâches touchent un peu (un journal des décisions, une liste de changements), c'est une file d'attente pour rien. Déclare-le partagé :
+
+```json
+"fichiers_partages": [
+  {"motif": "DECISIONS.md", "fusion": "union"},
+  {"motif": "docs/index.md", "fusion": "git"}
+]
+```
+
+Un fichier partagé ne retient plus personne : les tâches qui l'ont dans leur périmètre partent ensemble, et l'atelier réunit leurs changements quand chacune entre dans la branche principale.
+
+- `"union"` : les lignes ajoutées des deux côtés sont toutes gardées, sans jamais de conflit. C'est fait pour un fichier où l'on ne fait qu'ajouter des lignes. Une ligne modifiée des deux côtés garderait ses deux versions : les ouvriers ont pour consigne de seulement ajouter.
+- `"git"` (la valeur sans `fusion`) : git fusionne comme d'habitude. S'il bute sur un conflit, l'ouvrier reprend la main dans sa session pour le résoudre, une fois par départ, puis son travail repasse les contrôles et le vérificateur. Un livrable où restent des marqueurs de conflit n'entre jamais.
+
+Le motif suit les mêmes règles que les périmètres (`docs/*.md`, par exemple) pour savoir quelles tâches partent ensemble. À la fusion, git le lit à sa façon : un `*` n'y traverse pas les dossiers, et `docs/*` y couvre `docs/a.md` mais pas `docs/a/b.md`, qui n'est alors pas fusionné en union. Une entrée mal écrite est ignorée. La liste est lue à l'ouverture du projet. Rien n'est écrit dans `.git/` ni enregistré dans le dépôt : le réglage de git vit dans `.atelier/`.
 
 ## Installer l'Atelier sur ton Mac, avec son icône dans le Dock
 

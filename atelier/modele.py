@@ -32,6 +32,32 @@ class ProjetImpossible(Exception):
     """Un projet n'a pas pu être créé ou ouvert ; le message dit pourquoi, en clair."""
 
 
+def ecrire_d_un_seul_geste(chemin: Path, texte: str) -> None:
+    """Écrit un texte (UTF-8) dans un fichier d'un seul geste ; crée son dossier au besoin.
+
+    Le texte part dans un fichier voisin, qui prend la place de l'ancien une fois écrit en
+    entier : une écriture interrompue laisse l'ancien fichier intact, jamais un fichier tronqué,
+    et le fichier voisin est retiré. L'erreur de l'écriture est relevée telle quelle.
+
+    Pas faite pour deux écritures simultanées du même fichier : le fichier voisin porte
+    toujours le même nom, l'appelant doit donc tenir un verrou.
+    """
+    chemin.parent.mkdir(parents=True, exist_ok=True)
+    voisin = chemin.with_name(chemin.name + ".tmp")
+    try:
+        with open(voisin, "w", encoding="utf-8") as flux:
+            flux.write(texte)
+            flux.flush()
+            os.fsync(flux.fileno())  # le texte est sur le disque avant de prendre la place
+        os.replace(voisin, chemin)
+    except BaseException:
+        try:
+            voisin.unlink(missing_ok=True)
+        except OSError:
+            pass  # dans la mesure du possible : l'erreur d'origine compte davantage
+        raise
+
+
 @dataclass
 class Tache:
     """Une tâche du cahier des charges, avec son dosage et son histoire."""
@@ -90,6 +116,10 @@ class Chantier:
     session: str = ""
     # Les règles retenues par « Toujours pendant ce chantier » : elles partent avec lui.
     autorisations_chantier: list[str] = field(default_factory=list)
+    # Le débit : places d'écriture, agents en marche, suspensions pour limite (`Places.etat`),
+    # rangé par le moteur pour l'affichage. Jamais relu par lui : après un redémarrage, le
+    # premier refus pour limite rétablit la suspension.
+    debit: dict = field(default_factory=dict)
     ouvert_le: str = field(default_factory=lambda: datetime.now().isoformat(timespec="minutes"))
 
     def tache(self, identifiant: str) -> Tache:
@@ -112,10 +142,7 @@ class Chantier:
         entier : un arrêt en pleine écriture laisse l'ancien état lisible, jamais un fichier
         tronqué.
         """
-        chemin.parent.mkdir(parents=True, exist_ok=True)
-        provisoire = chemin.with_name(chemin.name + ".tmp")
-        provisoire.write_text(json.dumps(self.en_dict(), ensure_ascii=False, indent=2), "utf-8")
-        os.replace(provisoire, chemin)
+        ecrire_d_un_seul_geste(chemin, json.dumps(self.en_dict(), ensure_ascii=False, indent=2))
 
     @classmethod
     def depuis_dict(cls, donnees: dict) -> Chantier:

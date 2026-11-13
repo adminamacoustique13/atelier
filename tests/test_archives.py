@@ -142,3 +142,84 @@ def test_une_archive_illisible_ou_un_identifiant_piege_ne_lit_rien(tmp_path):
     for piege in ("../../etc", "2026-11-11-213721/../x", None, 12, ""):
         assert archives.lire(tmp_path, piege) is None
     assert archives.lister(tmp_path / "absent") == []
+
+
+def test_cout_fr():
+    assert archives.cout_fr(0) == "0,00 $"
+    assert archives.cout_fr(1234.5) == "1234,50 $"
+    assert archives.cout_fr(9.999) == "10,00 $"
+
+
+# --- le temps passé : totaux du chantier et durées de chaque tâche ---------------------------
+
+
+def chantier_mesure():
+    c = chantier_type()
+    a = c.taches[0]
+    a.historique[0]["durees"] = {"attente": 45, "preparation": 5, "ouvrier": 115,
+                                 "perimetre": 1, "controles": 34, "verificateur": 600}  # fmt: skip
+    a.historique[1]["durees"] = {"preparation": 5, "ouvrier": 600, "perimetre": 0.4,
+                                 "controles": 35, "verificateur": 480,
+                                 "enregistrement": 3}  # fmt: skip
+    b = c.taches[1]
+    b.historique = [{"tentative": 1, "modele": "haiku", "effort": "low", "issue": "panne",
+                     "detail": "", "durees": {"attente": 15, "preparation": 2}}]  # fmt: skip
+    return c
+
+
+def test_duree_fr():
+    assert archives.duree_fr(0) == "0 s" and archives.duree_fr(0.4) == "0 s"
+    assert archives.duree_fr(45) == "45 s" and archives.duree_fr(59.6) == "1 min"
+    assert archives.duree_fr(200) == "3 min 20 s" and archives.duree_fr(180) == "3 min"
+    assert archives.duree_fr(725) == "12 min"
+    assert archives.duree_fr(3900) == "1 h 05 min"
+    assert archives.duree_fr(-3) == "0 s"
+
+
+def test_temps_par_groupe_rassemble_les_phases_et_ignore_un_historique_sans_mesure():
+    c = chantier_mesure()
+    assert archives.temps_par_groupe(c.taches[0]) == {
+        "attendre": 45, "ecrire": 725, "controler": 70.4, "verifier": 1080,
+        "enregistrer": 3, "autre": 0,
+    }  # fmt: skip
+    assert archives.temps_par_groupe(chantier_type().taches[0]) is None
+    c.taches[1].historique[0]["durees"]["une_phase_nouvelle"] = 9
+    assert archives.temps_par_groupe(c.taches[1])["autre"] == 9
+
+
+def test_le_journal_donne_le_temps_du_chantier_et_de_chaque_tache():
+    j = archives.journal(chantier_mesure(), "2026-11-12-094100", "Calcul", "2026-11-12T09:41", {})
+    assert j["chiffres"][4:] == [
+        ["Temps passé à attendre", "1 min"],
+        ["Temps passé à écrire (préparation de la copie comprise)", "12 min"],
+        ["Temps passé à contrôler", "1 min 10 s"],
+        ["Temps passé à vérifier", "18 min"],
+        ["Temps passé à enregistrer", "3 s"],
+    ]
+    a, b = j["temps"]
+    assert (a["id"], a["tentatives"], b["id"], b["tentatives"]) == ("A", 2, "B", 3)
+    assert a["texte"] == (
+        "2 tentatives : attendre 45 s, écrire 12 min, contrôler 1 min 10 s, vérifier 18 min, "
+        "enregistrer 3 s."
+    )
+    assert b["phases"]["attendre"] == "15 s" and b["phases"]["ecrire"] == "2 s"
+    md = archives.journal_md(j)
+    assert "- Temps passé à vérifier : 18 min" in md
+    assert "## Le temps de chaque tâche" in md
+    assert f"- A — Lecture des données : {a['texte']}" in md
+
+
+def test_un_journal_sans_mesure_n_a_ni_lignes_ni_partie_de_temps():
+    j = archives.journal(chantier_type(), "x", "", "2026-11-12T09:41", {})
+    assert j["temps"] == [] and len(j["chiffres"]) == 4
+    assert "Temps passé" not in archives.journal_md(j)
+    del j["temps"]  # un journal.json écrit avant les mesures
+    assert "## Le temps de chaque tâche" not in archives.journal_md(j)
+
+
+def test_une_archive_mesuree_se_relit_avec_son_temps(tmp_path):
+    j = archives.archiver(tmp_path, chantier_mesure(), "Calcul", {})
+    relu = archives.lire(tmp_path, j["id"])
+    assert relu["temps"] == j["temps"] and relu["chiffres"] == j["chiffres"]
+    dossier = tmp_path / ".atelier" / "archives" / j["id"]
+    assert "## Le temps de chaque tâche" in (dossier / "JOURNAL.md").read_text("utf-8")
