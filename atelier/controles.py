@@ -331,8 +331,9 @@ class ControlesGit:
 
     def fichiers_modifies(self, tache, dossier, resultat) -> list[str]:
         """Rend les fichiers réellement modifiés, lus dans git et non dans le compte rendu."""
-        sortie = self._git("status", "--porcelain", "--untracked-files=all", dossier=dossier)
-        return [ligne[3:].split(" -> ")[-1].strip('"') for ligne in sortie.splitlines() if ligne]
+        # `-z` : git rend alors les noms tels quels, sans guillemets ni codes (accent, espace...).
+        sortie = self._git("status", "--porcelain", "-z", "--untracked-files=all", dossier=dossier)
+        return _chemins_du_statut(sortie)
 
     def mecaniques(self, tache, dossier) -> tuple[bool, str]:
         """Lance les commandes du profil. S'arrête à la première qui échoue ou qui ne finit pas."""
